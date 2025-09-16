@@ -9,6 +9,7 @@
 #include "Poco/NotificationQueue.h"
 #include "RESTObjects/RESTAPI_AnalyticsObjects.h"
 #include "framework/SubSystemServer.h"
+#include "VenueWorkerPool.h"
 
 namespace OpenWifi {
 
@@ -40,19 +41,15 @@ namespace OpenWifi {
 		}
 
 		inline void PostState(uint64_t SerialNumber, std::shared_ptr<nlohmann::json> &Msg) {
-			std::lock_guard G(Mutex_);
-			Queue_.enqueueNotification(new VenueMessage(SerialNumber, VenueMessage::state, Msg));
+			VenueWorkerPool()->Enqueue(this, SerialNumber, VenueMessage::state, Msg);
 		}
 
 		inline void PostConnection(uint64_t SerialNumber, std::shared_ptr<nlohmann::json> &Msg) {
-			std::lock_guard G(Mutex_);
-			Queue_.enqueueNotification(
-				new VenueMessage(SerialNumber, VenueMessage::connection, Msg));
+			VenueWorkerPool()->Enqueue(this, SerialNumber, VenueMessage::connection, Msg);
 		}
 
 		inline void PostHealth(uint64_t SerialNumber, std::shared_ptr<nlohmann::json> &Msg) {
-			std::lock_guard G(Mutex_);
-			Queue_.enqueueNotification(new VenueMessage(SerialNumber, VenueMessage::health, Msg));
+			VenueWorkerPool()->Enqueue(this, SerialNumber, VenueMessage::health, Msg);
 		}
 
 		void Start();
@@ -62,6 +59,8 @@ namespace OpenWifi {
 		inline Poco::Logger &Logger() { return Logger_; }
 		void ModifySerialNumbers(const std::vector<uint64_t> &SerialNumbers);
 		void GetDevices(std::vector<AnalyticsObjects::DeviceInfo> &DI);
+		void Process(uint64_t SerialNumber, VenueMessage::MsgType Type,
+					const std::shared_ptr<nlohmann::json> &Msg);
 
 		void GetBandwidth(uint64_t start, uint64_t end, uint64_t interval,
 						  AnalyticsObjects::BandwidthAnalysis &BW);
