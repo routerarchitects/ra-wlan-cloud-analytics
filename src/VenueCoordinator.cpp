@@ -5,8 +5,9 @@
 #include "VenueCoordinator.h"
 #include "StorageService.h"
 #include "VenueWatcher.h"
-#include "fmt/core.h"
+#include "fmt/format.h"
 #include "framework/MicroServiceFuncs.h"
+#include "framework/utils.h"
 #include "sdks/SDK_prov.h"
 
 namespace OpenWifi {
@@ -121,13 +122,7 @@ namespace OpenWifi {
 		bool VenueExists = true;
 		std::vector<uint64_t> Devices;
 		if (GetDevicesForBoard(B, Devices, VenueExists)) {
-			std::lock_guard G(Mutex_);
-			ExistingBoards_[B.info.id] = Devices;
-			Watchers_[B.info.id] =
-				std::make_shared<VenueWatcher>(B.info.id, B.venueList[0].id, Logger(), Devices);
-			Watchers_[B.info.id]->Start();
-			poco_information(Logger(), fmt::format("Started board {} for venue {}", B.info.name,
-												   B.venueList[0].id));
+			ApplyDeviceUpdate(B.info.id, Devices, ExistingVersions_[B.info.id]);
 			return true;
 		}
 
@@ -148,6 +143,8 @@ namespace OpenWifi {
 			it->second->Stop();
 			Watchers_.erase(it);
 		}
+		ExistingBoards_.erase(id);
+		ExistingVersions_.erase(id);
 	}
 
 	void VenueCoordinator::UpdateBoard(const std::string &id) {
@@ -156,21 +153,7 @@ namespace OpenWifi {
 			std::vector<uint64_t> Devices;
 			bool VenueExists = true;
 			if (GetDevicesForBoard(B, Devices, VenueExists)) {
-				std::lock_guard G(Mutex_);
-				auto it = ExistingBoards_.find(id);
-				if (it != ExistingBoards_.end()) {
-					if (it->second != Devices) {
-						auto it2 = Watchers_.find(id);
-						if (it2 != Watchers_.end()) {
-							it2->second->ModifySerialNumbers(Devices);
-						}
-						ExistingBoards_[id] = Devices;
-						poco_information(Logger(), fmt::format("Modified board {}", B.info.name));
-					} else {
-						poco_information(Logger(),
-										 fmt::format("No device changes in board {}", B.info.name));
-					}
-				}
+				ApplyDeviceUpdate(id, Devices, ExistingVersions_[id]);
 				return;
 			}
 
@@ -205,5 +188,84 @@ namespace OpenWifi {
 		if (it != end(Watchers_)) {
 			it->second->GetDevices(DIL.devices);
 		}
+	}
+
+	bool VenueCoordinator::StartBoard(const ProvisioningChangeEvent &event) {
+		std::vector<uint64_t> devices;
+		devices.reserve(event.board.devices.size());
+		for (const auto &serial : event.board.devices) {
+			devices.push_back(Utils::SerialNumberToInt(serial));
+		}
+		ApplyDeviceUpdate(event.board.id, devices, event.board.version);
+		return true;
+	}
+
+	void VenueCoordinator::ApplyDeviceUpdate(const std::string &boardId,
+							 const std::vector<uint64_t> &devices,
+							 uint64_t version) {
+		std::lock_guard G(Mutex_);
+
+		uint64_t currentVersion = ExistingVersions_[boardId];
+		if (version != 0 && currentVersion != 0 && version < currentVersion) {
+			poco_debug(Logger(), fmt::format("Ignoring stale provisioning event for board {} version {} (< {}).",
+							boardId, version, currentVersion));
+			return;
+		}
+
+		auto watcherIt = Watchers_.find(boardId);
+		if (watcherIt == Watchers_.end()) {
+			if (devices.empty()) {
+				ExistingBoards_.erase(boardId);
+				ExistingVersions_.erase(boardId);
+				return;
+			}
+			AnalyticsObjects::BoardInfo boardInfo;
+			std::string venueId;
+			if (StorageService()->BoardsDB().GetRecord("id", boardId, boardInfo) && !boardInfo.venueList.empty()) {
+				venueId = boardInfo.venueList[0].id;
+			}
+			auto watcher = std::make_shared<VenueWatcher>(boardId, venueId, Logger(), devices);
+			watcher->Start();
+			Watchers_[boardId] = watcher;
+			poco_information(Logger(), fmt::format("Started board {} with {} devices.", boardId, devices.size()));
+		} else {
+			if (ExistingBoards_[boardId] != devices) {
+				watcherIt->second->ModifySerialNumbers(devices);
+				poco_information(Logger(), fmt::format("Updated board {} device list ({} devices).",
+							boardId, devices.size()));
+			}
+		}
+
+		ExistingBoards_[boardId] = devices;
+		if (version != 0) {
+			ExistingVersions_[boardId] = version;
+		}
+	}
+
+	void VenueCoordinator::HandleProvisioningEvent(const ProvisioningChangeEvent &event) {
+		if (event.eventType == "board.deleted") {
+			poco_information(Logger(), fmt::format("Provisioning event delete board {}", event.board.id));
+			StopBoard(event.board.id);
+			StorageService()->BoardsDB().DeleteRecord("id", event.board.id);
+			StorageService()->TimePointsDB().DeleteRecords(fmt::format(" boardId='{}' ", event.board.id));
+			return;
+		}
+
+		if (!event.board.id.empty()) {
+			AnalyticsObjects::BoardInfo boardInfo;
+			if (!StorageService()->BoardsDB().GetRecord("id", event.board.id, boardInfo)) {
+				boardInfo.info.id = event.board.id;
+				boardInfo.info.name = event.board.name;
+				if (!event.board.venueId.empty()) {
+					AnalyticsObjects::VenueInfo venue;
+					venue.id = event.board.venueId;
+					venue.monitorSubVenues = event.board.monitorSubVenues;
+					boardInfo.venueList.push_back(venue);
+				}
+				StorageService()->BoardsDB().CreateRecord(boardInfo);
+			}
+		}
+
+		StartBoard(event);
 	}
 } // namespace OpenWifi
