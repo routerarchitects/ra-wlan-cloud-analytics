@@ -19,7 +19,9 @@
 #include "StateReceiver.h"
 #include "StorageService.h"
 #include "VenueCoordinator.h"
+#include "ProvisioningChangeReceiver.h"
 #include "WifiClientCache.h"
+#include "VenueWorkerPool.h"
 #include "framework/UI_WebSocketClientServer.h"
 
 namespace OpenWifi {
@@ -29,9 +31,14 @@ namespace OpenWifi {
 		if (instance_ == nullptr) {
 			instance_ = new Daemon(vDAEMON_PROPERTIES_FILENAME, vDAEMON_ROOT_ENV_VAR,
 								   vDAEMON_CONFIG_ENV_VAR, vDAEMON_APP_NAME, vDAEMON_BUS_TIMER,
-								   SubSystemVec{OpenWifi::StorageService(), StateReceiver(),
-												DeviceStatusReceiver(), HealthReceiver(),
-												VenueCoordinator(), WifiClientCache(),
+									   SubSystemVec{OpenWifi::StorageService(),
+													VenueWorkerPool(),
+													StateReceiver(),
+													DeviceStatusReceiver(),
+													HealthReceiver(),
+													ProvisioningChangeReceiver(),
+													VenueCoordinator(),
+													WifiClientCache(),
 												UI_WebSocketClientServer()});
 		}
 		return instance_;

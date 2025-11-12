@@ -21,14 +21,13 @@ namespace OpenWifi {
 
 		DeviceStatusReceiver()->Register(SerialNumbers_, this);
 		HealthReceiver()->Register(SerialNumbers_, this);
-		Worker_.start(*this);
+		// No per-venue worker thread; messages will be processed by VenueWorkerPool
 	}
 
 	void VenueWatcher::Stop() {
 		poco_notice(Logger(), "Stopping...");
 		Running_ = false;
-		Queue_.wakeUpAll();
-		Worker_.join();
+		// No per-venue worker thread to stop
 		for (const auto &i : SerialNumbers_)
 			StateReceiver()->DeRegister(i, this);
 		DeviceStatusReceiver()->DeRegister(this);
@@ -37,39 +36,8 @@ namespace OpenWifi {
 	}
 
 	void VenueWatcher::run() {
-		Utils::SetThreadName("venue-watch");
-		Running_ = true;
-		Poco::AutoPtr<Poco::Notification> Msg(Queue_.waitDequeueNotification());
-		while (Msg && Running_) {
-			auto MsgContent = dynamic_cast<VenueMessage *>(Msg.get());
-			if (MsgContent != nullptr) {
-				try {
-					auto State = MsgContent->Payload();
-					if (MsgContent->Type() == VenueMessage::connection) {
-						auto It = APs_.find(MsgContent->SerialNumber());
-						if (It != end(APs_)) {
-							It->second->UpdateConnection(MsgContent->Payload());
-						}
-					} else if (MsgContent->Type() == VenueMessage::state) {
-						auto It = APs_.find(MsgContent->SerialNumber());
-						if (It != end(APs_)) {
-							It->second->UpdateStats(MsgContent->Payload());
-						}
-					} else if (MsgContent->Type() == VenueMessage::health) {
-						auto It = APs_.find(MsgContent->SerialNumber());
-						if (It != end(APs_)) {
-							It->second->UpdateHealth(MsgContent->Payload());
-						}
-					}
-				} catch (const Poco::Exception &E) {
-					Logger().log(E);
-				} catch (...) {
-				}
-			} else {
-			}
-			Msg = Queue_.waitDequeueNotification();
-		}
-	}
+		// Legacy per-venue thread not used anymore.
+}
 
 	void VenueWatcher::ModifySerialNumbers(const std::vector<uint64_t> &SerialNumbers) {
 		std::lock_guard G(Mutex_);
@@ -106,6 +74,26 @@ namespace OpenWifi {
 		DIL.reserve(APs_.size());
 		for (const auto &[serialNumber, DI] : APs_)
 			DIL.push_back(DI->Info());
+	}
+
+	void VenueWatcher::Process(uint64_t SerialNumber, VenueMessage::MsgType Type,
+							 const std::shared_ptr<nlohmann::json> &Msg) {
+		try {
+			std::lock_guard G(Mutex_);
+			auto It = APs_.find(SerialNumber);
+			if (It == end(APs_))
+				return;
+			if (Type == VenueMessage::connection) {
+				It->second->UpdateConnection(Msg);
+			} else if (Type == VenueMessage::state) {
+				It->second->UpdateStats(Msg);
+			} else if (Type == VenueMessage::health) {
+				It->second->UpdateHealth(Msg);
+			}
+		} catch (const Poco::Exception &E) {
+			Logger().log(E);
+		} catch (...) {
+		}
 	}
 
 } // namespace OpenWifi
