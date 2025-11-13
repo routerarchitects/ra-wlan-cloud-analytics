@@ -20,8 +20,8 @@ namespace OpenWifi {
             auto Msg = dynamic_cast<VenueDispatchMessage *>(Note.get());
             if (Msg != nullptr) {
                 try {
-                    if (auto *VW = Msg->Watcher(); VW != nullptr) {
-                        VW->Process(Msg->Serial(), static_cast<VenueMessage::MsgType>(Msg->Type()), const_cast<std::shared_ptr<nlohmann::json>&>(Msg->Payload()));
+                    if (auto VW = Msg->Watcher()) {
+                        VW->Process(Msg->Serial(), static_cast<VenueMessage::MsgType>(Msg->Type()), Msg->Payload());
                     }
                 } catch (const Poco::Exception &E) {
                     Logger_.log(E);
@@ -34,6 +34,9 @@ namespace OpenWifi {
 
     std::size_t VenueWorkerPool::ShardIndex(VenueWatcher *VW) const {
         // Use venue id string for stable sharding across restarts
+        if (VW == nullptr || Workers_.empty())
+            return 0;
+
         auto key = VW->Venue();
         // FNV-1a 64-bit simple hash
         uint64_t h = 1469598103934665603ULL;
@@ -87,13 +90,13 @@ namespace OpenWifi {
         poco_notice(Logger(), "Stopped...");
     }
 
-    bool VenueWorkerPool::Enqueue(VenueWatcher *VW,
+    bool VenueWorkerPool::Enqueue(const std::shared_ptr<VenueWatcher> &VW,
                                   uint64_t Serial,
                                   uint64_t MsgType,
                                   const std::shared_ptr<nlohmann::json> &Payload) {
-        if (!Running_ || Workers_.empty())
+        if (!Running_ || Workers_.empty() || !VW)
             return false;
-        auto idx = ShardIndex(VW);
+        auto idx = ShardIndex(VW.get());
         auto &Q = Workers_[idx]->Queue_;
         if (Q.size() >= MaxQueueSize_) {
             poco_warning(Logger(), fmt::format("Worker {} queue full ({}). Dropping message for venue {}.", idx, Q.size(), VW->Venue()));

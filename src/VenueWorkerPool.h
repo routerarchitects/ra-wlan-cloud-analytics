@@ -8,6 +8,7 @@
 #include <vector>
 #include <atomic>
 #include <functional>
+#include <utility>
 
 #include "Poco/Thread.h"
 #include "Poco/Notification.h"
@@ -24,19 +25,19 @@ namespace OpenWifi {
 
     class VenueDispatchMessage : public Poco::Notification {
       public:
-        VenueDispatchMessage(VenueWatcher *VW,
+        VenueDispatchMessage(std::shared_ptr<VenueWatcher> VW,
                              uint64_t Serial,
                              uint64_t MsgType,
                              const std::shared_ptr<nlohmann::json> &Payload)
-            : Watcher_(VW), Serial_(Serial), MsgType_(MsgType), Payload_(Payload) {}
+            : Watcher_(std::move(VW)), Serial_(Serial), MsgType_(MsgType), Payload_(Payload) {}
 
-        inline VenueWatcher *Watcher() const { return Watcher_; }
+        inline std::shared_ptr<VenueWatcher> Watcher() const { return Watcher_; }
         inline uint64_t Serial() const { return Serial_; }
         inline uint64_t Type() const { return MsgType_; }
         inline const std::shared_ptr<nlohmann::json> &Payload() const { return Payload_; }
 
       private:
-        VenueWatcher *Watcher_;
+        std::shared_ptr<VenueWatcher> Watcher_;
         uint64_t Serial_;
         uint64_t MsgType_;
         std::shared_ptr<nlohmann::json> Payload_;
@@ -53,7 +54,7 @@ namespace OpenWifi {
         void Stop() override;
 
         // Enqueue a message for the venue's shard. Returns false if dropped due to backpressure.
-        bool Enqueue(VenueWatcher *VW,
+        bool Enqueue(const std::shared_ptr<VenueWatcher> &VW,
                      uint64_t Serial,
                      uint64_t MsgType,
                      const std::shared_ptr<nlohmann::json> &Payload);
