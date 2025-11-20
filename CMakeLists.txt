@@ -133,7 +133,10 @@ add_executable(owanalytics
         src/RESTObjects/RESTAPI_AnalyticsObjects.cpp src/RESTObjects/RESTAPI_AnalyticsObjects.h
         src/StateReceiver.cpp src/StateReceiver.h
         src/VenueWatcher.cpp src/VenueWatcher.h
+        src/VenueWorkerPool.cpp src/VenueWorkerPool.h
         src/VenueCoordinator.cpp src/VenueCoordinator.h
+        src/ProvisioningChangeReceiver.cpp src/ProvisioningChangeReceiver.h
+        src/ProvisioningChangeEvent.h
         src/sdks/SDK_prov.cpp src/sdks/SDK_prov.h
         src/storage/storage_boards.cpp src/storage/storage_boards.h
         src/RESTAPI/RESTAPI_board_list_handler.cpp src/RESTAPI/RESTAPI_board_list_handler.h
@@ -158,4 +161,3 @@ target_link_libraries(owanalytics PUBLIC
                         resolv
                         CppKafka::cppkafka
 )
-

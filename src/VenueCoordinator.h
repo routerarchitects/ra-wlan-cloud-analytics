@@ -6,6 +6,7 @@
 
 #include "VenueWatcher.h"
 #include "framework/SubSystemServer.h"
+#include "ProvisioningChangeEvent.h"
 
 #include "Poco/Timer.h"
 
@@ -25,6 +26,7 @@ namespace OpenWifi {
 		void StopBoard(const std::string &id);
 		void UpdateBoard(const std::string &id);
 		void AddBoard(const std::string &id);
+		void HandleProvisioningEvent(const ProvisioningChangeEvent &event);
 
 		bool GetDevicesForBoard(const AnalyticsObjects::BoardInfo &B,
 								std::vector<uint64_t> &Devices, bool &VenueExists);
@@ -44,11 +46,16 @@ namespace OpenWifi {
 		Poco::Timer ReconcileTimerTimer_;
 
 		std::map<std::string, std::vector<uint64_t>> ExistingBoards_;
+		std::map<std::string, uint64_t> ExistingVersions_;
 
 		VenueCoordinator() noexcept
 			: SubSystemServer("VenueCoordinator", "VENUE-COORD", "venue.coordinator") {}
 
 		bool StartBoard(const AnalyticsObjects::BoardInfo &B);
+		bool StartBoard(const ProvisioningChangeEvent &event);
+		void ApplyDeviceUpdate(const std::string &boardId,
+							 const std::vector<uint64_t> &devices,
+							 uint64_t version);
 	};
 	inline auto VenueCoordinator() { return VenueCoordinator::instance(); }
 

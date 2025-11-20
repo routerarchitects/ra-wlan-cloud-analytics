@@ -4,11 +4,13 @@
 
 #pragma once
 
+#include <memory>
 #include "APStats.h"
 #include "Poco/Notification.h"
 #include "Poco/NotificationQueue.h"
 #include "RESTObjects/RESTAPI_AnalyticsObjects.h"
 #include "framework/SubSystemServer.h"
+#include "VenueWorkerPool.h"
 
 namespace OpenWifi {
 
@@ -29,7 +31,7 @@ namespace OpenWifi {
 		uint64_t SerialNumber_ = 0;
 	};
 
-	class VenueWatcher : public Poco::Runnable {
+	class VenueWatcher : public Poco::Runnable, public std::enable_shared_from_this<VenueWatcher> {
 	  public:
 		explicit VenueWatcher(const std::string &boardId, const std::string &venue_id,
 							  Poco::Logger &L, const std::vector<uint64_t> &SerialNumbers)
@@ -40,19 +42,15 @@ namespace OpenWifi {
 		}
 
 		inline void PostState(uint64_t SerialNumber, std::shared_ptr<nlohmann::json> &Msg) {
-			std::lock_guard G(Mutex_);
-			Queue_.enqueueNotification(new VenueMessage(SerialNumber, VenueMessage::state, Msg));
+			VenueWorkerPool()->Enqueue(shared_from_this(), SerialNumber, VenueMessage::state, Msg);
 		}
 
 		inline void PostConnection(uint64_t SerialNumber, std::shared_ptr<nlohmann::json> &Msg) {
-			std::lock_guard G(Mutex_);
-			Queue_.enqueueNotification(
-				new VenueMessage(SerialNumber, VenueMessage::connection, Msg));
+			VenueWorkerPool()->Enqueue(shared_from_this(), SerialNumber, VenueMessage::connection, Msg);
 		}
 
 		inline void PostHealth(uint64_t SerialNumber, std::shared_ptr<nlohmann::json> &Msg) {
-			std::lock_guard G(Mutex_);
-			Queue_.enqueueNotification(new VenueMessage(SerialNumber, VenueMessage::health, Msg));
+			VenueWorkerPool()->Enqueue(shared_from_this(), SerialNumber, VenueMessage::health, Msg);
 		}
 
 		void Start();
@@ -62,6 +60,8 @@ namespace OpenWifi {
 		inline Poco::Logger &Logger() { return Logger_; }
 		void ModifySerialNumbers(const std::vector<uint64_t> &SerialNumbers);
 		void GetDevices(std::vector<AnalyticsObjects::DeviceInfo> &DI);
+		void Process(uint64_t SerialNumber, VenueMessage::MsgType Type,
+					const std::shared_ptr<nlohmann::json> &Msg);
 
 		void GetBandwidth(uint64_t start, uint64_t end, uint64_t interval,
 						  AnalyticsObjects::BandwidthAnalysis &BW);
@@ -73,7 +73,6 @@ namespace OpenWifi {
 		std::string venue_id_;
 		Poco::NotificationQueue Queue_;
 		Poco::Logger &Logger_;
-		Poco::Thread Worker_;
 		std::atomic_bool Running_ = false;
 		std::vector<uint64_t> SerialNumbers_;
 		std::map<uint64_t, std::shared_ptr<AP>> APs_;

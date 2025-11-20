@@ -4,6 +4,11 @@
 
 #include "RESTAPI_board_handler.h"
 #include "VenueCoordinator.h"
+#include "framework/KafkaManager.h"
+#include "framework/KafkaTopics.h"
+#include "framework/utils.h"
+#include "framework/MicroServiceFuncs.h"
+#include "nlohmann/json.hpp"
 
 namespace OpenWifi {
 	void RESTAPI_board_handler::DoGet() {
@@ -35,6 +40,12 @@ namespace OpenWifi {
 		VenueCoordinator()->StopBoard(id);
 		StorageService()->BoardsDB().DeleteRecord("id", id);
 		StorageService()->TimePointsDB().DeleteBoard(id);
+		if (KafkaManager()->Enabled()) {
+			nlohmann::json message{{"eventId", MicroServiceCreateUUID()},
+				{"eventType", "board.deleted"},
+				{"board", {{"id", id}}}};
+			KafkaManager()->PostMessage(KafkaTopics::PROVISIONING_CHANGE, id, message.dump());
+		}
 		return OK();
 	}
 
@@ -56,6 +67,24 @@ namespace OpenWifi {
 			VenueCoordinator()->AddBoard(NewObject.info.id);
 			AnalyticsObjects::BoardInfo NewBoard;
 			StorageService()->BoardsDB().GetRecord("id", NewObject.info.id, NewBoard);
+			if (KafkaManager()->Enabled()) {
+				nlohmann::json boardJson = {
+					{"id", NewBoard.info.id},
+					{"name", NewBoard.info.name},
+					{"venueId", NewBoard.venueList.empty() ? "" : NewBoard.venueList[0].id},
+					{"monitorSubVenues",
+						 NewBoard.venueList.empty() ? false : NewBoard.venueList[0].monitorSubVenues},
+					{"version", 0},
+					{"devices", nlohmann::json::array()}
+				};
+				nlohmann::json message = {
+					{"eventId", MicroServiceCreateUUID()},
+					{"eventType", "board.created"},
+					{"occurredAt", Utils::Now()},
+					{"board", boardJson}
+				};
+				KafkaManager()->PostMessage(KafkaTopics::PROVISIONING_CHANGE, NewBoard.info.id, message.dump());
+			}
 			Poco::JSON::Object Answer;
 			NewBoard.to_json(Answer);
 			return ReturnObject(Answer);
@@ -93,6 +122,24 @@ namespace OpenWifi {
 			VenueCoordinator()->UpdateBoard(Existing.info.id);
 			AnalyticsObjects::BoardInfo NewBoard;
 			StorageService()->BoardsDB().GetRecord("id", Existing.info.id, NewBoard);
+			if (KafkaManager()->Enabled()) {
+				nlohmann::json boardJson = {
+					{"id", NewBoard.info.id},
+					{"name", NewBoard.info.name},
+					{"venueId", NewBoard.venueList.empty() ? "" : NewBoard.venueList[0].id},
+					{"monitorSubVenues",
+						 NewBoard.venueList.empty() ? false : NewBoard.venueList[0].monitorSubVenues},
+					{"version", 0},
+					{"devices", nlohmann::json::array()}
+				};
+				nlohmann::json message = {
+					{"eventId", MicroServiceCreateUUID()},
+					{"eventType", "board.updated"},
+					{"occurredAt", Utils::Now()},
+					{"board", boardJson}
+				};
+				KafkaManager()->PostMessage(KafkaTopics::PROVISIONING_CHANGE, NewBoard.info.id, message.dump());
+			}
 			Poco::JSON::Object Answer;
 			NewBoard.to_json(Answer);
 			return ReturnObject(Answer);
