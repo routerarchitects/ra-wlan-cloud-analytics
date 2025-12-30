@@ -156,14 +156,21 @@ namespace OpenWifi {
 		}
 
 		AnalyticsObjects::DeviceTimePointList Points;
-		StorageService()->TimePointsDB().SelectRecords(id, fromDate, endDate, maxRecords,
-													   Points.points);
-		std::cout << "1 MaxRecords=" << maxRecords << " retrieved=" << Points.points.size()
-				  << std::endl;
+		auto latest = GetBoolParameter("latest", false);
+		if (latest) {
+			StorageService()->TimePointsDB().SelectLatestRecords(id, fromDate, endDate, maxRecords,
+																 Points.points);
+		} else {
+			StorageService()->TimePointsDB().SelectRecords(id, fromDate, endDate, maxRecords,
+														   Points.points);
+		}
 
 		split_points sp;
-
-		NewSort(Points, sp);
+		if (latest) {
+			sp.emplace_back(Points.points);
+		} else {
+			NewSort(Points, sp);
+		}
 		std::cout << __LINE__ << std::endl;
 
 		Poco::JSON::Object Answer;
