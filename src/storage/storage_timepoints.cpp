@@ -11,37 +11,6 @@
 #include <Poco/JSON/Stringifier.h>
 #include <sstream>
 
-template <>
-void ORM::DB<OpenWifi::TimePointDBRecordType, OpenWifi::AnalyticsObjects::DeviceTimePoint>::Convert(
-	const OpenWifi::TimePointDBRecordType &In, OpenWifi::AnalyticsObjects::DeviceTimePoint &Out) {
-	Out.id = In.get<0>();
-	Out.boardId = In.get<1>();
-	Out.timestamp = In.get<2>();
-	Out.ap_data =
-		OpenWifi::RESTAPI_utils::to_object<OpenWifi::AnalyticsObjects::APTimePoint>(In.get<3>());
-	Out.ssid_data =
-		OpenWifi::RESTAPI_utils::to_object_array<OpenWifi::AnalyticsObjects::SSIDTimePoint>(
-			In.get<4>());
-	Out.radio_data =
-		OpenWifi::RESTAPI_utils::to_object_array<OpenWifi::AnalyticsObjects::RadioTimePoint>(
-			In.get<5>());
-	Out.device_info =
-		OpenWifi::RESTAPI_utils::to_object<OpenWifi::AnalyticsObjects::DeviceInfo>(In.get<6>());
-	Out.serialNumber = In.get<7>();
-}
-
-template <>
-void ORM::DB<OpenWifi::TimePointDBRecordType, OpenWifi::AnalyticsObjects::DeviceTimePoint>::Convert(
-	const OpenWifi::AnalyticsObjects::DeviceTimePoint &In, OpenWifi::TimePointDBRecordType &Out) {
-	Out.set<0>(In.id);
-	Out.set<1>(In.boardId);
-	Out.set<2>(In.timestamp);
-	Out.set<3>(OpenWifi::RESTAPI_utils::to_string(In.ap_data));
-	Out.set<4>(OpenWifi::RESTAPI_utils::to_string(In.ssid_data));
-	Out.set<5>(OpenWifi::RESTAPI_utils::to_string(In.radio_data));
-	Out.set<6>(OpenWifi::RESTAPI_utils::to_string(In.device_info));
-	Out.set<7>(In.serialNumber);
-}
 
 namespace OpenWifi {
 
@@ -104,7 +73,64 @@ namespace OpenWifi {
 		return true;
 	}
 
-	bool TimePointDB::SelectLatestRecords(const std::string &boardId, uint64_t FromDate,
+
+	bool TimePointDB::DeleteBoard(const std::string &boardId) {
+		return DeleteRecords(fmt::format(" boardId='{}' ", boardId));
+	}
+
+	bool TimePointDB::DeleteTimeLine(const std::string &boardId, uint64_t FromDate,
+									 uint64_t LastDate) {
+		std::string WhereClause;
+
+		if (FromDate && LastDate) {
+			WhereClause =
+				fmt::format(" boardId='{}' and (timestamp >= {} ) and ( timestamp <= {} ) ",
+							boardId, FromDate, LastDate);
+		} else if (FromDate) {
+			WhereClause = fmt::format(" boardId='{}' and (timestamp >= {}) ", boardId, FromDate);
+		} else if (LastDate) {
+			WhereClause = fmt::format(" boardId='{}' and (timestamp <= {}) ", boardId, LastDate);
+		}
+		DeleteRecords(WhereClause);
+		return true;
+	}
+
+} // namespace OpenWifi
+
+template <>
+void ORM::DB<OpenWifi::TimePointDBRecordType, OpenWifi::AnalyticsObjects::DeviceTimePoint>::Convert(
+	const OpenWifi::TimePointDBRecordType &In, OpenWifi::AnalyticsObjects::DeviceTimePoint &Out) {
+	Out.id = In.get<0>();
+	Out.boardId = In.get<1>();
+	Out.timestamp = In.get<2>();
+	Out.ap_data =
+		OpenWifi::RESTAPI_utils::to_object<OpenWifi::AnalyticsObjects::APTimePoint>(In.get<3>());
+	Out.ssid_data =
+		OpenWifi::RESTAPI_utils::to_object_array<OpenWifi::AnalyticsObjects::SSIDTimePoint>(
+			In.get<4>());
+	Out.radio_data =
+		OpenWifi::RESTAPI_utils::to_object_array<OpenWifi::AnalyticsObjects::RadioTimePoint>(
+			In.get<5>());
+	Out.device_info =
+		OpenWifi::RESTAPI_utils::to_object<OpenWifi::AnalyticsObjects::DeviceInfo>(In.get<6>());
+	Out.serialNumber = In.get<7>();
+}
+
+template <>
+void ORM::DB<OpenWifi::TimePointDBRecordType, OpenWifi::AnalyticsObjects::DeviceTimePoint>::Convert(
+	const OpenWifi::AnalyticsObjects::DeviceTimePoint &In, OpenWifi::TimePointDBRecordType &Out) {
+	Out.set<0>(In.id);
+	Out.set<1>(In.boardId);
+	Out.set<2>(In.timestamp);
+	Out.set<3>(OpenWifi::RESTAPI_utils::to_string(In.ap_data));
+	Out.set<4>(OpenWifi::RESTAPI_utils::to_string(In.ssid_data));
+	Out.set<5>(OpenWifi::RESTAPI_utils::to_string(In.radio_data));
+	Out.set<6>(OpenWifi::RESTAPI_utils::to_string(In.device_info));
+	Out.set<7>(In.serialNumber);
+}
+namespace OpenWifi {
+
+bool TimePointDB::SelectLatestRecords(const std::string &boardId, uint64_t FromDate,
 										 uint64_t LastDate, uint64_t MaxRecords,
 										 std::vector<AnalyticsObjects::DeviceTimePoint> &Recs) {
 		auto BuildTimeClause = [&](const std::string &prefix) -> std::string {
@@ -143,33 +169,12 @@ namespace OpenWifi {
 			return false;
 		}
 
-		for (const auto &R : Records) {
-			AnalyticsObjects::DeviceTimePoint Point;
-			Convert(R, Point);
-			Recs.emplace_back(Point);
-		}
-		return true;
+	for (const auto &R : Records) {
+		AnalyticsObjects::DeviceTimePoint Point;
+		Convert(R, Point);
+		Recs.emplace_back(Point);
 	}
-
-	bool TimePointDB::DeleteBoard(const std::string &boardId) {
-		return DeleteRecords(fmt::format(" boardId='{}' ", boardId));
-	}
-
-	bool TimePointDB::DeleteTimeLine(const std::string &boardId, uint64_t FromDate,
-									 uint64_t LastDate) {
-		std::string WhereClause;
-
-		if (FromDate && LastDate) {
-			WhereClause =
-				fmt::format(" boardId='{}' and (timestamp >= {} ) and ( timestamp <= {} ) ",
-							boardId, FromDate, LastDate);
-		} else if (FromDate) {
-			WhereClause = fmt::format(" boardId='{}' and (timestamp >= {}) ", boardId, FromDate);
-		} else if (LastDate) {
-			WhereClause = fmt::format(" boardId='{}' and (timestamp <= {}) ", boardId, LastDate);
-		}
-		DeleteRecords(WhereClause);
-		return true;
-	}
+	return true;
+}
 
 } // namespace OpenWifi
