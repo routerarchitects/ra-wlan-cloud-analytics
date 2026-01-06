@@ -298,6 +298,9 @@ namespace OpenWifi {
 								GetJSON("tx_failed", association, TP.tx_failed, (uint64_t)0);
 								GetJSON("connected", association, TP.connected, (uint64_t)0);
 								GetJSON("inactive", association, TP.inactive, (uint64_t)0);
+								if (association.contains("fingerprint")) {
+									TP.fingerprint.json = association["fingerprint"].dump();
+								}
 
 								AnalyticsObjects::WifiClientHistory WFH;
 								WFH.station_id = mac_filter(TP.station);

@@ -209,6 +209,10 @@ components:
           type:
             boolean
 
+    Fingerprint:
+      type: object
+      additionalProperties: true
+
     UETimePoint:
       type: object
       properties:
@@ -218,6 +222,8 @@ components:
         station:
           type: integer
           format: int64
+        fingerprint:
+          $ref: '#/components/schemas/Fingerprint'
         rssi:
           type: integer
           format: int64

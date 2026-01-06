@@ -7,6 +7,11 @@
 #include "framework/OpenWifiTypes.h"
 #include "framework/RESTAPI_utils.h"
 
+#include <Poco/JSON/Object.h>
+#include <Poco/JSON/Stringifier.h>
+#include <sstream>
+
+
 namespace OpenWifi {
 
 	static ORM::FieldVec TimePoint_Fields{// object info
@@ -68,6 +73,7 @@ namespace OpenWifi {
 		return true;
 	}
 
+
 	bool TimePointDB::DeleteBoard(const std::string &boardId) {
 		return DeleteRecords(fmt::format(" boardId='{}' ", boardId));
 	}
@@ -122,3 +128,46 @@ void ORM::DB<OpenWifi::TimePointDBRecordType, OpenWifi::AnalyticsObjects::Device
 	Out.set<6>(OpenWifi::RESTAPI_utils::to_string(In.device_info));
 	Out.set<7>(In.serialNumber);
 }
+namespace OpenWifi {
+
+bool TimePointDB::SelectLatestRecords(const std::string &boardId, uint64_t FromDate,
+										 uint64_t LastDate, uint64_t MaxRecords,
+										 std::vector<AnalyticsObjects::DeviceTimePoint> &Recs) {
+	auto BuildTimeClause = [&]() -> std::string {
+		if (FromDate && LastDate) {
+			return fmt::format("timestamp >= {} and timestamp <= {}", FromDate, LastDate);
+		} else if (FromDate) {
+			return fmt::format("timestamp >= {}", FromDate);
+		} else if (LastDate) {
+			return fmt::format("timestamp <= {}", LastDate);
+		}
+		return std::string{};
+	};
+
+	auto AppendRecords = [&](const std::vector<TimePointDBRecordType> &Records) {
+		for (const auto &R : Records) {
+			AnalyticsObjects::DeviceTimePoint Point;
+			Convert(R, Point);
+			Recs.emplace_back(Point);
+		}
+	};
+
+	std::string RangeClause = ComputeRange(0, MaxRecords);
+	std::string WhereClause = fmt::format("boardId='{}'", ORM::Escape(boardId));
+	if (auto Clause = BuildTimeClause(); !Clause.empty())
+		WhereClause += fmt::format(" and {}", Clause);
+
+	std::string Statement = fmt::format(
+		"select distinct on (serialNumber) {} from {} where {} order by serialNumber, "
+		"timestamp DESC, id DESC{}",
+		SelectFields(), TableName_, WhereClause, RangeClause);
+
+	std::vector<TimePointDBRecordType> Records;
+	if (!Join(Statement, Records))
+		return false;
+
+	AppendRecords(Records);
+	return true;
+}
+
+} // namespace OpenWifi
