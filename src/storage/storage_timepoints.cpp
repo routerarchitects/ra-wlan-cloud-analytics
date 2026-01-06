@@ -133,47 +133,40 @@ namespace OpenWifi {
 bool TimePointDB::SelectLatestRecords(const std::string &boardId, uint64_t FromDate,
 										 uint64_t LastDate, uint64_t MaxRecords,
 										 std::vector<AnalyticsObjects::DeviceTimePoint> &Recs) {
-		auto BuildTimeClause = [&](const std::string &prefix) -> std::string {
-			if (FromDate && LastDate) {
-				return fmt::format("{}timestamp >= {} and {}timestamp <= {}", prefix, FromDate,
-								   prefix, LastDate);
-			} else if (FromDate) {
-				return fmt::format("{}timestamp >= {}", prefix, FromDate);
-			} else if (LastDate) {
-				return fmt::format("{}timestamp <= {}", prefix, LastDate);
-			}
-			return std::string{};
-		};
-
-		std::string RangeClause = ComputeRange(0, MaxRecords);
-		auto t1TimeClause = BuildTimeClause("t1.");
-		auto t2TimeClause = BuildTimeClause("t2.");
-		auto EscapedBoardId = ORM::Escape(boardId);
-
-		std::string WhereClause = fmt::format("t1.boardId='{}'", EscapedBoardId);
-		if (!t1TimeClause.empty())
-			WhereClause += " and " + t1TimeClause;
-
-		std::string T2ClauseExtended;
-		if (!t2TimeClause.empty())
-			T2ClauseExtended = " and " + t2TimeClause;
-
-		std::string Statement = fmt::format(
-			"select {} from {} t1 where {} and "
-			"t1.timestamp = (select max(t2.timestamp) from {} t2 where t2.boardId = t1.boardId and "
-			"t2.serialNumber = t1.serialNumber{} ) order by t1.timestamp DESC{}",
-			SelectFields(), TableName_, WhereClause, TableName_, T2ClauseExtended, RangeClause);
-
-		std::vector<TimePointDBRecordType> Records;
-		if (!Join(Statement, Records)) {
-			return false;
+	auto BuildTimeClause = [&]() -> std::string {
+		if (FromDate && LastDate) {
+			return fmt::format("timestamp >= {} and timestamp <= {}", FromDate, LastDate);
+		} else if (FromDate) {
+			return fmt::format("timestamp >= {}", FromDate);
+		} else if (LastDate) {
+			return fmt::format("timestamp <= {}", LastDate);
 		}
+		return std::string{};
+	};
 
-	for (const auto &R : Records) {
-		AnalyticsObjects::DeviceTimePoint Point;
-		Convert(R, Point);
-		Recs.emplace_back(Point);
-	}
+	auto AppendRecords = [&](const std::vector<TimePointDBRecordType> &Records) {
+		for (const auto &R : Records) {
+			AnalyticsObjects::DeviceTimePoint Point;
+			Convert(R, Point);
+			Recs.emplace_back(Point);
+		}
+	};
+
+	std::string RangeClause = ComputeRange(0, MaxRecords);
+	std::string WhereClause = fmt::format("boardId='{}'", ORM::Escape(boardId));
+	if (auto Clause = BuildTimeClause(); !Clause.empty())
+		WhereClause += fmt::format(" and {}", Clause);
+
+	std::string Statement = fmt::format(
+		"select distinct on (serialNumber) {} from {} where {} order by serialNumber, "
+		"timestamp DESC, id DESC{}",
+		SelectFields(), TableName_, WhereClause, RangeClause);
+
+	std::vector<TimePointDBRecordType> Records;
+	if (!Join(Statement, Records))
+		return false;
+
+	AppendRecords(Records);
 	return true;
 }
 
