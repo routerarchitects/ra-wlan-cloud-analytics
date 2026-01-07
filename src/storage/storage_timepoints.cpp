@@ -6,6 +6,15 @@
 #include "fmt/format.h"
 #include "framework/OpenWifiTypes.h"
 #include "framework/RESTAPI_utils.h"
+#include "VenueCoordinator.h"
+
+template <>
+void ORM::DB<OpenWifi::TimePointDBRecordType, OpenWifi::AnalyticsObjects::DeviceTimePoint>::Convert(
+	const OpenWifi::TimePointDBRecordType &In, OpenWifi::AnalyticsObjects::DeviceTimePoint &Out);
+
+template <>
+void ORM::DB<OpenWifi::TimePointDBRecordType, OpenWifi::AnalyticsObjects::DeviceTimePoint>::Convert(
+	const OpenWifi::AnalyticsObjects::DeviceTimePoint &In, OpenWifi::TimePointDBRecordType &Out);
 
 namespace OpenWifi {
 
@@ -51,21 +60,36 @@ namespace OpenWifi {
 	}
 
 	bool TimePointDB::SelectRecords(const std::string &boardId, uint64_t FromDate,
-									uint64_t LastDate, uint64_t MaxRecords,
+									uint64_t LastDate, uint64_t MaxRecords, bool LatestPerDevice,
 									std::vector<AnalyticsObjects::DeviceTimePoint> &Recs) {
-		std::string WhereClause;
 
-		if (FromDate && LastDate) {
-			WhereClause =
-				fmt::format(" boardId='{}' and (timestamp >= {} ) and ( timestamp <= {} ) ",
-							boardId, FromDate, LastDate);
-		} else if (FromDate) {
-			WhereClause = fmt::format(" boardId='{}' and (timestamp >= {}) ", boardId, FromDate);
-		} else if (LastDate) {
-			WhereClause = fmt::format(" boardId='{}' and (timestamp <= {}) ", boardId, LastDate);
+		if (LatestPerDevice) {
+			std::vector<AnalyticsObjects::DeviceTimePoint> tmp;
+			if (!GetRecordsPerDevice(boardId, FromDate, LastDate, MaxRecords, tmp))
+				return false;
+
+			std::sort(tmp.begin(), tmp.end(),
+			[](auto const &a, auto const &b) {
+				return a.timestamp > b.timestamp;
+			});
+
+			Recs.swap(tmp);
+			return true;
+		} else {
+			std::string WhereClause;
+
+			if (FromDate && LastDate) {
+				WhereClause =
+					fmt::format(" boardId='{}' and (timestamp >= {} ) and ( timestamp <= {} ) ",
+						boardId, FromDate, LastDate);
+			} else if (FromDate) {
+				WhereClause = fmt::format(" boardId='{}' and (timestamp >= {}) ", boardId, FromDate);
+			} else if (LastDate) {
+				WhereClause = fmt::format(" boardId='{}' and (timestamp <= {}) ", boardId, LastDate);
+			}
+			GetRecords(0, MaxRecords, Recs, WhereClause, " order by timestamp, serialNumber ASC ");
+			return true;
 		}
-		GetRecords(0, MaxRecords, Recs, WhereClause, " order by timestamp, serialNumber ASC ");
-		return true;
 	}
 
 	bool TimePointDB::DeleteBoard(const std::string &boardId) {
@@ -87,6 +111,78 @@ namespace OpenWifi {
 		}
 		DeleteRecords(WhereClause);
 		return true;
+	}
+
+	bool TimePointDB::GetRecordsPerDevice(const std::string &boardId, uint64_t FromDate, uint64_t LastDate,
+						uint64_t MaxRecords, std::vector<AnalyticsObjects::DeviceTimePoint> &Recs) {
+
+		Recs.clear();
+
+		if (MaxRecords == 0) {
+			return true;
+		}
+
+		std::string whereClause = fmt::format("boardId='{}'", ORM::Escape(boardId));
+
+		if (FromDate || LastDate) {
+			whereClause += " and ";
+
+			if (FromDate && LastDate) {
+				whereClause += fmt::format("timestamp >= {} and timestamp <= {}", FromDate, LastDate);
+			} else if (FromDate) {
+				whereClause += fmt::format("timestamp >= {}", FromDate);
+			} else {
+				whereClause += fmt::format("timestamp <= {}", LastDate);
+			}
+		}
+
+		const std::string rangeClause = ComputeRange(0, MaxRecords);
+
+		const std::string sql = fmt::format(
+			"select distinct on (serialNumber) {fields} "
+			"from {table} "
+			"where {where} "
+			"order by serialNumber, timestamp DESC, id DESC{range}",
+			fmt::arg("fields", SelectFields()),   // all columns for TimePointDBRecordType
+			fmt::arg("table",  TableName_),       // timepoints table
+			fmt::arg("where",  whereClause),
+			fmt::arg("range",  rangeClause)
+		);
+
+		std::vector<TimePointDBRecordType> rawRecords;
+		if (!Join(sql, rawRecords)) {
+			return false;
+		}
+		auto currentSerials = GetCurrentDeviceFromBoard(boardId);
+		if (currentSerials.empty()) {
+			return true;
+		}
+
+		Recs.reserve(rawRecords.size());
+		for (const auto &row : rawRecords) {
+			AnalyticsObjects::DeviceTimePoint point;
+			Convert(row, point);
+			
+			if (currentSerials.count(point.serialNumber) != 0) {
+				Recs.emplace_back(std::move(point));
+			}
+		}
+
+		return true;
+	}
+
+	std::set<std::string> TimePointDB::GetCurrentDeviceFromBoard(const std::string &boardId) {
+		AnalyticsObjects::DeviceInfoList DIL;
+		std::set<std::string> serials;
+
+		std::string boardIdCopy(boardId);
+		VenueCoordinator()->GetDevices(boardIdCopy, DIL);
+
+		for (const auto &dev : DIL.devices) {
+			serials.insert(dev.serialNumber);
+		}
+
+		return serials;
 	}
 
 } // namespace OpenWifi
