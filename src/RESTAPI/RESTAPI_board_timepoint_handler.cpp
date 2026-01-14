@@ -66,7 +66,7 @@ namespace OpenWifi {
 		std::sort(tmp.points.begin(), tmp.points.end(), sort_serial_ts);
 
 		std::string cur_ser;
-		std::uint64_t cur_int = 0, start_val, last_val, first_val = 0;
+		std::uint64_t cur_int = 0, start_val, last_val = 0, first_val = 0;
 		for (const auto &point : tmp.points) {
 			if (cur_ser.empty()) {
 				start_val = point.timestamp;
@@ -99,6 +99,13 @@ namespace OpenWifi {
 
 		std::uint64_t cur_first = first_val, cur_end = 0;
 		sp.clear();
+
+		if (cur_int == 0) {
+			sp.clear();
+			sp.emplace_back(tmp.points.begin(), tmp.points.end());
+			return;
+		}
+
 		while (cur_end < last_val) {
 			std::pair<std::uint64_t, std::uint64_t> e;
 			e.first = cur_first;
@@ -156,7 +163,8 @@ namespace OpenWifi {
 		}
 
 		AnalyticsObjects::DeviceTimePointList Points;
-		StorageService()->TimePointsDB().SelectRecords(id, fromDate, endDate, maxRecords,
+		auto LatestPerDevice = GetBoolParameter("LatestPerDevice", false);
+		StorageService()->TimePointsDB().SelectRecords(id, fromDate, endDate, maxRecords, LatestPerDevice,
 													   Points.points);
 		std::cout << "1 MaxRecords=" << maxRecords << " retrieved=" << Points.points.size()
 				  << std::endl;
