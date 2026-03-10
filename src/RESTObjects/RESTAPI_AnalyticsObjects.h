@@ -107,6 +107,13 @@ namespace OpenWifi {
 			bool from_json(const Poco::JSON::Object::Ptr &Obj);
 		};
 
+		struct Fingerprint {
+			std::string json;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+			bool from_json(const Poco::JSON::Object::Ptr &Obj);
+		};
+
 		struct UETimePoint {
 			std::string station;
 			int64_t rssi = 0;
@@ -121,6 +128,7 @@ namespace OpenWifi {
 					 tx_failed_delta = 0;
 
 			UE_rate tx_rate, rx_rate;
+			Fingerprint fingerprint;
 			std::vector<TIDstat_entry> tidstats;
 
 			void to_json(Poco::JSON::Object &Obj) const;
