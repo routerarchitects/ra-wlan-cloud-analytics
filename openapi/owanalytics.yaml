@@ -96,10 +96,13 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/BoardInfo'
-
+ 
     DeviceInfo:
       type: object
       properties:
+        boardId:
+          type: string
+          format: uuid
         type:
           type: string
           enum:
@@ -209,6 +212,10 @@ components:
           type:
             boolean
 
+    Fingerprint:
+      type: object
+      additionalProperties: true
+
     UETimePoint:
       type: object
       properties:
@@ -218,6 +225,8 @@ components:
         station:
           type: integer
           format: int64
+        fingerprint:
+          $ref: '#/components/schemas/Fingerprint'
         rssi:
           type: integer
           format: int64
@@ -462,9 +471,6 @@ components:
     DeviceTimePointAnalysis:
       type: object
       properties:
-        timestamp:
-          type: integer
-          format: int64
         noise:
           $ref: '#/components/schemas/AveragePoint'
         active_pct:
@@ -500,7 +506,9 @@ components:
         points:
           type: array
           items:
-            $ref: '#/components/schemas/DeviceTimePoint'
+            type: array
+            items:
+              $ref: '#/components/schemas/DeviceTimePoint'
         stats:
           type: array
           items:
@@ -834,13 +842,13 @@ components:
     SystemGetSubSystemNamesResult:
       type: object
       properties:
-        taglist:
+        list:
           type: array
           items:
-            $ref: '#/components/schemas/TagValuePair'
+            type: string
 
 paths:
-  /boards:
+  /api/v1/boards:
     get:
       tags:
         - Boards
@@ -892,7 +900,7 @@ paths:
         404:
           $ref: '#/components/responses/NotFound'
 
-  /board/{id}:
+  /api/v1/board/{id}:
     get:
       tags:
         - Boards
@@ -993,7 +1001,7 @@ paths:
         404:
           $ref: '#/components/responses/NotFound'
 
-  /board/{id}/devices:
+  /api/v1/board/{id}/devices:
     get:
       tags:
         - Board Devices
@@ -1017,7 +1025,7 @@ paths:
         404:
           $ref: '#/components/responses/NotFound'
 
-  /board/{id}/timepoints:
+  /api/v1/board/{id}/timepoints:
     get:
       tags:
         - Board data
@@ -1067,7 +1075,13 @@ paths:
 
       responses:
         200:
-          $ref: '#/components/schemas/DeviceTimePointList'
+          description: Return board timepoints or summary statistics
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/DeviceTimePointList'
+                  - $ref: '#/components/schemas/DeviceTimePointStats'
         400:
           $ref: '#/components/responses/BadRequest'
         403:
@@ -1107,7 +1121,7 @@ paths:
         404:
           $ref: '#/components/responses/NotFound'
 
-  /wifiClientHistory:
+  /api/v1/wifiClientHistory:
     get:
       tags:
         - WiFiClientHistory
@@ -1142,7 +1156,7 @@ paths:
           schema:
             type: boolean
             default: false
-          required: true
+          required: false
         - in: query
           description: Maximum number of entries to return (if absent, no limit is assumed)
           name: macFilter
@@ -1152,21 +1166,32 @@ paths:
               112233445566, 11223344*, *5566
           required: false
         - in: query
-          description: The venue to for the search.
+          description: Venue for the search. If omitted, boardId may be used to derive it.
           name: venue
           schema:
             type: string
             format: uuid
-          required: true
+          required: false
+        - in: query
+          description: Board used to derive venue when venue is not provided.
+          name: boardId
+          schema:
+            type: string
+            format: uuid
+          required: false
       responses:
         200:
-          $ref: '#/components/schemas/StringList'
+          description: Return matching client MAC addresses
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MacList'
         403:
           $ref: '#/components/responses/Unauthorized'
         404:
           $ref: '#/components/responses/NotFound'
 
-  /wifiClientHistory/{client}:
+  /api/v1/wifiClientHistory/{client}:
     get:
       tags:
         - WiFiClientHistory
@@ -1203,12 +1228,19 @@ paths:
             type: integer
           required: false
         - in: query
-          description: The venue to for the search.
+          description: Venue for the search. If omitted, boardId may be used to derive it.
           name: venue
           schema:
             type: string
             format: uuid
-          required: true
+          required: false
+        - in: query
+          description: Board used to derive venue when venue is not provided.
+          name: boardId
+          schema:
+            type: string
+            format: uuid
+          required: false
         - in: query
           description: return extended information
           name: orderBy
@@ -1222,6 +1254,12 @@ paths:
           schema:
             type: boolean
             default: false
+          required: false
+        - in: query
+          description: Return count only
+          name: countOnly
+          schema:
+            type: boolean
           required: false
       responses:
         200:
@@ -1261,14 +1299,6 @@ paths:
           schema:
             type: integer
           required: false
-        - in: query
-          description: Maximum number of entries to return (if absent, no limit is assumed)
-          name: macFilter
-          schema:
-            type: string
-            example:
-              112233445566, 11223344*, *5566
-          required: false
       responses:
         200:
           $ref: '#/components/responses/Success'
@@ -1282,7 +1312,7 @@ paths:
   ## These are endpoints that all services in the OpenWiFi stack must provide
   ##
   #########################################################################################
-  /system:
+  /api/v1/system:
     post:
       tags:
         - System Commands
@@ -1339,7 +1369,7 @@ paths:
         404:
           $ref: '#/components/responses/NotFound'
 
-  /systemConfiguration:
+  /api/v1/systemConfiguration:
     get:
       tags:
         - SystemConfiguration
@@ -1354,7 +1384,7 @@ paths:
             example:
               - element1
               - element1,element2,element3
-          required: false
+          required: true
       responses:
         200:
           description: List of configuration elements
@@ -1364,39 +1394,6 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/ExtraSystemConfiguration'
-        403:
-          $ref: '#/components/responses/Unauthorized'
-        404:
-          $ref: '#/components/responses/NotFound'
-
-    put:
-      tags:
-        - SystemConfiguration
-      summary: Set some or all system configuration
-      operationId: setSystemConfiguration
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ExtraSystemConfiguration'
-
-      responses:
-        200:
-          $ref: '#/components/schemas/ExtraSystemConfiguration'
-        403:
-          $ref: '#/components/responses/Unauthorized'
-        404:
-          $ref: '#/components/responses/NotFound'
-
-    delete:
-      tags:
-        - SystemConfiguration
-      summary: Delete all additional system configuration
-      operationId: deleteSystemConfiguration
-
-      responses:
-        200:
-          $ref: '#/components/responses/Success'
         403:
           $ref: '#/components/responses/Unauthorized'
         404:
