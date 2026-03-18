@@ -5,7 +5,7 @@ info:
   version: 2.6.0
   license:
     name: BSD3
-    url: https://github.com/Telecominfraproject/wlan-cloud-ucentralgw/blob/master/LICENSE
+    url: https://github.com/routerarchitects/wlan-cloud-ucentralgw/blob/master/LICENSE
 
 servers:
   - url: 'https://localhost:16009/api/v1'
@@ -27,13 +27,13 @@ components:
 
   responses:
     NotFound:
-      $ref: 'https://github.com/Telecominfraproject/wlan-cloud-ucentralsec/blob/main/openpapi/owsec.yaml#/components/responses/NotFound'
+      $ref: 'https://github.com/routerarchitects/wlan-cloud-ucentralsec/blob/main/openapi/owsec.yaml#/components/responses/NotFound'
     Unauthorized:
-      $ref: 'https://github.com/Telecominfraproject/wlan-cloud-ucentralsec/blob/main/openpapi/owsec.yaml#/components/responses/Unauthorized'
+      $ref: 'https://github.com/routerarchitects/wlan-cloud-ucentralsec/blob/main/openapi/owsec.yaml#/components/responses/Unauthorized'
     Success:
-      $ref: 'https://github.com/Telecominfraproject/wlan-cloud-ucentralsec/blob/main/openpapi/owsec.yaml#/components/responses/Success'
+      $ref: 'https://github.com/routerarchitects/wlan-cloud-ucentralsec/blob/main/openapi/owsec.yaml#/components/responses/Success'
     BadRequest:
-      $ref: 'https://github.com/Telecominfraproject/wlan-cloud-ucentralsec/blob/main/openpapi/owsec.yaml#/components/responses/BadRequest'
+      $ref: 'https://github.com/routerarchitects/wlan-cloud-ucentralsec/blob/main/openapi/owsec.yaml#/components/responses/BadRequest'
 
   schemas:
     ObjectInfo:
@@ -80,14 +80,14 @@ components:
           type: boolean
 
     BoardInfo:
-      type: object
-      properties:
-        allOf:
-          $ref: '#/components/schemas/ObjectInfo'
-        venueList:
-          type: array
-          items:
-            $ref: '#/components/schemas/VenueInfo'
+      allOf:
+        - $ref: '#/components/schemas/ObjectInfo'
+        - type: object
+          properties:
+            venueList:
+              type: array
+              items:
+                $ref: '#/components/schemas/VenueInfo'
 
     BoardInfoList:
       type: object
@@ -96,10 +96,13 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/BoardInfo'
-
+ 
     DeviceInfo:
       type: object
       properties:
+        boardId:
+          type: string
+          format: uuid
         type:
           type: string
           enum:
@@ -206,8 +209,11 @@ components:
         ht:
           type: boolean
         sgi:
-          type:
-            boolean
+          type: boolean
+
+    Fingerprint:
+      type: object
+      additionalProperties: true
 
     UETimePoint:
       type: object
@@ -218,6 +224,8 @@ components:
         station:
           type: integer
           format: int64
+        fingerprint:
+          $ref: '#/components/schemas/Fingerprint'
         rssi:
           type: integer
           format: int64
@@ -462,9 +470,6 @@ components:
     DeviceTimePointAnalysis:
       type: object
       properties:
-        timestamp:
-          type: integer
-          format: int64
         noise:
           $ref: '#/components/schemas/AveragePoint'
         active_pct:
@@ -500,7 +505,9 @@ components:
         points:
           type: array
           items:
-            $ref: '#/components/schemas/DeviceTimePoint'
+            type: array
+            items:
+              $ref: '#/components/schemas/DeviceTimePoint'
         stats:
           type: array
           items:
@@ -709,10 +716,10 @@ components:
           type: string
         uptime:
           type: integer
-          format: integer64
+          format: int64
         start:
           type: integer
-          format: integer64
+          format: int64
         os:
           type: string
         processors:
@@ -834,10 +841,10 @@ components:
     SystemGetSubSystemNamesResult:
       type: object
       properties:
-        taglist:
+        list:
           type: array
           items:
-            $ref: '#/components/schemas/TagValuePair'
+            type: string
 
 paths:
   /boards:
@@ -959,7 +966,11 @@ paths:
               $ref: '#/components/schemas/BoardInfo'
       responses:
         200:
-          $ref: '#/components/schemas/BoardInfo'
+          description: Return the created board
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoardInfo'
         400:
           $ref: '#/components/responses/BadRequest'
         403:
@@ -985,7 +996,11 @@ paths:
               $ref: '#/components/schemas/BoardInfo'
       responses:
         200:
-          $ref: '#/components/schemas/BoardInfo'
+          description: Return the updated board
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BoardInfo'
         400:
           $ref: '#/components/responses/BadRequest'
         403:
@@ -1009,7 +1024,11 @@ paths:
 
       responses:
         200:
-          $ref: '#/components/schemas/DeviceInfoList'
+          description: Return device information for the board
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceInfoList'
         400:
           $ref: '#/components/responses/BadRequest'
         403:
@@ -1067,7 +1086,13 @@ paths:
 
       responses:
         200:
-          $ref: '#/components/schemas/DeviceTimePointList'
+          description: Return board timepoints or summary statistics
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/DeviceTimePointList'
+                  - $ref: '#/components/schemas/DeviceTimePointStats'
         400:
           $ref: '#/components/responses/BadRequest'
         403:
@@ -1142,7 +1167,7 @@ paths:
           schema:
             type: boolean
             default: false
-          required: true
+          required: false
         - in: query
           description: Maximum number of entries to return (if absent, no limit is assumed)
           name: macFilter
@@ -1152,15 +1177,26 @@ paths:
               112233445566, 11223344*, *5566
           required: false
         - in: query
-          description: The venue to for the search.
+          description: Venue for the search. If omitted, boardId may be used to derive it.
           name: venue
           schema:
             type: string
             format: uuid
-          required: true
+          required: false
+        - in: query
+          description: Board used to derive venue when venue is not provided.
+          name: boardId
+          schema:
+            type: string
+            format: uuid
+          required: false
       responses:
         200:
-          $ref: '#/components/schemas/StringList'
+          description: Return matching client MAC addresses
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MacList'
         403:
           $ref: '#/components/responses/Unauthorized'
         404:
@@ -1203,12 +1239,19 @@ paths:
             type: integer
           required: false
         - in: query
-          description: The venue to for the search.
+          description: Venue for the search. If omitted, boardId may be used to derive it.
           name: venue
           schema:
             type: string
             format: uuid
-          required: true
+          required: false
+        - in: query
+          description: Board used to derive venue when venue is not provided.
+          name: boardId
+          schema:
+            type: string
+            format: uuid
+          required: false
         - in: query
           description: return extended information
           name: orderBy
@@ -1223,9 +1266,19 @@ paths:
             type: boolean
             default: false
           required: false
+        - in: query
+          description: Return count only
+          name: countOnly
+          schema:
+            type: boolean
+          required: false
       responses:
         200:
-          $ref: '#/components/schemas/WifiClientHistoryList'
+          description: Return WiFi client history entries
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WifiClientHistoryList'
         403:
           $ref: '#/components/responses/Unauthorized'
         404:
@@ -1260,14 +1313,6 @@ paths:
           name: endDate
           schema:
             type: integer
-          required: false
-        - in: query
-          description: Maximum number of entries to return (if absent, no limit is assumed)
-          name: macFilter
-          schema:
-            type: string
-            example:
-              112233445566, 11223344*, *5566
           required: false
       responses:
         200:
@@ -1333,7 +1378,11 @@ paths:
           required: true
       responses:
         200:
-          $ref: '#/components/schemas/SystemCommandResults'
+          description: Return the requested system information
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SystemCommandResults'
         403:
           $ref: '#/components/responses/Unauthorized'
         404:
@@ -1354,7 +1403,7 @@ paths:
             example:
               - element1
               - element1,element2,element3
-          required: false
+          required: true
       responses:
         200:
           description: List of configuration elements
@@ -1364,39 +1413,6 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/ExtraSystemConfiguration'
-        403:
-          $ref: '#/components/responses/Unauthorized'
-        404:
-          $ref: '#/components/responses/NotFound'
-
-    put:
-      tags:
-        - SystemConfiguration
-      summary: Set some or all system configuration
-      operationId: setSystemConfiguration
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ExtraSystemConfiguration'
-
-      responses:
-        200:
-          $ref: '#/components/schemas/ExtraSystemConfiguration'
-        403:
-          $ref: '#/components/responses/Unauthorized'
-        404:
-          $ref: '#/components/responses/NotFound'
-
-    delete:
-      tags:
-        - SystemConfiguration
-      summary: Delete all additional system configuration
-      operationId: deleteSystemConfiguration
-
-      responses:
-        200:
-          $ref: '#/components/responses/Success'
         403:
           $ref: '#/components/responses/Unauthorized'
         404:
