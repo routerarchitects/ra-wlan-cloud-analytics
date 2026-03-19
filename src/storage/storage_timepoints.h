@@ -6,6 +6,7 @@
 
 #include "RESTObjects/RESTAPI_AnalyticsObjects.h"
 #include "framework/orm.h"
+#include <set>
 
 namespace OpenWifi {
 	typedef Poco::Tuple<std::string, std::string, uint64_t, std::string, std::string, std::string,
@@ -17,9 +18,12 @@ namespace OpenWifi {
 		TimePointDB(OpenWifi::DBType T, Poco::Data::SessionPool &P, Poco::Logger &L);
 		bool GetStats(const std::string &id, AnalyticsObjects::DeviceTimePointStats &S);
 		bool SelectRecords(const std::string &boardId, uint64_t FromDate, uint64_t LastDate,
-						   uint64_t MaxRecords, DB::RecordVec &Recs);
+						   uint64_t MaxRecords, bool LatestPerDevice, DB::RecordVec &Recs);
 		bool DeleteBoard(const std::string &boardId);
 		bool DeleteTimeLine(const std::string &boardId, uint64_t fromDate, uint64_t endDate);
+		bool GetRecordsPerDevice(const std::string &boardId, uint64_t FromDate, uint64_t LastDate,
+						   uint64_t MaxRecords, DB::RecordVec &Recs);
+		std::set<std::string> GetCurrentDeviceFromBoard(const std::string &boardId);
 		virtual ~TimePointDB(){};
 
 	  private:

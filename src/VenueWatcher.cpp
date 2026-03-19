@@ -11,9 +11,12 @@ namespace OpenWifi {
 
 	void VenueWatcher::Start() {
 		poco_notice(Logger(), "Starting...");
-		for (const auto &mac : SerialNumbers_) {
-			auto ap = std::make_shared<AP>(mac, venue_id_, boardId_, Logger());
-			APs_[mac] = ap;
+		{
+			std::lock_guard G(Mutex_);
+			for (const auto &mac : SerialNumbers_) {
+				auto ap = std::make_shared<AP>(mac, venue_id_, boardId_, Logger());
+				APs_[mac] = ap;
+			}
 		}
 
 		for (const auto &i : SerialNumbers_)
@@ -44,21 +47,28 @@ namespace OpenWifi {
 			auto MsgContent = dynamic_cast<VenueMessage *>(Msg.get());
 			if (MsgContent != nullptr) {
 				try {
-					auto State = MsgContent->Payload();
-					if (MsgContent->Type() == VenueMessage::connection) {
+					std::shared_ptr<AP> ap;
+					{
+						std::lock_guard G(Mutex_);
 						auto It = APs_.find(MsgContent->SerialNumber());
 						if (It != end(APs_)) {
-							It->second->UpdateConnection(MsgContent->Payload());
+							ap = It->second;
 						}
-					} else if (MsgContent->Type() == VenueMessage::state) {
-						auto It = APs_.find(MsgContent->SerialNumber());
-						if (It != end(APs_)) {
-							It->second->UpdateStats(MsgContent->Payload());
-						}
-					} else if (MsgContent->Type() == VenueMessage::health) {
-						auto It = APs_.find(MsgContent->SerialNumber());
-						if (It != end(APs_)) {
-							It->second->UpdateHealth(MsgContent->Payload());
+					}
+
+					if (ap) {
+						switch (MsgContent->Type()) {
+							case VenueMessage::connection:
+								ap->UpdateConnection(MsgContent->Payload());
+								break;
+							case VenueMessage::state:
+								ap->UpdateStats(MsgContent->Payload());
+								break;
+							case VenueMessage::health:
+								ap->UpdateHealth(MsgContent->Payload());
+								break;
+							default:
+								break;
 						}
 					}
 				} catch (const Poco::Exception &E) {
@@ -89,9 +99,12 @@ namespace OpenWifi {
 
 		for (const auto &i : ToRemove) {
 			StateReceiver()->DeRegister(i, this);
+			APs_.erase(i);
 		}
 		for (const auto &i : ToAdd) {
 			StateReceiver()->Register(i, this);
+			auto ap = std::make_shared<AP>(i, venue_id_, boardId_, Logger());
+			APs_[i] = ap;
 		}
 
 		HealthReceiver()->Register(SerialNumbers, this);

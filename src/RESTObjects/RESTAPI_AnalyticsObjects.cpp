@@ -5,6 +5,9 @@
 #include "RESTAPI_AnalyticsObjects.h"
 #include "RESTAPI_ProvObjects.h"
 #include "framework/RESTAPI_utils.h"
+#include <Poco/JSON/Parser.h>
+#include <Poco/JSON/Stringifier.h>
+#include <sstream>
 
 using OpenWifi::RESTAPI_utils::field_from_json;
 using OpenWifi::RESTAPI_utils::field_to_json;
@@ -123,28 +126,50 @@ namespace OpenWifi::AnalyticsObjects {
 		return false;
 	}
 
-	void UE_rate::to_json(Poco::JSON::Object &Obj) const {
-		field_to_json(Obj, "bitrate", bitrate);
-		field_to_json(Obj, "mcs", mcs);
+void UE_rate::to_json(Poco::JSON::Object &Obj) const {
+	field_to_json(Obj, "bitrate", bitrate);
+	field_to_json(Obj, "mcs", mcs);
 		field_to_json(Obj, "nss", nss);
 		field_to_json(Obj, "ht", ht);
 		field_to_json(Obj, "sgi", sgi);
 		field_to_json(Obj, "chwidth", chwidth);
 	}
 
-	bool UE_rate::from_json(const Poco::JSON::Object::Ptr &Obj) {
-		try {
-			field_from_json(Obj, "bitrate", bitrate);
-			field_from_json(Obj, "mcs", mcs);
+bool UE_rate::from_json(const Poco::JSON::Object::Ptr &Obj) {
+	try {
+		field_from_json(Obj, "bitrate", bitrate);
+		field_from_json(Obj, "mcs", mcs);
 			field_from_json(Obj, "nss", nss);
 			field_from_json(Obj, "ht", ht);
 			field_from_json(Obj, "sgi", sgi);
 			field_from_json(Obj, "chwidth", chwidth);
-			return true;
-		} catch (...) {
-		}
-		return false;
+		return true;
+	} catch (...) {
 	}
+	return false;
+}
+
+void Fingerprint::to_json(Poco::JSON::Object &Obj) const {
+	if (json.empty())
+		return;
+	try {
+		Poco::JSON::Parser Parser;
+		auto Result = Parser.parse(json);
+		auto Ptr = Result.extract<Poco::JSON::Object::Ptr>();
+		if (Ptr)
+			Obj = *Ptr;
+	} catch (...) {
+	}
+}
+
+bool Fingerprint::from_json(const Poco::JSON::Object::Ptr &Obj) {
+	if (!Obj)
+		return false;
+	std::ostringstream Stream;
+	Poco::JSON::Stringifier::stringify(Obj, Stream);
+	json = Stream.str();
+	return true;
+}
 
 	void UETimePoint::to_json(Poco::JSON::Object &Obj) const {
 		field_to_json(Obj, "station", station);
@@ -154,12 +179,13 @@ namespace OpenWifi::AnalyticsObjects {
 		field_to_json(Obj, "tx_duration", tx_duration);
 		field_to_json(Obj, "rx_packets", rx_packets);
 		field_to_json(Obj, "tx_packets", tx_packets);
-		field_to_json(Obj, "tx_retries", tx_retries);
-		field_to_json(Obj, "tx_failed", tx_failed);
-		field_to_json(Obj, "connected", connected);
-		field_to_json(Obj, "inactive", inactive);
-		field_to_json(Obj, "tx_rate", tx_rate);
-		field_to_json(Obj, "rx_rate", rx_rate);
+	field_to_json(Obj, "tx_retries", tx_retries);
+	field_to_json(Obj, "tx_failed", tx_failed);
+	field_to_json(Obj, "connected", connected);
+	field_to_json(Obj, "inactive", inactive);
+	field_to_json(Obj, "tx_rate", tx_rate);
+	field_to_json(Obj, "rx_rate", rx_rate);
+	field_to_json(Obj, "fingerprint", fingerprint);
 		//      field_to_json(Obj, "tidstats", tidstats);
 
 		field_to_json(Obj, "tx_bytes_bw", tx_bytes_bw);
@@ -187,13 +213,14 @@ namespace OpenWifi::AnalyticsObjects {
 			field_from_json(Obj, "rx_bytes", rx_bytes);
 			field_from_json(Obj, "tx_duration", tx_duration);
 			field_from_json(Obj, "rx_packets", rx_packets);
-			field_from_json(Obj, "tx_packets", tx_packets);
-			field_from_json(Obj, "tx_retries", tx_retries);
-			field_from_json(Obj, "tx_failed", tx_failed);
-			field_from_json(Obj, "connected", connected);
-			field_from_json(Obj, "inactive", inactive);
-			field_from_json(Obj, "tx_rate", tx_rate);
-			field_from_json(Obj, "rx_rate", rx_rate);
+		field_from_json(Obj, "tx_packets", tx_packets);
+		field_from_json(Obj, "tx_retries", tx_retries);
+		field_from_json(Obj, "tx_failed", tx_failed);
+		field_from_json(Obj, "connected", connected);
+		field_from_json(Obj, "inactive", inactive);
+		field_from_json(Obj, "tx_rate", tx_rate);
+		field_from_json(Obj, "rx_rate", rx_rate);
+		field_from_json(Obj, "fingerprint", fingerprint);
 			//          field_from_json(Obj,"tidstats",tidstats);
 			field_from_json(Obj, "tx_bytes_bw", tx_bytes_bw);
 			field_from_json(Obj, "rx_bytes_bw", rx_bytes_bw);

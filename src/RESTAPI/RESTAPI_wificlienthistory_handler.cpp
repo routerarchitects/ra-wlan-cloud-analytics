@@ -16,6 +16,20 @@ namespace OpenWifi {
 
 		auto venue = ORM::Escape(GetParameter("venue", ""));
 		if (venue.empty()) {
+			auto boardId = GetParameter("boardId", "");
+			if (!boardId.empty()) {
+				AnalyticsObjects::BoardInfo B;
+				
+				if (StorageService()->BoardsDB().GetRecord("id", boardId, B) &&
+						!B.venueList.empty()) {
+					venue = B.venueList[0].id;
+				} else {
+					return BadRequest(RESTAPI::Errors::VenueMustExist);
+				}
+			}
+		}
+		
+		if (venue.empty()) {
 			return BadRequest(RESTAPI::Errors::VenueMustExist);
 		}
 
