@@ -8,7 +8,7 @@ info:
     url: https://github.com/routerarchitects/wlan-cloud-ucentralgw/blob/master/LICENSE
 
 servers:
-  - url: 'https://localhost:16009/api/v1'
+  - url: 'https://openwifi.wlan.local:16009/api/v1'
 
 security:
   - bearerAuth: []
@@ -219,11 +219,9 @@ components:
       type: object
       properties:
         association_bssid:
-          type: integer
-          format: int64
+          type: string
         station:
-          type: integer
-          format: int64
+          type: string
         fingerprint:
           $ref: '#/components/schemas/Fingerprint'
         rssi:
@@ -470,6 +468,10 @@ components:
     DeviceTimePointAnalysis:
       type: object
       properties:
+        timestamp:
+          type: integer
+          format: int64
+          description: Start (or representative time) of the aggregation window
         noise:
           $ref: '#/components/schemas/AveragePoint'
         active_pct:
@@ -621,14 +623,12 @@ components:
             type: string
 
     ExtraSystemConfiguration:
-      type: array
-      items:
-        type: object
-        properties:
-          parameterName:
-            type: string
-          parameterValue:
-            type: string
+      type: object
+      properties:
+        parameterName:
+          type: string
+        parameterValue:
+          type: string
 
     #########################################################################################
     ##
@@ -648,6 +648,13 @@ components:
           type: array
           items:
             type: string
+
+    ExtraConfigurationStatus:
+      type: object
+      properties:
+        additionalConfiguration:
+          type: boolean
+          description: Indicates whether additional configuration is enabled
 
     TagValuePair:
       type: object
@@ -763,6 +770,7 @@ components:
         - $ref: '#/components/schemas/SystemInfoResults'
         - $ref: '#/components/schemas/StringList'
         - $ref: '#/components/schemas/TagValuePairList'
+        - $ref: '#/components/schemas/ExtraConfigurationStatus' 
 
     Dashboard:
       type: object
@@ -1090,9 +1098,7 @@ paths:
           content:
             application/json:
               schema:
-                oneOf:
-                  - $ref: '#/components/schemas/DeviceTimePointList'
-                  - $ref: '#/components/schemas/DeviceTimePointStats'
+                $ref: '#/components/schemas/DeviceTimePointList'
         400:
           $ref: '#/components/responses/BadRequest'
         403:
@@ -1137,7 +1143,7 @@ paths:
       tags:
         - WiFiClientHistory
       operationId: getWifiClientHistory
-      summary: Retrieve WiFi client history for debugging purpose
+      summary: Retrieve WiFi client addresses 
       parameters:
         - in: query
           name: fromDate
@@ -1206,8 +1212,8 @@ paths:
     get:
       tags:
         - WiFiClientHistory
-      operationId: getWifiClients
-      summary: Retrieve WiFi client history for debugging purpose
+      operationId: getWifiClientHistoryEntries
+      summary: Retrieve WiFi client history per device
       parameters:
         - in: path
           name: client
@@ -1274,7 +1280,7 @@ paths:
           required: false
       responses:
         200:
-          description: Return WiFi client history entries
+          description: Return WiFi client history entries per device
           content:
             application/json:
               schema:
@@ -1288,7 +1294,7 @@ paths:
       tags:
         - WiFiClientHistory
       operationId: deleteWifiClientHistory
-      summary: Retrieve WiFi client history for debugging purpose
+      summary: Delete WiFi client history per device
       parameters:
         - in: query
           description: The venue to for the search.
