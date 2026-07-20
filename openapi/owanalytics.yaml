@@ -27,13 +27,13 @@ components:
 
   responses:
     NotFound:
-      $ref: 'https://github.com/routerarchitects/wlan-cloud-ucentralsec/blob/main/openapi/owsec.yaml#/components/responses/NotFound'
+      $ref: 'https://github.com/routerarchitects/ra-wlan-cloud-ucentralsec/blob/main/openapi/owsec.yaml#/components/responses/NotFound'
     Unauthorized:
-      $ref: 'https://github.com/routerarchitects/wlan-cloud-ucentralsec/blob/main/openapi/owsec.yaml#/components/responses/Unauthorized'
+      $ref: 'https://github.com/routerarchitects/ra-wlan-cloud-ucentralsec/blob/main/openapi/owsec.yaml#/components/responses/Unauthorized'
     Success:
-      $ref: 'https://github.com/routerarchitects/wlan-cloud-ucentralsec/blob/main/openapi/owsec.yaml#/components/responses/Success'
+      $ref: 'https://github.com/routerarchitects/ra-wlan-cloud-ucentralsec/blob/main/openapi/owsec.yaml#/components/responses/Success'
     BadRequest:
-      $ref: 'https://github.com/routerarchitects/wlan-cloud-ucentralsec/blob/main/openapi/owsec.yaml#/components/responses/BadRequest'
+      $ref: 'https://github.com/routerarchitects/ra-wlan-cloud-ucentralsec/blob/main/openapi/owsec.yaml#/components/responses/BadRequest'
 
   schemas:
     ObjectInfo:

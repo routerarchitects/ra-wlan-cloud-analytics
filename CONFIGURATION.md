@@ -15,7 +15,7 @@ openwifi.restapi.host.0.backlog = 100
 openwifi.restapi.host.0.security = relaxed
 openwifi.restapi.host.0.rootca = $OWANALYTICS_ROOT/certs/restapi-ca.pem
 openwifi.restapi.host.0.address = *
-openwifi.restapi.host.0.port = 16005
+openwifi.restapi.host.0.port = 16009
 openwifi.restapi.host.0.cert = $OWANALYTICS_ROOT/certs/restapi-cert.pem
 openwifi.restapi.host.0.key = $OWANALYTICS_ROOT/certs/restapi-key.pem
 openwifi.restapi.host.0.key.password = mypassword
@@ -32,7 +32,7 @@ This is the private key associated with your own certificate in `pem` format.
 #### openwifi.restapi.host.0.address
 Leve this a `*` in the case you want to bind to all interfaces on your gateway host or select the address of a single interface.
 #### openwifi.restapi.host.0.port
-The port on which the REST API server is listening. By default, this is 16002.
+The port on which the REST API server is listening. By default, this is 16009.
 #### openwifi.restapi.host.0.security
 Leave this as `relaxed` for now for devices.
 #### openwifi.restapi.host.0.key.password
@@ -46,7 +46,7 @@ openwifi.internal.restapi.host.0.backlog = 100
 openwifi.internal.restapi.host.0.security = relaxed
 openwifi.internal.restapi.host.0.rootca = $OWANALYTICS_ROOT/certs/restapi-ca.pem
 openwifi.internal.restapi.host.0.address = *
-openwifi.internal.restapi.host.0.port = 17005
+openwifi.internal.restapi.host.0.port = 17009
 openwifi.internal.restapi.host.0.cert = $OWANALYTICS_ROOT/certs/restapi-cert.pem
 openwifi.internal.restapi.host.0.key = $OWANALYTICS_ROOT/certs/restapi-key.pem
 openwifi.internal.restapi.host.0.key.password = mypassword
@@ -63,7 +63,7 @@ This is the private key associated with your own certificate in `pem` format.
 #### openwifi.internal.host.0.address
 Leve this a `*` in the case you want to bind to all interfaces on your gateway host or select the address of a single interface.
 #### openwifi.internal.host.0.port
-The port on which the REST API server is listening. By default, this is 17002.
+The port on which the REST API server is listening. By default, this is 17009.
 #### openwifi.internal.host.0.security
 Leave this as `relaxed` for now for devices.
 #### openwifi.internal.host.0.key.password
@@ -75,9 +75,9 @@ These are different Microservie parameters. Following is a brief explanation.
 openwifi.service.key = $OWANALYTICS_ROOT/certs/restapi-key.pem
 openwifi.service.key.password = mypassword
 openwifi.system.data = $OWANALYTICS_ROOT/data
-openwifi.system.uri.private = https://localhost:17005
-openwifi.system.uri.public = https://openwifi.example.com:16005
-openwifi.system.uri.ui = https://provisioning-ui.arilia.com
+openwifi.system.uri.private = https://localhost:17009
+openwifi.system.uri.public = https://openwifi.example.com:16009
+openwifi.system.uri.ui = https://owprov-ui.arilia.com
 openwifi.security.restapi.disable = false
 openwifi.system.commandchannel = /tmp/app.ucentralanalytics
 openwifi.autoprovisioning = true
@@ -107,7 +107,7 @@ Allow unknown devices to be provisioned by the system.
 In order to support an application load balancer health check verification, your need to provide the following parameters.
 ```properties
 alb.enable = true
-alb.port = 16105
+alb.port = 16109
 ```
 
 ### Kafka
