@@ -5,7 +5,7 @@ info:
   version: 2.6.0
   license:
     name: BSD3
-    url: https://github.com/routerarchitects/wlan-cloud-ucentralgw/blob/master/LICENSE
+    url: https://github.com/routerarchitects/ra-wlan-cloud-ucentralgw/blob/main/LICENSE
 
 servers:
   - url: 'https://openwifi.wlan.local:16009/api/v1'
