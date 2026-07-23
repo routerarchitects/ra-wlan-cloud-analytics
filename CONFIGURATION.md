@@ -79,7 +79,7 @@ openwifi.system.uri.private = https://localhost:17009
 openwifi.system.uri.public = https://openwifi.example.com:16009
 openwifi.system.uri.ui = owprov-ui.arilia.com
 openwifi.security.restapi.disable = false
-openwifi.system.commandchannel = /tmp/app.ucentralanalytics
+openwifi.system.commandchannel = /tmp/app.owanalytics
 openwifi.autoprovisioning = true
 ```
 #### openwifi.service.key
@@ -137,7 +137,7 @@ Kafka buffering. Leave as `50`.
 ### Kafka security
 If you intend to use SSL, you should look into Kafka Connect and specify the certificates below.
 ```properties
-penwifi.kafka.ssl.ca.location =
+openwifi.kafka.ssl.ca.location =
 openwifi.kafka.ssl.certificate.location =
 openwifi.kafka.ssl.key.location =
 openwifi.kafka.ssl.key.password =
