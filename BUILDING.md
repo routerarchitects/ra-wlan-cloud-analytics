@@ -59,8 +59,8 @@ make
 make install
 
 cd ~
-git clone https://github.com/Telecominfraproject/wlan-cloud-analytics
-cd wlan-cloud-analytics
+git clone https://github.com/routerarchitects/ra-wlan-cloud-analytics
+cd ra-wlan-cloud-analytics
 mkdir cmake-build
 cd cmake-build
 cmake ..
@@ -101,8 +101,8 @@ cmake --build . --config Release
 sudo cmake --build . --target install
 
 cd ~
-git clone https://github.com/Telecominfraproject/wlan-cloud-analytics
-cd wlan-cloud-analytics
+git clone https://github.com/routerarchitects/ra-wlan-cloud-analytics
+cd ra-wlan-cloud-analytics
 mkdir cmake-build
 cd cmake-build
 cmake ..
@@ -155,8 +155,8 @@ sudo cmake --build . --target install
 popd
 popd
 
-git clone https://github.com/Telecominfraproject/wlan-cloud-analytics
-pushd wlan-cloud-analytics
+git clone https://github.com/routerarchitects/ra-wlan-cloud-analytics
+pushd ra-wlan-cloud-analytics
 mkdir cmake-build
 pushd cmake-build
 cmake ..
@@ -181,8 +181,8 @@ cmake --build . --config Release
 sudo cmake --build . --target install
 
 cd ~
-git clone https://github.com/Telecominfraproject/wlan-cloud-analytics
-cd wlan-cloud-ucentralgw
+git clone https://github.com/routerarchitects/ra-wlan-cloud-analytics
+cd ra-wlan-cloud-analytics
 mkdir cmake-build
 cd cmake-build
 cmake -DSMALL_BUILD=1 ..
