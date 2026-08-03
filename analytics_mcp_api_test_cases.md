@@ -312,6 +312,7 @@ GET /api/v1/devices/60cf84f22290/memory-summary
 ### Expected result
 
 * HTTP `400 Bad Request`.
+* Error is `invalid_timestamp`.
 * The value is rejected even though it matches the timestamp shape.
 * No database aggregation is performed.
 
@@ -329,6 +330,7 @@ GET /api/v1/devices/60cf84f22290/memory-summary
 ### Expected result
 
 * HTTP `400 Bad Request`.
+* Error is `invalid_lookback`, not `invalid_timestamp`.
 
 ---
 
@@ -344,6 +346,7 @@ GET /api/v1/devices/60cf84f22290/memory-summary
 ### Expected result
 
 * HTTP `400 Bad Request`.
+* Error is `invalid_lookback`, not `invalid_timestamp`.
 
 ---
 
@@ -359,7 +362,8 @@ GET /api/v1/devices/60cf84f22290/memory-summary
 ### Expected result
 
 * HTTP `400 Bad Request`.
-* Error indicates that the maximum supported lookback was exceeded.
+* Error is `invalid_lookback`, not `invalid_timestamp`.
+* Error message may indicate that the maximum supported lookback was exceeded.
 
 ---
 
@@ -374,6 +378,7 @@ GET /api/v1/devices/60cf84f22290/memory-summary
 ### Expected result
 
 * HTTP `400 Bad Request`.
+* Error is `invalid_timestamp`.
 
 ---
 
@@ -388,6 +393,7 @@ GET /api/v1/devices/60cf84f22290/memory-summary
 ### Expected result
 
 * HTTP `400 Bad Request`.
+* Error is `invalid_lookback`, not `invalid_timestamp`.
 
 ---
 
@@ -548,6 +554,7 @@ Verify that transition history is stored separately from current state.
 * Required event fields exist:
 
 ```text
+id
 serialNumber
 board_id
 event_type
@@ -556,10 +563,16 @@ event_id
 idempotency_key
 reason
 connection_ip
+session_id
 metadata
 ```
 
-* `idempotency_key` is unique.
+* `id` exists and is the primary key.
+* `serialNumber` is non-null.
+* `event_type` is non-null.
+* `event_time` is non-null.
+* `idempotency_key` is non-null and unique.
+* `session_id` exists and is nullable.
 * At least one index supports lookup by `serialNumber` and `event_time`.
 * `event_type` accepts only stored transition values `online` and `offline`.
 
@@ -1455,7 +1468,7 @@ GET /api/v1/devices/60cf84f22290/availability-summary
 ### Expected result
 
 * HTTP `400 Bad Request`.
-* Error indicates invalid lookback value.
+* Error is `invalid_lookback`, not `invalid_timestamp`.
 
 ---
 
@@ -1472,6 +1485,7 @@ GET /api/v1/devices/60cf84f22290/availability-summary
 ### Expected result
 
 * HTTP `400 Bad Request`.
+* Error is `invalid_lookback`, not `invalid_timestamp`.
 
 ---
 
@@ -1488,7 +1502,8 @@ GET /api/v1/devices/60cf84f22290/availability-summary
 ### Expected result
 
 * HTTP `400 Bad Request`.
-* Error indicates that the supported lookback limit was exceeded.
+* Error is `invalid_lookback`, not `invalid_timestamp`.
+* Error message may indicate that the supported lookback limit was exceeded.
 
 ---
 

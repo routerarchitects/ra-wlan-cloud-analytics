@@ -139,7 +139,20 @@ All APIs in this document derive `maxLookbackHours` from the configured `monitor
 
 For a one-year monitoring configuration, `maxLookbackHours` is `365 * 24` only when the configured monitoring duration is exactly 365 days. Do not assume every calendar year is 8760 hours; use the configured duration and effective retention timestamps when validating the request.
 
-Return `400 Bad Request` with `error: "invalid_timestamp"` for invalid timestamps, unsupported timezone formats/offsets, non-positive `lookbackHours`, or values above the applicable maximum. Internally, query `timepoints.timestamp` and `wificlienthistory.timestamp` using epoch seconds.
+Return validation errors with field-specific error codes:
+
+```text
+invalid_timestamp:
+  timestampTill is missing, malformed, not UTC `Z` format, or otherwise unsupported.
+
+invalid_lookback:
+  lookbackHours is missing, non-numeric, zero, negative, or greater than maxLookbackHours.
+
+lookback_outside_retention:
+  the calculated [startTime, endTime) window is outside the configured retention window.
+```
+
+A valid timestamp with an invalid `lookbackHours` value must not return `invalid_timestamp`. Internally, query `timepoints.timestamp` and `wificlienthistory.timestamp` using epoch seconds.
 
 ### Monitoring Configuration
 
@@ -1919,11 +1932,13 @@ metadata
 
 ### Required Storage Implementation
 
-Add a dedicated storage class for availability events:
+Add dedicated storage classes for availability events and restart-safe availability state:
 
 ```text
 src/storage/storage_device_availability_events.h
 src/storage/storage_device_availability_events.cpp
+src/storage/storage_device_availability_state.h
+src/storage/storage_device_availability_state.cpp
 ```
 
 Required ORM fields and indexes:
@@ -2031,7 +2046,7 @@ src/StorageService.cpp
 
 Add a DB upgrade/migration path for the new table. Existing deployments will start with no historical availability events. Define a fixed `availabilityValidFrom` timestamp as the deployment/migration time when availability-event persistence starts. The API should return `offline_count: 0` only for successful empty queries whose requested range starts at or after `availabilityValidFrom`; do not infer old events from `lastDisconnection`.
 
-Add the files to `CMakeLists.txt`.
+Add all availability storage files to `CMakeLists.txt`, including both `storage_device_availability_events.*` and `storage_device_availability_state.*`. Register database migration/upgrade logic for both tables so fresh databases and upgraded deployments create the event table, state table, indexes, uniqueness constraints, and state constraints consistently.
 
 ### Ingestion Hook
 
