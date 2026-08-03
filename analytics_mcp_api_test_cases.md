@@ -25,7 +25,7 @@ get_gateway_offline_count
 The test cases cover:
 * API contract tests for request shapes, HTTP status codes, response schemas, parameter validation, filtering, and half-open time-range window semantics `[startTime, endTime)`.
 * Service integration tests for Kafka topic consumption, OWPROV fallback resolution, `VenueCoordinator` maintained ownership map, process-level router resolution cache, and PostgreSQL storage queries.
-* Database/white-box tests for `device_availability_events`, `timepoints`, and `wificlienthistory` table schemas, constraints, and event counting behavior.
+* Database/white-box tests for `device_availability_events`, `device_availability_state`, `timepoints`, and `wificlienthistory` table schemas, constraints, and event counting behavior.
 * End-to-end physical device scenarios covering gateway shutdown, power restoration, cable removal, and reconnection flows.
 
 ---
@@ -44,11 +44,12 @@ Before executing the test cases:
 
 ```text
 device_availability_events
+device_availability_state
 timepoints
 wificlienthistory
 ```
 
-8. Gateway availability uses the existing persisted gateway state record as the authoritative state and `device_availability_events` as the transition log. Kafka `disconnection` messages are treated as `offline`; Kafka `ping` and `capabilities` messages are treated as `online`. Every newer message updates that record's `lastContact`; pings also update `lastPing`, and real offline transitions update `lastDisconnection`. This does not require a table named `device` or `devices`.
+8. Gateway availability uses `device_availability_state` as the authoritative restart-safe state table and `device_availability_events` as the transition log. Kafka `disconnection` messages are treated as `offline`; Kafka `ping` and `capabilities` messages are treated as `online`. Every accepted newer source message updates `device_availability_state.last_event_time`. `DeviceInfo.lastContact` is contact/processing metadata and is not used for source-event ordering.
 9. Database records for the test gateway are cleared or isolated before each independent test.
 10. A valid authorization token is available for testing endpoint access.
 
@@ -508,18 +509,96 @@ Call `GET /api/v1/devices/{routerId}/availability-summary` with a calculated `st
 
 ## 4.1. Database/White-Box Validation Queries
 
-### Persisted gateway state check
+## TC-AVAIL-SCHEMA-001: Availability state table schema exists
+
+### Objective
+
+Verify that the required restart-safe state table exists with deterministic fields and constraints.
+
+### Expected result
+
+* `device_availability_state` exists.
+* `serialNumber` is the primary identity for a gateway state row.
+* Required fields exist:
 
 ```text
-Lock and read the existing persisted gateway state record for:
-serialNumber = 60cf84f22290
+serialNumber
+board_id
+current_state
+last_event_time
+last_idempotency_key
+updated_at
+metadata
+```
 
-Verify these fields:
-connected
-lastContact
-lastPing
-lastConnection
-lastDisconnection
+* `current_state` accepts only `online`, `offline`, or `unknown`.
+* An index exists for `board_id` when board-scoped maintenance queries need it.
+
+---
+
+## TC-AVAIL-SCHEMA-002: Availability event table schema exists
+
+### Objective
+
+Verify that transition history is stored separately from current state.
+
+### Expected result
+
+* `device_availability_events` exists.
+* Required event fields exist:
+
+```text
+serialNumber
+board_id
+event_type
+event_time
+event_id
+idempotency_key
+reason
+connection_ip
+metadata
+```
+
+* `idempotency_key` is unique.
+* At least one index supports lookup by `serialNumber` and `event_time`.
+* `event_type` accepts only stored transition values `online` and `offline`.
+
+---
+
+## TC-AVAIL-SCHEMA-003: Availability migrations are idempotent
+
+### Objective
+
+Verify that migration from a database without availability tables creates both required tables safely.
+
+### Steps
+
+1. Start with a previous-version database that has no availability tables.
+2. Run Analytics migrations.
+3. Run Analytics migrations again.
+4. Inspect the schema.
+
+### Expected result
+
+* `device_availability_events` and `device_availability_state` exist after migration.
+* Re-running migration does not drop or duplicate tables, indexes, or constraints.
+* Existing `timepoints` and `wificlienthistory` data remains intact.
+
+---
+
+### Availability state row query
+
+```sql
+SELECT serialNumber,
+       board_id,
+       current_state,
+       last_event_time,
+       last_idempotency_key,
+       updated_at,
+       metadata
+FROM device_availability_state
+WHERE serialNumber = '60cf84f22290'
+FOR UPDATE;
 ```
 
 ### Latest transition event query
@@ -560,36 +639,34 @@ WHERE serialNumber = ?
 
 ### Objective
 
-Verify that the first observed ping initializes the persisted gateway state record as online without creating an online transition event.
+Verify that the first observed ping initializes `device_availability_state` as online without creating an online transition event.
 
 ### Preconditions
 
 * No availability event exists for the gateway.
-* The persisted gateway state record has no prior availability contact state:
+* No `device_availability_state` row exists for the gateway.
 
-```text
-connected is unset or false only because the row is uninitialized
-lastContact is unset or 0
-```
 
 ### Steps
 
 1. Start the gateway.
 2. Wait for the gateway to publish a `ping` message.
 3. Wait for Analytics to consume the message.
-4. Query the persisted gateway state record.
+4. Query `device_availability_state`.
 5. Query `device_availability_events`.
 
 ### Expected result
 
 * No `online` event is inserted.
 * No `offline` event is inserted.
-* The persisted gateway state record is updated:
+* One `device_availability_state` row is created:
 
 ```text
-connected = true
-lastContact = ping timestamp
-lastPing = ping timestamp
+serialNumber = 60cf84f22290
+current_state = online
+last_event_time = ping source timestamp
+last_idempotency_key = ping idempotency key
+updated_at >= processing time
 ```
 
 * The availability API returns:
@@ -612,11 +689,11 @@ Verify that regular gateway pings do not create repeated online transition event
 
 ### Preconditions
 
-* The persisted gateway state record has:
+* `device_availability_state` has:
 
 ```text
-connected = true
-lastContact < latest ping timestamp
+current_state = online
+last_event_time < latest ping source timestamp
 ```
 
 ### Steps
@@ -624,7 +701,7 @@ lastContact < latest ping timestamp
 1. Keep the gateway online.
 2. Allow it to send at least three ping messages.
 3. Wait for Analytics to process all messages.
-4. Query the persisted gateway state record.
+4. Query `device_availability_state`.
 5. Query `device_availability_events`.
 
 Example messages:
@@ -638,9 +715,9 @@ Example messages:
 ### Expected result
 
 * No additional `online` event is inserted after the first online state.
-* `lastContact` is updated to the latest newer ping timestamp.
-* `lastPing` is updated to the latest newer ping timestamp.
-* `connected` remains `true`.
+* `last_event_time` is updated to the latest newer ping source timestamp.
+* `last_idempotency_key` is updated to the latest accepted ping idempotency key.
+* `current_state` remains `online`.
 * `offline_count` remains `0`.
 
 ---
@@ -654,7 +731,7 @@ Verify that physically powering off the gateway creates one offline transition.
 ### Preconditions
 
 * Gateway is online.
-* The persisted gateway state record has `connected = true`.
+* `device_availability_state.current_state = online`.
 
 ### Steps
 
@@ -669,12 +746,13 @@ Verify that physically powering off the gateway creates one offline transition.
 ### Expected result
 
 * Exactly one `offline` event is inserted.
-* The persisted gateway state record is updated:
+* `device_availability_state` is updated:
 
 ```text
-connected = false
-lastContact = disconnection message timestamp
-lastDisconnection = disconnection message timestamp
+current_state = offline
+last_event_time = disconnection source timestamp
+last_idempotency_key = disconnection idempotency key
+updated_at >= processing time
 ```
 
 * The event contains:
@@ -836,13 +914,13 @@ Verify that restoring power changes the gateway state from offline to online wit
 
 * One `online` transition event is inserted.
 * No additional `offline` event is inserted.
-* The persisted gateway state record is updated:
+* `device_availability_state` is updated:
 
 ```text
-connected = true
-lastContact = ping or capabilities timestamp
-lastPing = ping timestamp when message type is ping
-lastConnection = ping or capabilities timestamp
+current_state = online
+last_event_time = ping or capabilities source timestamp
+last_idempotency_key = ping or capabilities idempotency key
+updated_at >= processing time
 ```
 
 * Existing offline count remains unchanged.
@@ -889,8 +967,8 @@ Verify recovery after an Ethernet disconnection.
 
 * One `online` transition event is inserted.
 * No additional offline event is inserted.
-* `connected` becomes `true`.
-* `lastContact` and the applicable online timestamp field are updated.
+* `device_availability_state.current_state` becomes `online`.
+* `last_event_time`, `last_idempotency_key`, `updated_at`, and metadata are updated.
 * Offline count remains unchanged.
 
 ---
@@ -910,13 +988,13 @@ Verify that each separate online-to-offline transition is counted once.
 Perform the following sequence:
 
 ```text
-12:00 ping          → online
-12:10 shutdown      → offline
-12:15 boot          → online
-13:00 disconnect    → offline
-13:05 reconnect     → online
-14:00 power off     → offline
-14:10 power on      → online
+12:00 initial ping  → initialize online state, no event
+12:10 shutdown      → offline event
+12:15 boot          → online event
+13:00 disconnect    → offline event
+13:05 reconnect     → online event
+14:00 power off     → offline event
+14:10 power on      → online event
 ```
 
 Call the API for a time range covering the entire sequence.
@@ -926,7 +1004,6 @@ Call the API for a time range covering the entire sequence.
 The event table contains:
 
 ```text
-12:00 online
 12:10 offline
 12:15 online
 13:00 offline
@@ -956,12 +1033,12 @@ Verify that repeated offline messages do not create duplicate offline transition
 ### Preconditions
 
 * The gateway has already produced one offline transition.
-* The persisted gateway state record has `connected = false`.
+* `device_availability_state.current_state = offline`.
 
 ### Steps
 
 1. Keep the gateway offline after the first disconnection.
-2. Deliver another newer `disconnection` message for the same gateway while `connected = false`.
+2. Deliver another newer `disconnection` message for the same gateway while `current_state = offline`.
 3. Query the availability-event table.
 4. Call the API.
 
@@ -977,8 +1054,8 @@ Example:
 
 * Only the first offline transition is stored.
 * Later same-state disconnection messages are ignored.
-* For newer repeated disconnection messages while `connected = false`, `lastContact` advances.
-* `lastDisconnection` remains the timestamp of the actual offline transition.
+* For newer repeated disconnection messages while `current_state = offline`, `last_event_time` advances.
+* `last_idempotency_key`, `updated_at`, and metadata are updated for the latest accepted same-state message.
 * `offline_count` is `1`.
 
 ---
@@ -1006,8 +1083,69 @@ Verify storage-level idempotency when Kafka redelivers the same logical connecti
 
 * Both deliveries map to the same deterministic `idempotency_key` or source `event_id`.
 * Exactly one transition event row is inserted.
-* The duplicate delivery does not move `connected`, `lastContact`, `lastPing`, or `lastDisconnection`.
+* The duplicate delivery does not move `current_state`, `last_event_time`, `last_idempotency_key`, `updated_at`, or transition history.
 * `offline_count` is `1`.
+
+---
+
+## TC-AVAIL-012A: Same logical event at a different Kafka offset is ignored
+
+### Objective
+
+Verify that Kafka offset is not used as the logical idempotency key.
+
+### Steps
+
+1. Publish a disconnection message with a stable source UUID and source timestamp.
+2. Publish the same logical disconnection again as a separate Kafka record at a different topic offset.
+3. Query `device_availability_events` and `device_availability_state`.
+
+### Expected result
+
+* Both records derive the same logical `idempotency_key`.
+* Exactly one offline transition row exists.
+* `device_availability_state` is updated once for the logical event.
+* Kafka topic, partition, and offset may appear in metadata only.
+
+---
+
+## TC-AVAIL-012B: Same UUID from different source namespaces is not conflated
+
+### Objective
+
+Verify that `system.host` and `system.id` are part of the idempotency namespace.
+
+### Steps
+
+1. Process a ping from source namespace A with `payload.ping.uuid = 44702320`.
+2. Process a different ping for the same gateway from source namespace B with the same UUID.
+3. Query `device_availability_state`.
+
+### Expected result
+
+* The two messages derive different `idempotency_key` values because the source namespace differs.
+* If both messages are newer source events and same-state online, no transition row is inserted.
+* `last_event_time` advances only according to source timestamp ordering.
+
+---
+
+## TC-AVAIL-012C: Missing or unstable UUID uses stable logical fields
+
+### Objective
+
+Verify that UUID absence does not force Kafka-offset idempotency.
+
+### Steps
+
+1. Process a valid disconnection message without a stable source UUID.
+2. Derive the idempotency key from stable fields such as `serialNumber`, `message_type`, `event_type`, `event_time`, `reason`, and `connection_ip`.
+3. Re-deliver the same logical message.
+
+### Expected result
+
+* Both deliveries derive the same idempotency key.
+* Exactly one transition event is inserted.
+* If stable logical fields are insufficient, the message is rejected as a counted event instead of using Kafka offset as identity.
 
 ---
 
@@ -1020,15 +1158,15 @@ Verify that repeated online messages after an offline-to-online transition do no
 ### Steps
 
 1. Reconnect or power on the gateway from an offline state.
-2. Capture the first ping that creates the online transition.
-3. Deliver another newer ping while the persisted gateway state record has `connected = true`.
+2. Capture the first recovery ping that creates the online transition.
+3. Deliver another newer ping while `device_availability_state.current_state = online`.
 4. Query availability storage.
 
 ### Expected result
 
 * Exactly one online transition event is inserted.
 * No additional offline event is inserted.
-* The newer repeated ping updates `lastContact` and `lastPing`.
+* The newer repeated ping updates `last_event_time`, `last_idempotency_key`, `updated_at`, and metadata.
 * `offline_count` is unchanged.
 
 ---
@@ -1370,17 +1508,138 @@ Verify that concurrent processing cannot create duplicate offline transitions.
 
 ### Steps
 
-1. Start with the persisted gateway state record locked state as `connected = true`.
+1. Start with `device_availability_state.current_state = online`.
 2. Deliver two disconnection messages for the same gateway concurrently.
 3. Query event storage.
 
 ### Expected result
 
-* Gateway state check and event insertion happen inside one database transaction.
-* The persisted gateway state record is locked by `serialNumber` while processing.
+* State check, idempotency check, event insertion, and state update happen inside one database transaction.
+* The `device_availability_state` row is locked by `serialNumber` while processing.
 * Exactly one offline event row is inserted.
-* The persisted gateway state record ends with `connected = false` and `lastContact` equal to the accepted disconnection timestamp.
+* The `device_availability_state` row ends with `current_state = offline` and `last_event_time` equal to the accepted disconnection source timestamp.
 * Offline count is `1`.
+
+---
+
+## TC-AVAIL-028A: Two first disconnections race when no state row exists
+
+### Objective
+
+Verify that first-row creation is concurrency-safe and does not rely on locking a nonexistent row with only `SELECT ... FOR UPDATE`.
+
+### Preconditions
+
+* No `device_availability_state` row exists for the gateway.
+* No availability event exists for the gateway.
+
+### Steps
+
+1. Deliver two disconnection messages for the same gateway concurrently.
+2. Force both consumers to attempt state initialization.
+3. Query `device_availability_state` and `device_availability_events`.
+
+### Expected result
+
+* The implementation uses an atomic first-row mechanism, such as `INSERT ... ON CONFLICT`, a PostgreSQL advisory transaction lock, or a serializable transaction with retry.
+* Exactly one `device_availability_state` row exists.
+* Exactly one offline transition row exists.
+* The final state is `current_state = offline`.
+
+---
+
+## TC-AVAIL-028B: Opposite-state events arriving concurrently are serialized
+
+### Objective
+
+Verify deterministic state when an offline and online source event are processed concurrently.
+
+### Preconditions
+
+* `device_availability_state.current_state = online`.
+* Existing `last_event_time = 12:00`.
+
+### Steps
+
+1. Deliver an offline source event at `12:03`.
+2. Deliver an online source event at `12:04` concurrently.
+3. Query `device_availability_state` and transition history.
+
+### Expected result
+
+* State-row locking or equivalent serializes processing by `serialNumber`.
+* Both events are processed in source-time order or retried until that ordering is respected.
+* Final `device_availability_state.current_state = online`.
+* Transition history contains one `offline` event at `12:03` and one `online` event at `12:04`.
+
+---
+
+## TC-AVAIL-028C: Event insert and state update roll back together
+
+### Objective
+
+Verify atomicity when the transition event insert succeeds but the state update fails.
+
+### Steps
+
+1. Start from `device_availability_state.current_state = online`.
+2. Inject a failure after inserting the offline event but before updating `device_availability_state`.
+3. Roll back the transaction.
+4. Query both availability tables.
+
+### Expected result
+
+* No offline transition row remains after rollback.
+* `device_availability_state` remains unchanged.
+* A retry can process the same logical event exactly once.
+
+---
+
+## TC-AVAIL-028D: State update and event insert roll back together
+
+### Objective
+
+Verify atomicity when state mutation would succeed but event insertion fails.
+
+### Steps
+
+1. Start from `device_availability_state.current_state = online`.
+2. Inject an event insert failure for a newer offline transition.
+3. Query both availability tables.
+
+### Expected result
+
+* `device_availability_state` remains `online`.
+* `last_event_time` does not advance.
+* No offline event is counted.
+
+---
+
+## TC-AVAIL-028E: Restart and multiple replicas use persisted state
+
+### Objective
+
+Verify that transition detection does not depend on in-memory `DeviceInfo` state.
+
+### Steps
+
+1. Process a disconnection and commit:
+
+```text
+device_availability_state.current_state = offline
+last_event_time = 12:10
+```
+
+2. Restart Analytics or route the next message to another Analytics replica.
+3. Process a recovery ping at `12:15`.
+4. Query availability storage.
+
+### Expected result
+
+* The new process or replica loads `device_availability_state`.
+* One online transition event is inserted.
+* `device_availability_state.current_state = online`.
+* No duplicate offline event is created after restart.
 
 ---
 
@@ -1390,33 +1649,81 @@ Verify that concurrent processing cannot create duplicate offline transitions.
 
 ### Objective
 
-Verify that an event older than the persisted gateway state record's `lastContact` cannot change availability history.
+Verify that an event older than `device_availability_state.last_event_time` cannot change availability history.
 
 ### Steps
 
-1. Set the persisted gateway state record to:
+1. Set `device_availability_state` to:
 
 ```text
-connected = true
-lastContact = 12:10
-lastPing = 12:10
+current_state = online
+last_event_time = 12:10
+last_idempotency_key = ping-1210
 ```
 
 2. Deliver a delayed `disconnection` message for the same gateway at `12:05`.
-3. Query the persisted gateway state record.
+3. Query `device_availability_state`.
 4. Query `device_availability_events`.
 
 ### Expected result
 
 * The stale `12:05` event is ignored.
 * No offline event row is inserted.
-* The persisted gateway state record remains:
+* `device_availability_state` remains:
 
 ```text
-connected = true
-lastContact = 12:10
-lastPing = 12:10
+current_state = online
+last_event_time = 12:10
+last_idempotency_key = ping-1210
 ```
+
+---
+
+## TC-AVAIL-029A: Equal timestamp without tie-breaker is non-advancing
+
+### Objective
+
+Verify that an opposite-state message with the same source timestamp does not create an arbitrary transition.
+
+### Steps
+
+1. Set `device_availability_state` to:
+
+```text
+current_state = online
+last_event_time = 12:10
+last_idempotency_key = ping-1210
+```
+
+2. Deliver a disconnection for the same gateway with `event_time = 12:10` and no reliable source sequence.
+3. Query `device_availability_state` and `device_availability_events`.
+
+### Expected result
+
+* The disconnection is treated as duplicate or non-advancing.
+* No offline transition event is inserted.
+* `device_availability_state` remains unchanged.
+
+---
+
+## TC-AVAIL-029B: Equal timestamp with deterministic source sequence is ordered
+
+### Objective
+
+Verify behavior when the source provides a reliable tie-breaker for same-timestamp events.
+
+### Steps
+
+1. Set `device_availability_state` to an online event at `12:10` with source sequence `10`.
+2. Deliver a disconnection for the same gateway at `12:10` with source sequence `11`.
+3. Query availability storage.
+
+### Expected result
+
+* The implementation accepts the disconnection only if the source sequence is documented as reliable.
+* One offline transition event is inserted.
+* `device_availability_state.current_state = offline`.
+* `last_event_time` remains `12:10`, and metadata records the accepted tie-breaker.
 
 ---
 
@@ -1429,25 +1736,68 @@ Verify that a first observed `disconnection` message creates an offline transiti
 ### Preconditions
 
 * No availability event exists for the gateway.
-* The persisted gateway state record has:
-
-```text
-connected = true
-lastContact < disconnection timestamp
-```
+* No `device_availability_state` row exists for the gateway.
 
 ### Steps
 
 1. Deliver a `disconnection` message.
-3. Query `device_availability_events`.
-4. Call availability-summary for a window containing the event.
+2. Query `device_availability_events`.
+3. Call availability-summary for a window containing the event.
 
 ### Expected result
 
 * One `offline` event row is inserted.
 * The event uses the gateway `serialNumber`.
-* The persisted gateway state record is updated to `connected = false`.
+* A `device_availability_state` row is created with `current_state = offline` and `last_event_time` equal to the disconnection source timestamp.
 * `offline_count` is `1`.
+
+---
+
+## TC-AVAIL-030A: Delayed but source-newer event is accepted
+
+### Objective
+
+Verify that Kafka delivery delay does not cause a valid source-newer event to be rejected by processing-time `lastContact`.
+
+### Steps
+
+1. Process a ping with:
+
+```text
+source event_time = 12:00
+processed/contact time = 12:05
+```
+
+2. Confirm `device_availability_state` has:
+
+```text
+current_state = online
+last_event_time = 12:00
+updated_at = 12:05 or equivalent processing timestamp
+```
+
+3. Process a delayed disconnection with:
+
+```text
+source event_time = 12:03
+processed/contact time = 12:06
+```
+
+4. Query `device_availability_state` and `device_availability_events`.
+
+### Expected result
+
+* The disconnection is accepted because `12:03 > last_event_time 12:00`.
+* The implementation does not compare `12:03` against processing-time `DeviceInfo.lastContact = 12:05`.
+* One `offline` event row is inserted with `event_time = 12:03`.
+* `device_availability_state` ends with:
+
+```text
+current_state = offline
+last_event_time = 12:03
+updated_at = 12:06 or equivalent processing timestamp
+last_idempotency_key = disconnection idempotency key
+```
 
 ---
 
@@ -1484,7 +1834,6 @@ Verify that online transition rows do not affect `offline_count`.
 1. Store this event sequence for one gateway:
 
 ```text
-12:00 online
 12:10 offline
 12:15 online
 12:30 offline
@@ -1534,7 +1883,7 @@ sudo shutdown -h now
 ### Expected event sequence
 
 ```text
-Initial ping                 → online event
+Initial ping                 → initialize online state, no event
 Device shutdown             → offline event 1
 Device remains shut down    → no new event
 Device powers on            → online event
@@ -2125,7 +2474,7 @@ Two 5 GHz radios publish valid temperatures.
 
 ### Expected result
 
-* Only samples where `startTime <= sample_time < endTime` are included.
+* Only samples where `effective_start_time <= sample_time < endTime` are included, where `effective_start_time = max(startTime, temperature_migration_cutover_time)`.
 
 ---
 
@@ -3179,15 +3528,12 @@ offline_count
 
 ---
 
-## TC-CONTRACT-006: Bounded client summary arrays
+## TC-CONTRACT-006: Client summary array shape
 
 ### Expected result
 
 * Usage and RSSI summary responses are arrays, not wrapper objects.
-* Each response contains at most 500 client summary items.
-* Results are ordered by normalized client MAC address ascending before the 500-client cap is applied.
-* If more than 500 clients match, the response contains the first 500 clients in that deterministic order.
-* The endpoints do not accept or require `limit` or `cursor` query parameters.
+* The endpoints do not define `limit`, `cursor`, `totalClients`, or `truncated` response behavior unless those fields are added to the API contract first.
 
 ---
 
@@ -3254,7 +3600,7 @@ The PR implementation is functionally accepted when:
 12. RSSI thresholds and boundary values are classified correctly.
 13. Invalid RSSI values are ignored.
 14. RSSI percentages are calculated per client.
-15. Usage and RSSI client-summary arrays are ordered by normalized MAC address and capped at 500 clients.
+15. Usage and RSSI client-summary responses use the documented array shape and do not invent pagination or truncation fields.
 16. Gateway shutdown and network loss create one offline transition each.
 17. Repeated pings and disconnections do not create duplicate transitions.
 18. Availability events remain queryable after board reassignment.

@@ -32,6 +32,8 @@ Internal storage field: serialNumber
 serialNumber = routerId
 ```
 
+Public `routerId` validation should require the supported OWPROV gateway serial form: 12 to 29 hexadecimal characters, for example `dc6279652334`. This intentionally rejects path dot-segments such as `.` and `..`, path separators, UUID punctuation, and punctuation-only values before OWPROV ownership resolution. After syntax validation, OWPROV ownership resolution determines whether the serial exists and belongs to the caller's scope.
+
 The Analytics API should calculate the requested time range as:
 
 ```text
@@ -112,18 +114,21 @@ per-segment actual sample timestamps are included only when
 
 ### Time Conversion and Validation
 
-The public MCP-facing parameters use ISO-8601/RFC3339 time, but the existing Analytics API style uses integer `fromDate` and `endDate` timestamps. Handlers should convert the request as:
+The public MCP-facing parameters use ISO-8601/RFC3339 UTC time, but the existing Analytics API style uses integer `fromDate` and `endDate` timestamps. Handlers should convert the request as:
 
 ```text
-timestampTill: RFC3339 UTC string, for example 2026-07-27T12:00:00Z
+timestampTill: RFC3339 UTC string ending with 'Z', for example 2026-07-27T12:00:00Z
 endTime:       Unix epoch seconds parsed from timestampTill
 startTime:     endTime - (lookbackHours * 3600)
 ```
 
+Timezone Requirement:
+`timestampTill` MUST use the UTC `Z` suffix format (e.g., `2026-07-27T12:00:00Z`). Explicit numeric timezone offsets (such as `+05:30` or `-08:00`) and timestamps without a timezone designator are unsupported and MUST be rejected with `400 Bad Request` and `error: "invalid_timestamp"`.
+
 Validation rules:
 
 ```text
-timestampTill must parse as a valid timestamp.
+timestampTill must parse as a valid UTC timestamp ending with 'Z'.
 lookbackHours must be greater than 0.
 maxLookbackHours = floor(configured monitoringDuration / 3600).
 lookbackHours must be less than or equal to maxLookbackHours.
@@ -134,7 +139,7 @@ All APIs in this document derive `maxLookbackHours` from the configured `monitor
 
 For a one-year monitoring configuration, `maxLookbackHours` is `365 * 24` only when the configured monitoring duration is exactly 365 days. Do not assume every calendar year is 8760 hours; use the configured duration and effective retention timestamps when validating the request.
 
-Return `400 Bad Request` for invalid timestamps, unsupported timezones, non-positive `lookbackHours`, or values above the applicable maximum. Internally, query `timepoints.timestamp` and `wificlienthistory.timestamp` using epoch seconds.
+Return `400 Bad Request` with `error: "invalid_timestamp"` for invalid timestamps, unsupported timezone formats/offsets, non-positive `lookbackHours`, or values above the applicable maximum. Internally, query `timepoints.timestamp` and `wificlienthistory.timestamp` using epoch seconds.
 
 ### Monitoring Configuration
 
@@ -681,6 +686,12 @@ Return:
   avg_memfree = sum(memory_free samples) / sample_count
 ```
 
+Memory values are bytes and must be nonnegative. For successful responses with samples, the invariant is:
+
+```text
+min_memfree <= avg_memfree <= max_memfree
+```
+
 Do not query `device_timepoints.memory_free` unless a separate normalized table and migration are introduced.
 
 ### Handler Flow
@@ -773,6 +784,8 @@ Analytics should store a nullable Wi-Fi temperature value per radio:
 radios[].band
 radios[].wifi_temp
 ```
+
+`radios[].wifi_temp` and all `*_wifi_temp_*` response fields use degrees Celsius.
 
 Required ingestion rule:
 
@@ -1346,6 +1359,7 @@ samples between start_sample and end_sample:
 data_consume_rx = SUM(stream rx_bytes segment differentials or lower-bound deltas)
 data_consume_tx = SUM(stream tx_bytes segment differentials or lower-bound deltas)
 total_data_usage = data_consume_rx + data_consume_tx
+total_bytes = rx_bytes + tx_bytes
 
 stream accuracy =
   exact when the segment has authoritative counter evidence at effective_start
@@ -1374,6 +1388,8 @@ segment objects. When `includeCalculationDetails=true`, the detailed
 `calculation_segments[]` array must satisfy the same byte-sum invariants. If
 any segment contributing to a station MAC is lower_bound, that station's usage
 is lower_bound.
+
+Client MAC values in API responses must be normalized colon-separated MAC addresses matching `^[A-Fa-f0-9]{2}(:[A-Fa-f0-9]{2}){5}$`.
 
 Usage accuracy contract:
 
@@ -1579,7 +1595,7 @@ A client moving between BSSIDs should remain one client in the final response un
 
 ### Unit Conversion
 
-The MCP output expects strings such as:
+The API returns raw byte counters plus display-only strings such as:
 
 ```text
 106.49 MB
@@ -1786,6 +1802,8 @@ poor_pct      = poor_count × 100 / total_samples
 
 Round percentages to two decimal places.
 
+The four percentage fields are constrained to `0 <= value <= 100`. Because each percentage is independently rounded to two decimal places, the four values may sum to slightly below or above exactly `100`.
+
 ### Current Storage Aggregation Logic
 
 ```text
@@ -1906,8 +1924,6 @@ Add a dedicated storage class for availability events:
 ```text
 src/storage/storage_device_availability_events.h
 src/storage/storage_device_availability_events.cpp
-src/storage/storage_device_availability_state.h
-src/storage/storage_device_availability_state.cpp
 ```
 
 Required ORM fields and indexes:
@@ -1983,6 +1999,10 @@ Constraints:
   current_state must be one of: online, offline, unknown
 ```
 
+`device_availability_events` stores only online/offline transition history. `device_availability_state` stores the authoritative current state and the latest accepted source availability event time.
+
+`last_event_time` is the source-event ordering watermark. It must be populated from the normalized Kafka source timestamp (`event_time`) and used for stale/out-of-order detection. `DeviceInfo.lastContact` may remain local contact or processing metadata, but it must not be used to order source events because Kafka delivery can be delayed.
+
 Add a `DeviceAvailabilityEvent` REST/storage object with `to_json` and `from_json` support in:
 
 ```text
@@ -2049,23 +2069,28 @@ On ping/capabilities:
 Do not store online events for every ping.
 ```
 
-Bootstrap rule when no persisted state exists:
+Bootstrap rule when no `device_availability_state` row exists:
 
 ```text
 First observed disconnection:
   insert one offline event
-  set current_state = offline
+  insert state row with current_state = offline
+  set last_event_time = event_time
+  set last_idempotency_key = idempotency_key
 
 First observed ping/capabilities:
-  set current_state = online
-  do not insert an online event
+  insert state row with current_state = online
+  set last_event_time = event_time
+  set last_idempotency_key = idempotency_key
+  do not insert an online transition event
 
 First observed unrecognized connection message:
-  set current_state = unknown
+  insert or update state row with current_state = unknown only when useful
+  set last_event_time only from a valid source timestamp
   do not insert a counted event
 ```
 
-In-memory transition checking is only an optimization. It is not sufficient for correctness because Kafka can redeliver messages and the service can restart after losing in-memory state. Transition detection must use `device_availability_state` or derive the latest known state from `device_availability_events` under the same transaction before writing. Duplicate connection messages must be rejected by storage-level idempotency before they can affect `offline_count`.
+In-memory transition checking is only an optimization. It is not sufficient for correctness because Kafka can redeliver messages and the service can restart after losing in-memory state. Transition detection must use `device_availability_state.current_state` and `device_availability_state.last_event_time` under the same transaction before writing `device_availability_events`. Duplicate connection messages must be rejected by source timestamp validation and storage-level idempotency before they can affect `offline_count`.
 
 Normalize connection messages before transition processing:
 
@@ -2138,6 +2163,20 @@ Else:
 
 Treat `uuid` as a source event id only if it is stable for the same logical connection message across Kafka redelivery and unique within the source namespace identified by `system.host` and `system.id`. If `uuid` is only a random per-delivery value, do not use it as `source_event_id`.
 
+Example for exact Kafka redelivery protection, after verifying that `payload.ping.uuid` remains stable for the same logical redelivered message:
+
+```text
+hash(
+  system.host +
+  system.id +
+  serialNumber +
+  message_type +
+  payload.ping.uuid
+)
+```
+
+Do not use `system.id` alone as the logical event id; it identifies the producing system, not one individual ping.
+
 Minimum fields for derived idempotency keys:
 
 ```text
@@ -2178,48 +2217,75 @@ Atomic transition and insert rule:
 
 ```text
 For each valid connection message:
-  begin transaction
-  load the persisted state row for serialNumber with write/transaction isolation
+  BEGIN
+
+  acquire a serialNumber-scoped transaction lock before reading state
+  load device_availability_state row for serialNumber with write isolation
   if no state row exists:
+    atomically create or lock the serialNumber state slot using one of:
+      INSERT ... ON CONFLICT ... DO UPDATE/NOTHING followed by SELECT ... FOR UPDATE
+      PostgreSQL advisory transaction lock
+      serializable transaction with retry
     treat previous state as unknown
-  determine the new state from the message
-  if state row exists and event_time is older than last_event_time:
+
+  if event_time < last_event_time:
     treat the message as stale
     do not insert an availability event
     do not update device_availability_state
-    commit transaction
+    COMMIT
     stop processing this message
-  if state row exists and event_time equals last_event_time and no reliable tie-breaker proves this event is later:
+
+  if event_time == last_event_time and no deterministic source tie-breaker proves this message is later:
     treat the message as duplicate or non-advancing
-    do not insert a counted availability event
+    do not insert an availability event
     do not update device_availability_state
-    commit transaction
+    COMMIT
     stop processing this message
-  if previous state is unknown:
-    if new state is offline:
-      insert one offline event with conflict-safe semantics
+
+  determine incomingState from message_type:
+    ping or capabilities -> online
+    disconnection -> offline
+
+  if incomingState is online:
+    if current_state is offline:
+      INSERT online transition event with conflict-safe semantics
+      if the insert created a row:
+        update device_availability_state:
+          current_state = online
+          last_event_time = event_time
+          last_idempotency_key = idempotency_key
+          updated_at = processing time
+      else:
+        treat as duplicate and do not update state
+    else if current_state is online:
+      update device_availability_state metadata, last_event_time, last_idempotency_key, and updated_at
+      do not insert a transition event
+    else:
+      update device_availability_state to online and last_event_time
+      do not insert an initial online transition event
+
+  if incomingState is offline:
+    if current_state is online:
+      INSERT offline transition event with conflict-safe semantics
+      if the insert created a row:
+        update device_availability_state:
+          current_state = offline
+          last_event_time = event_time
+          last_idempotency_key = idempotency_key
+          updated_at = processing time
+      else:
+        treat as duplicate and do not update state
+    else if current_state is offline:
+      update device_availability_state metadata, last_event_time, last_idempotency_key, and updated_at
+      do not insert a transition event
+    else:
+      INSERT offline transition event with conflict-safe semantics
       if the insert created a row:
         update device_availability_state to offline and last_event_time
       else:
-        do not update device_availability_state
-    else if new state is online:
-      update device_availability_state to online and last_event_time
-      do not insert an online event
-    else:
-      update device_availability_state to unknown and last_event_time
-      do not insert a counted event
-  else if previous state differs from new state:
-    insert availability event with conflict-safe semantics:
-      INSERT ... ON CONFLICT(idempotency_key) DO NOTHING
-    if the insert created a row:
-      update device_availability_state to the new state and last_event_time
-    else:
-      treat it as a duplicate
-      do not update device_availability_state
-  else if previous state equals new state:
-    update last contact metadata only when event_time is newer than last_event_time
-    do not insert a counted transition event
-  commit transaction
+        do not update state
+
+  COMMIT
 
 or the equivalent database-specific "insert if absent" operation.
 
@@ -2228,20 +2294,45 @@ the unique idempotency constraint must not be treated as new offline transitions
 must not move `device_availability_state` backward or forward.
 ```
 
+Equivalent transaction shape:
+
+```text
+BEGIN;
+
+Acquire a serialNumber-scoped transaction lock.
+Atomically create or lock the device_availability_state row for :serialNumber.
+Read:
+  current_state
+  last_event_time
+  last_idempotency_key
+
+-- Validate timestamp and determine whether state changed.
+-- Insert into device_availability_events only if state changed.
+
+Update device_availability_state only when timestamp and idempotency checks allow it:
+  current_state = :newState
+  last_event_time = :eventTime
+  last_idempotency_key = :idempotencyKey
+  updated_at = :processingTime
+  board_id = :boardId when known, otherwise keep existing or NULL according to metadata policy
+  metadata = source and processing metadata
+
+COMMIT;
+```
+
 Staleness rule:
 
 ```text
-An event is stale when its event_time is older than the persisted state's
-last_event_time for the same serialNumber. An event with the same event_time is
-non-advancing unless a deterministic source tie-breaker proves it happened later.
+An event is stale when its source event_time is older than the persisted
+device_availability_state.last_event_time for the same serialNumber.
 
 Stale or non-advancing events must not insert counted availability events and must
 not update device_availability_state, even if their idempotency_key has not been
 seen before.
 
-For equal timestamps, use deterministic tie-breakers if the source provides them.
-If no reliable tie-breaker exists, process at most one state-changing event for that
-serialNumber and timestamp.
+An event with the same event_time is non-advancing unless a deterministic source
+tie-breaker proves it occurred later. Exact Kafka redelivery should be ignored by
+the idempotency key.
 ```
 
 ### Store Only State Transitions
@@ -2259,7 +2350,57 @@ Incorrect:
 every ping → store online event
 ```
 
-Every ping should not be treated as a new online transition.
+Every ping should not be treated as a new online transition. However, every newer source ping must still update `device_availability_state.last_event_time` and metadata.
+
+Ping handling:
+
+```text
+current_state=online  + ping -> update last_event_time and metadata only
+current_state=offline + ping after a prior offline state -> insert online event, set current_state=online, update last_event_time
+no state row + ping -> create current_state=online, update last_event_time, do not insert an online event
+```
+
+Disconnection handling:
+
+```text
+current_state=online  + disconnection -> insert offline event, set current_state=offline, update last_event_time
+current_state=offline + disconnection -> update last_event_time and metadata only when the source message is newer; do not insert another offline event
+no state row + disconnection -> create current_state=offline, update last_event_time, insert one offline event
+```
+
+Example:
+
+```text
+12:00 first ping initializes current_state=online with no transition event
+12:10 ping received
+```
+
+At `12:10`, no new event is inserted, but `device_availability_state` becomes:
+
+```text
+current_state = online
+last_event_time = 12:10
+updated_at = processing time for the 12:10 ping
+```
+
+If a delayed disconnection with source time `12:05` then arrives, it is ignored because `12:05 < last_event_time 12:10`, regardless of when Analytics processes the delayed Kafka message.
+
+Kafka delay example:
+
+```text
+Ping source time:          12:00
+Ping processed:            12:05
+Disconnection source time: 12:03
+Disconnection processed:   12:06
+```
+
+The `12:03` disconnection is not stale because it is newer than `device_availability_state.last_event_time = 12:00`. It must not be rejected by comparing against processing-time `DeviceInfo.lastContact = 12:05`.
+
+Review conclusion:
+
+```text
+The implementation requires `device_availability_state` unless a future design explicitly names an existing persistent table with the same fields and locking guarantees. `last_event_time` must be updated for every newer ping, capabilities, or disconnection message, even when no availability transition event is inserted. `DeviceInfo.lastContact` remains contact/processing metadata and is not the source-event ordering field.
+```
 
 ### Calculation
 
@@ -2339,7 +2480,7 @@ Use an HTTP error:
 }
 ```
 
-Do not return `fetch_status: failed` with HTTP 200 for internal failures.
+HTTP 200 represents a successful retrieval. Do not return a success-shaped HTTP 200 response for internal failures; return the appropriate HTTP error instead.
 
 ---
 
@@ -2386,7 +2527,9 @@ Add objects:
 struct GatewayMemorySummary;
 struct GatewayWifiTemperatureSummary;
 struct ClientBandwidthConsumption;
+struct ClientBandwidthConsumptionResponse;
 struct ClientRssiQuality;
+struct ClientRssiQualityResponse;
 struct GatewayOfflineSummary;
 ```
 
@@ -2521,7 +2664,7 @@ bool GetGatewayAvailabilitySummary(...);
 | `get_gateway_wifi_temp` | `GET /devices/{routerId}/radio-temperature-summary` | `timepoints.radio_data[].wifi_temp` | Resolve routerId to venueId and boardId, then aggregate present Wi-Fi temperature samples from `timepoints` |
 | `get_device_bandwidth_consumption` | `GET /devices/{routerId}/wifi-clients/usage-summary` | `timepoints.ssid_data[].associations[]` | Resolve routerId to venueId and boardId, then calculate reset-safe cumulative-counter differentials with concise quality metadata by default; include segment provenance only when `includeCalculationDetails=true` |
 | `get_device_rssi_quality` | `GET /devices/{routerId}/wifi-clients/rssi-summary` | `timepoints.ssid_data[].associations[].rssi` | Resolve routerId to venueId and boardId, then classify RSSI samples |
-| `get_gateway_offline_count` | `GET /devices/{routerId}/availability-summary` | Existing gateway `connection` topic plus `device_availability_events` | Use routerId as durable serialNumber, persist restart-safe state transitions, then count offline events by serialNumber |
+| `get_gateway_offline_count` | `GET /devices/{routerId}/availability-summary` | Existing gateway `connection` topic plus `device_availability_events` and `device_availability_state` | Use routerId as durable serialNumber, use `device_availability_state.current_state` and `last_event_time` for restart-safe transition detection, then count offline events by serialNumber |
 
 ---
 
