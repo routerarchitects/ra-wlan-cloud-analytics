@@ -1582,10 +1582,38 @@ Verify deterministic state when an offline and online source event are processed
 
 ### Expected result
 
-* State-row locking or equivalent serializes processing by `serialNumber`.
-* Both events are processed in source-time order or retried until that ordering is respected.
-* Final `device_availability_state.current_state = online`.
-* Transition history contains one `offline` event at `12:03` and one `online` event at `12:04`.
+* State-row locking or equivalent serializes processing by `serialNumber`, but it does not sort messages by source `event_time`.
+* Either processing-order outcome is valid under the watermark design:
+
+```text
+Outcome 1:
+  12:03 offline processes first
+  offline transition event is inserted
+  device_availability_state.current_state = offline
+  last_event_time = 12:03
+
+  12:04 online processes second
+  online transition event is inserted
+  device_availability_state.current_state = online
+  last_event_time = 12:04
+
+Outcome 2:
+  12:04 online processes first
+  same-state online message updates last_event_time to 12:04
+  no transition event is inserted
+
+  12:03 offline processes second
+  offline message is rejected as stale because 12:03 < last_event_time 12:04
+  no transition event is inserted
+```
+
+* In both outcomes:
+  * Final `device_availability_state.current_state = online`.
+  * Final `last_event_time = 12:04`.
+  * State never moves backward.
+  * No duplicate transition events are inserted.
+  * State and event writes are atomic.
+* Outcome 2 can undercount a short outage. Preventing that undercount would require an additional ordering guarantee such as Kafka key ordering, an event-time reorder buffer, or another explicitly defined source-ordering mechanism.
 
 ---
 
