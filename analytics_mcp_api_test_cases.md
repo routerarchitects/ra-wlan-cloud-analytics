@@ -179,6 +179,30 @@ GET /api/v1/devices/unknown-router/memory-summary
 
 ---
 
+## TC-COMMON-005A: Router ID syntax boundaries
+
+### Objective
+
+Verify the public `routerId` contract: 12 to 29 hexadecimal characters only. Syntax validation runs before OWPROV ownership resolution.
+
+### Requests and expected results
+
+| routerId path segment | Expected result |
+| --- | --- |
+| `abcdef12345` | HTTP `400 Bad Request`, `error: "invalid_router_id"` because the value has 11 hex characters. |
+| `abcdef123456` | Syntax is accepted. If the gateway does not exist or is outside scope, return HTTP `404 Not Found`, `error: "not_found"`. |
+| `abcdef123456abcdef123456abcde` | Syntax is accepted. If the gateway does not exist or is outside scope, return HTTP `404 Not Found`, `error: "not_found"`. |
+| `abcdef123456abcdef123456abcdef` | HTTP `400 Bad Request`, `error: "invalid_router_id"` because the value has 30 hex characters. |
+| `ABCDEF123456` | Syntax is accepted. If the gateway does not exist or is outside scope, return HTTP `404 Not Found`, `error: "not_found"`. |
+| `abcdef12345G` | HTTP `400 Bad Request`, `error: "invalid_router_id"` because `G` is not hexadecimal. |
+| `.` | Handler-level validation returns HTTP `400 Bad Request`, `error: "invalid_router_id"`. End-to-end route tests may observe framework-level rejection first if the server normalizes dot-segments, but OWPROV lookup must not run. |
+| `..` | Handler-level validation returns HTTP `400 Bad Request`, `error: "invalid_router_id"`. End-to-end route tests may observe framework-level rejection first if the server normalizes dot-segments, but OWPROV lookup must not run. |
+| `abc%2Fdef123456` | Rejected before OWPROV lookup. Encoded path separators must not be decoded into a router ID that reaches ownership resolution. |
+
+For all rejected syntax cases, OWPROV ownership lookup and metric aggregation are not executed.
+
+---
+
 ## TC-COMMON-006: Router inventory has no venue
 
 ### Preconditions
@@ -272,7 +296,7 @@ Verify that non-UTC timezone formats, explicit numeric timezone offsets, or miss
 
 ```http
 GET /api/v1/devices/60cf84f22290/memory-summary
-    ?timestampTill=2026-07-29T12:00:00+05:30
+    ?timestampTill=2026-07-29T12:00:00%2B05:30
     &lookbackHours=24
 ```
 
@@ -297,6 +321,28 @@ GET /api/v1/devices/60cf84f22290/memory-summary
 ```
 
 * OWPROV ownership lookup and metric aggregation are not executed.
+
+---
+
+## TC-COMMON-011A: Literal unencoded plus in timestamp is malformed
+
+### Objective
+
+Verify that a literal `+` in a query string is not treated as a valid numeric timezone offset. HTTP frameworks commonly decode `+` as a space in query parameters.
+
+### Request
+
+```http
+GET /api/v1/devices/60cf84f22290/memory-summary
+    ?timestampTill=2026-07-29T12:00:00+05:30
+    &lookbackHours=24
+```
+
+### Expected result
+
+* HTTP `400 Bad Request`.
+* Error is `invalid_timestamp`.
+* The encoded numeric-offset case in `TC-COMMON-011` is still required to prove valid RFC3339 numeric offsets are intentionally unsupported.
 
 ---
 
@@ -330,7 +376,7 @@ GET /api/v1/devices/60cf84f22290/memory-summary
 ### Expected result
 
 * HTTP `400 Bad Request`.
-* Error is `invalid_lookback`, not `invalid_timestamp`.
+* Error is `invalid_lookback_hours`, not `invalid_timestamp`.
 
 ---
 
@@ -346,7 +392,7 @@ GET /api/v1/devices/60cf84f22290/memory-summary
 ### Expected result
 
 * HTTP `400 Bad Request`.
-* Error is `invalid_lookback`, not `invalid_timestamp`.
+* Error is `invalid_lookback_hours`, not `invalid_timestamp`.
 
 ---
 
@@ -362,7 +408,7 @@ GET /api/v1/devices/60cf84f22290/memory-summary
 ### Expected result
 
 * HTTP `400 Bad Request`.
-* Error is `invalid_lookback`, not `invalid_timestamp`.
+* Error is `invalid_lookback_hours`, not `invalid_timestamp`.
 * Error message may indicate that the maximum supported lookback was exceeded.
 
 ---
@@ -393,7 +439,109 @@ GET /api/v1/devices/60cf84f22290/memory-summary
 ### Expected result
 
 * HTTP `400 Bad Request`.
-* Error is `invalid_lookback`, not `invalid_timestamp`.
+* Error is `invalid_lookback_hours`, not `invalid_timestamp`.
+
+---
+
+## TC-COMMON-017A: Non-numeric lookback
+
+### Request
+
+```http
+?timestampTill=2026-07-29T12:00:00Z
+&lookbackHours=abc
+```
+
+### Expected result
+
+* HTTP `400 Bad Request`.
+* Error is `invalid_lookback_hours`, not `invalid_timestamp`.
+* The value is not accepted as `0` or as a missing parameter.
+
+---
+
+## TC-COMMON-017B: Fractional lookback
+
+### Request
+
+```http
+?timestampTill=2026-07-29T12:00:00Z
+&lookbackHours=1.5
+```
+
+### Expected result
+
+* HTTP `400 Bad Request`.
+* Error is `invalid_lookback_hours`, not `invalid_timestamp`.
+* `lookbackHours` must be parsed as a strict whole decimal integer.
+
+---
+
+## TC-COMMON-017C: Partially numeric lookback
+
+### Request
+
+```http
+?timestampTill=2026-07-29T12:00:00Z
+&lookbackHours=24hours
+```
+
+### Expected result
+
+* HTTP `400 Bad Request`.
+* Error is `invalid_lookback_hours`, not `invalid_timestamp`.
+* Parsers must reject partial conversions such as `atoi("24hours") == 24`.
+
+---
+
+## TC-COMMON-017D: Empty lookback
+
+### Request
+
+```http
+?timestampTill=2026-07-29T12:00:00Z
+&lookbackHours=
+```
+
+### Expected result
+
+* HTTP `400 Bad Request`.
+* Error is `invalid_lookback_hours`, not `invalid_timestamp`.
+
+---
+
+## TC-COMMON-017E: Overflowing lookback
+
+### Request
+
+```http
+?timestampTill=2026-07-29T12:00:00Z
+&lookbackHours=999999999999999999999
+```
+
+### Expected result
+
+* HTTP `400 Bad Request`.
+* Error is `invalid_lookback_hours`, not `invalid_timestamp`.
+* The value is rejected before integer overflow, wraparound, or truncation can affect range calculation.
+
+---
+
+## TC-COMMON-017F: Repeated lookback parameter
+
+### Request
+
+```http
+?timestampTill=2026-07-29T12:00:00Z
+&lookbackHours=24
+&lookbackHours=48
+```
+
+### Expected result
+
+* HTTP `400 Bad Request`.
+* Error is `invalid_lookback_hours`, not `invalid_timestamp`.
+* Repeated `lookbackHours` query parameters are ambiguous and must not be accepted by picking the first or last value.
 
 ---
 
@@ -686,9 +834,47 @@ updated_at >= processing time
 
 ```json
 {
-  "gw_uuid": "60cf84f22290",
-  "fetch_status": "success",
-  "offline_count": 0
+  "meta": {
+    "requestedWindow": {
+      "from": "<startTime>",
+      "till": "<endTime>"
+    },
+    "observedWindow": {
+      "firstSampleAt": null,
+      "lastSampleAt": null
+    },
+    "sourceWindow": {
+      "firstSampleAt": "<firstSourceAt>",
+      "lastSampleAt": "<lastSourceAt>"
+    },
+    "contributingWindow": {
+      "firstSampleAt": null,
+      "lastSampleAt": null
+    },
+    "selection": "boundary_assisted",
+    "coverage": "full",
+    "accuracy": "exact",
+    "sampleCount": 0,
+    "effectiveSamplingIntervalSeconds": 0,
+    "allowedGapSeconds": 0,
+    "boundarySamplesUsed": {
+      "beforeStart": true,
+      "atStart": false,
+      "atEnd": false,
+      "afterEnd": false
+    },
+    "availabilityCoverage": {
+      "coverageStart": "<= startTime",
+      "processedThrough": ">= endTime",
+      "ingestionGapKnown": false,
+      "proofSource": "serial_partition_checkpoint"
+    }
+  },
+  "data": {
+    "gw_uuid": "60cf84f22290",
+    "fetch_status": "success",
+    "offline_count": 0
+  }
 }
 ```
 
@@ -780,9 +966,47 @@ event_time = disconnection message timestamp
 
 ```json
 {
-  "gw_uuid": "60cf84f22290",
-  "fetch_status": "success",
-  "offline_count": 1
+  "meta": {
+    "requestedWindow": {
+      "from": "<startTime>",
+      "till": "<endTime>"
+    },
+    "observedWindow": {
+      "firstSampleAt": "<firstOfflineEventAt>",
+      "lastSampleAt": "<lastOfflineEventAt>"
+    },
+    "sourceWindow": {
+      "firstSampleAt": "<firstSourceAt>",
+      "lastSampleAt": "<lastSourceAt>"
+    },
+    "contributingWindow": {
+      "firstSampleAt": "<firstOfflineEventAt>",
+      "lastSampleAt": "<lastOfflineEventAt>"
+    },
+    "selection": "boundary_assisted",
+    "coverage": "full",
+    "accuracy": "exact",
+    "sampleCount": 1,
+    "effectiveSamplingIntervalSeconds": 0,
+    "allowedGapSeconds": 0,
+    "boundarySamplesUsed": {
+      "beforeStart": true,
+      "atStart": false,
+      "atEnd": false,
+      "afterEnd": false
+    },
+    "availabilityCoverage": {
+      "coverageStart": "<= startTime",
+      "processedThrough": ">= endTime",
+      "ingestionGapKnown": false,
+      "proofSource": "serial_partition_checkpoint"
+    }
+  },
+  "data": {
+    "gw_uuid": "60cf84f22290",
+    "fetch_status": "success",
+    "offline_count": 1
+  }
 }
 ```
 
@@ -949,9 +1173,47 @@ API result:
 
 ```json
 {
-  "gw_uuid": "60cf84f22290",
-  "fetch_status": "success",
-  "offline_count": 1
+  "meta": {
+    "requestedWindow": {
+      "from": "<startTime>",
+      "till": "<endTime>"
+    },
+    "observedWindow": {
+      "firstSampleAt": "<firstOfflineEventAt>",
+      "lastSampleAt": "<lastOfflineEventAt>"
+    },
+    "sourceWindow": {
+      "firstSampleAt": "<firstSourceAt>",
+      "lastSampleAt": "<lastSourceAt>"
+    },
+    "contributingWindow": {
+      "firstSampleAt": "<firstOfflineEventAt>",
+      "lastSampleAt": "<lastOfflineEventAt>"
+    },
+    "selection": "boundary_assisted",
+    "coverage": "full",
+    "accuracy": "exact",
+    "sampleCount": 1,
+    "effectiveSamplingIntervalSeconds": 0,
+    "allowedGapSeconds": 0,
+    "boundarySamplesUsed": {
+      "beforeStart": true,
+      "atStart": false,
+      "atEnd": false,
+      "afterEnd": false
+    },
+    "availabilityCoverage": {
+      "coverageStart": "<= startTime",
+      "processedThrough": ">= endTime",
+      "ingestionGapKnown": false,
+      "proofSource": "serial_partition_checkpoint"
+    }
+  },
+  "data": {
+    "gw_uuid": "60cf84f22290",
+    "fetch_status": "success",
+    "offline_count": 1
+  }
 }
 ```
 
@@ -1029,9 +1291,47 @@ The API returns:
 
 ```json
 {
-  "gw_uuid": "60cf84f22290",
-  "fetch_status": "success",
-  "offline_count": 3
+  "meta": {
+    "requestedWindow": {
+      "from": "<startTime>",
+      "till": "<endTime>"
+    },
+    "observedWindow": {
+      "firstSampleAt": "<firstOfflineEventAt>",
+      "lastSampleAt": "<lastOfflineEventAt>"
+    },
+    "sourceWindow": {
+      "firstSampleAt": "<firstSourceAt>",
+      "lastSampleAt": "<lastSourceAt>"
+    },
+    "contributingWindow": {
+      "firstSampleAt": "<firstOfflineEventAt>",
+      "lastSampleAt": "<lastOfflineEventAt>"
+    },
+    "selection": "boundary_assisted",
+    "coverage": "full",
+    "accuracy": "exact",
+    "sampleCount": 3,
+    "effectiveSamplingIntervalSeconds": 0,
+    "allowedGapSeconds": 0,
+    "boundarySamplesUsed": {
+      "beforeStart": true,
+      "atStart": false,
+      "atEnd": false,
+      "afterEnd": false
+    },
+    "availabilityCoverage": {
+      "coverageStart": "<= startTime",
+      "processedThrough": ">= endTime",
+      "ingestionGapKnown": false,
+      "proofSource": "serial_partition_checkpoint"
+    }
+  },
+  "data": {
+    "gw_uuid": "60cf84f22290",
+    "fetch_status": "success",
+    "offline_count": 3
+  }
 }
 ```
 
@@ -1294,6 +1594,11 @@ offline event = 16:00
 
 Verify successful empty results.
 
+### Preconditions
+
+* The requested range starts at or after `availabilityValidFrom`.
+* The cutover behavior for ranges beginning before `availabilityValidFrom` is covered by `TC-COMMON-023`.
+
 ### Steps
 
 1. Select a time range containing no offline events.
@@ -1301,15 +1606,125 @@ Verify successful empty results.
 
 ### Expected result
 
+* The response uses the top-level `meta` and `data` shape.
+* `meta.coverage = "full"`.
+* `meta.accuracy = "exact"`.
+* `meta.availabilityCoverage.coverageStart <= startTime`.
+* `meta.availabilityCoverage.processedThrough >= endTime`.
+* `meta.availabilityCoverage.ingestionGapKnown = false`.
+* `meta.availabilityCoverage.proofSource != "unavailable"`.
+* `data.gw_uuid = "60cf84f22290"`.
+* `data.fetch_status = "success"`.
+* `data.offline_count = 0`.
+
 ```json
 {
-  "gw_uuid": "60cf84f22290",
-  "fetch_status": "success",
-  "offline_count": 0
+  "meta": {
+    "requestedWindow": {
+      "from": "<startTime>",
+      "till": "<endTime>"
+    },
+    "observedWindow": {
+      "firstSampleAt": null,
+      "lastSampleAt": null
+    },
+    "sourceWindow": {
+      "firstSampleAt": "<firstSourceAt>",
+      "lastSampleAt": "<lastSourceAt>"
+    },
+    "contributingWindow": {
+      "firstSampleAt": null,
+      "lastSampleAt": null
+    },
+    "selection": "boundary_assisted",
+    "coverage": "full",
+    "accuracy": "exact",
+    "sampleCount": 0,
+    "effectiveSamplingIntervalSeconds": 0,
+    "allowedGapSeconds": 0,
+    "boundarySamplesUsed": {
+      "beforeStart": true,
+      "atStart": false,
+      "atEnd": false,
+      "afterEnd": false
+    },
+    "availabilityCoverage": {
+      "coverageStart": "<= startTime",
+      "processedThrough": ">= endTime",
+      "ingestionGapKnown": false,
+      "proofSource": "serial_partition_checkpoint"
+    }
+  },
+  "data": {
+    "gw_uuid": "60cf84f22290",
+    "fetch_status": "success",
+    "offline_count": 0
+  }
 }
 ```
 
-The API must not treat an empty result as an error.
+The API must not treat a full-coverage empty result as an error. Absence of
+matching offline rows is not enough by itself to prove an exact zero; if coverage
+is partial or unavailable, the response must use partial/lower-bound or no
+coverage semantics instead of reporting an exact zero.
+
+---
+
+## TC-AVAIL-018A: No offline events with partial ingestion coverage
+
+### Objective
+
+Verify that zero matching offline rows are not reported as an exact zero when the
+availability ingestion stream does not prove full interval coverage.
+
+### Preconditions
+
+* The requested range starts at or after `availabilityValidFrom`.
+* No `offline` rows match `[startTime, endTime)`.
+* `availabilityCoverage.processedThrough < endTime` or a known ingestion gap overlaps the requested range.
+
+### Steps
+
+1. Select a range with no matching offline rows.
+2. Set availability coverage proof to overlap only part of the requested range.
+3. Call the availability-summary API.
+
+### Expected result
+
+* HTTP `200 OK`.
+* `data.offline_count = 0`.
+* `meta.coverage = "partial"`.
+* `meta.accuracy = "lower_bound"`.
+* The response includes `meta.availabilityCoverage`.
+* The response must not describe the zero as exact full coverage.
+
+---
+
+## TC-AVAIL-018B: No offline events with unavailable ingestion coverage
+
+### Objective
+
+Verify that the API does not present a zero matching count as a meaningful
+interval result when no durable availability coverage proof exists.
+
+### Preconditions
+
+* No `offline` rows match `[startTime, endTime)`.
+* `availabilityCoverage.proofSource = "unavailable"` or no durable processed-through watermark exists.
+
+### Steps
+
+1. Select a range with no matching offline rows.
+2. Make availability coverage proof unavailable.
+3. Call the availability-summary API.
+
+### Expected result
+
+* HTTP `200 OK` when the storage query itself succeeds.
+* `meta.coverage = "none"`.
+* `meta.accuracy = "not_applicable"`.
+* `meta.availabilityCoverage.proofSource = "unavailable"`.
+* `data.offline_count` is not asserted as an exact outage count for the interval.
 
 ---
 
@@ -1328,9 +1743,17 @@ Requested lookback: 24 hours
 
 ### Expected result
 
-```text
-offline_count = 0
-```
+* The old event is excluded by the half-open requested window.
+* `data.offline_count = 0` only when the response proves full availability coverage.
+* `meta.coverage = "full"`.
+* `meta.accuracy = "exact"`.
+* `meta.availabilityCoverage.coverageStart <= startTime`.
+* `meta.availabilityCoverage.processedThrough >= endTime`.
+* `meta.availabilityCoverage.ingestionGapKnown = false`.
+* `meta.availabilityCoverage.proofSource != "unavailable"`.
+
+If these coverage assertions fail, the zero matching count must be reported using
+partial/lower-bound or no-coverage semantics instead of as an exact zero.
 
 ---
 
@@ -1381,7 +1804,7 @@ Verify that syntactically invalid router IDs (such as non-hexadecimal values or 
 
 ### Requests
 
-1. Handler-level validation requests (non-hexadecimal or invalid punctuation):
+1. Handler-level validation requests (length, non-hexadecimal, or invalid punctuation):
 
 ```http
 GET /api/v1/devices/unknown-router/availability-summary
@@ -1391,18 +1814,47 @@ GET /api/v1/devices/unknown-router/availability-summary
 GET /api/v1/devices/:::/availability-summary
     ?timestampTill=2026-07-29T12:00:00Z
     &lookbackHours=24
+
+GET /api/v1/devices/abcdef12345/availability-summary
+    ?timestampTill=2026-07-29T12:00:00Z
+    &lookbackHours=24
+
+GET /api/v1/devices/abcdef123456abcdef123456abcdef/availability-summary
+    ?timestampTill=2026-07-29T12:00:00Z
+    &lookbackHours=24
+
+GET /api/v1/devices/abcdef12345G/availability-summary
+    ?timestampTill=2026-07-29T12:00:00Z
+    &lookbackHours=24
 ```
 
-2. Framework / route-level security requests (path dot-segments):
+2. Syntax-accepted nonexistent values:
+
+```http
+GET /api/v1/devices/abcdef123456/availability-summary
+    ?timestampTill=2026-07-29T12:00:00Z
+    &lookbackHours=24
+
+GET /api/v1/devices/abcdef123456abcdef123456abcde/availability-summary
+    ?timestampTill=2026-07-29T12:00:00Z
+    &lookbackHours=24
+
+GET /api/v1/devices/ABCDEF123456/availability-summary
+    ?timestampTill=2026-07-29T12:00:00Z
+    &lookbackHours=24
+```
+
+3. Framework / route-level security requests (path dot-segments and encoded slash):
 
 ```http
 GET /api/v1/devices/./availability-summary
 GET /api/v1/devices/../availability-summary
+GET /api/v1/devices/abc%2Fdef123456/availability-summary
 ```
 
 ### Expected result
 
-* For handler-level validation requests (`unknown-router`, `:::`):
+* For handler-level validation requests (`unknown-router`, `:::`, 11 hex characters, 30 hex characters, non-hex `G`):
   * HTTP `400 Bad Request`.
   * Response resembles:
 
@@ -1416,9 +1868,15 @@ GET /api/v1/devices/../availability-summary
   * OWPROV resolution is not called.
   * No availability query is executed.
 
-* For framework / route-level dot-segment requests (`.`, `..`):
-  * Requests are normalized or rejected by the HTTP server/framework layer before reaching the handler.
-  * Dot-segments are never passed to OWPROV ownership resolution.
+* For syntax-accepted nonexistent values (12 hex characters, 29 hex characters, and uppercase hexadecimal):
+  * HTTP `404 Not Found`.
+  * Error is `not_found`.
+  * The response proves the value passed syntax validation before OWPROV ownership resolution determined it was nonexistent or outside scope.
+
+* For dot-segment and encoded slash requests (`.`, `..`, `%2F`):
+  * Handler-level validation of `.` and `..` returns HTTP `400 Bad Request` with `error: "invalid_router_id"` when those values reach the handler as router IDs.
+  * End-to-end route tests may observe framework-level rejection before reaching the handler if the HTTP server normalizes dot-segments or rejects encoded path separators.
+  * These path values are never passed to OWPROV ownership resolution.
 
 ---
 
@@ -1450,7 +1908,8 @@ GET /api/v1/devices/60cf84f22290/availability-summary
 
 ### Expected result
 
-* Request is rejected according to the API contract.
+* HTTP `400 Bad Request`.
+* Error is `invalid_timestamp`.
 * No query is executed with an undefined time range.
 
 ---
@@ -1468,7 +1927,7 @@ GET /api/v1/devices/60cf84f22290/availability-summary
 ### Expected result
 
 * HTTP `400 Bad Request`.
-* Error is `invalid_lookback`, not `invalid_timestamp`.
+* Error is `invalid_lookback_hours`, not `invalid_timestamp`.
 
 ---
 
@@ -1485,7 +1944,7 @@ GET /api/v1/devices/60cf84f22290/availability-summary
 ### Expected result
 
 * HTTP `400 Bad Request`.
-* Error is `invalid_lookback`, not `invalid_timestamp`.
+* Error is `invalid_lookback_hours`, not `invalid_timestamp`.
 
 ---
 
@@ -1502,7 +1961,7 @@ GET /api/v1/devices/60cf84f22290/availability-summary
 ### Expected result
 
 * HTTP `400 Bad Request`.
-* Error is `invalid_lookback`, not `invalid_timestamp`.
+* Error is `invalid_lookback_hours`, not `invalid_timestamp`.
 * Error message may indicate that the supported lookback limit was exceeded.
 
 ---
@@ -1558,8 +2017,9 @@ Verify that first-row creation is concurrency-safe and does not rely on locking 
 
 * The implementation uses an atomic first-row mechanism, such as `INSERT ... ON CONFLICT`, a PostgreSQL advisory transaction lock, or a serializable transaction with retry.
 * Exactly one `device_availability_state` row exists.
-* Exactly one offline transition row exists.
 * The final state is `current_state = offline`.
+* No offline transition row is inserted because the prior state was unknown.
+* A full-coverage availability-summary response for a window containing these first observations reports `data.offline_count = 0`, `meta.coverage = "full"`, and `meta.accuracy = "exact"`.
 
 ---
 
@@ -1567,7 +2027,7 @@ Verify that first-row creation is concurrency-safe and does not rely on locking 
 
 ### Objective
 
-Verify deterministic state when an offline and online source event are processed concurrently.
+Verify that an offline and online source event for the same gateway are applied in source-event order, even when delivery to workers is concurrent.
 
 ### Preconditions
 
@@ -1582,38 +2042,30 @@ Verify deterministic state when an offline and online source event are processed
 
 ### Expected result
 
-* State-row locking or equivalent serializes processing by `serialNumber`, but it does not sort messages by source `event_time`.
-* Either processing-order outcome is valid under the watermark design:
+* The ingestion path provides one explicit ordering guarantee for each `serialNumber` before transition detection, such as:
+  * Kafka partitioning keyed by `serialNumber`, preserving gateway event order; or
+  * a bounded event-time reorder window; or
+  * an equivalent serialNumber-scoped ordering mechanism that prevents a newer online event from causing an older offline transition to be discarded silently.
+* Processing must produce the source-time outcome:
 
 ```text
-Outcome 1:
-  12:03 offline processes first
-  offline transition event is inserted
-  device_availability_state.current_state = offline
-  last_event_time = 12:03
+12:03 offline is applied first
+offline transition event is inserted
+device_availability_state.current_state = offline
+last_event_time = 12:03
 
-  12:04 online processes second
-  online transition event is inserted
-  device_availability_state.current_state = online
-  last_event_time = 12:04
-
-Outcome 2:
-  12:04 online processes first
-  same-state online message updates last_event_time to 12:04
-  no transition event is inserted
-
-  12:03 offline processes second
-  offline message is rejected as stale because 12:03 < last_event_time 12:04
-  no transition event is inserted
+12:04 online is applied second
+online transition event is inserted
+device_availability_state.current_state = online
+last_event_time = 12:04
 ```
 
-* In both outcomes:
-  * Final `device_availability_state.current_state = online`.
-  * Final `last_event_time = 12:04`.
-  * State never moves backward.
-  * No duplicate transition events are inserted.
-  * State and event writes are atomic.
-* Outcome 2 can undercount a short outage. Preventing that undercount would require an additional ordering guarantee such as Kafka key ordering, an event-time reorder buffer, or another explicitly defined source-ordering mechanism.
+* Final `device_availability_state.current_state = online`.
+* Final `last_event_time = 12:04`.
+* State never moves backward.
+* No duplicate transition events are inserted.
+* State and event writes are atomic.
+* It is not valid to process the `12:04` online event first, mark the `12:03` offline event stale, and lose the outage. If the implementation intentionally chooses best-effort counting instead of an ordering guarantee, this test must be replaced by an explicit documented best-effort contract and must assert that the undercount is observable as degraded accuracy, not silently successful exact counting.
 
 ---
 
@@ -1749,32 +2201,16 @@ last_idempotency_key = ping-1210
 
 ---
 
-## TC-AVAIL-029B: Equal timestamp with deterministic source sequence is ordered
-
-### Objective
-
-Verify behavior when the source provides a reliable tie-breaker for same-timestamp events.
-
-### Steps
-
-1. Set `device_availability_state` to an online event at `12:10` with source sequence `10`.
-2. Deliver a disconnection for the same gateway at `12:10` with source sequence `11`.
-3. Query availability storage.
-
-### Expected result
-
-* The implementation accepts the disconnection only if the source sequence is documented as reliable.
-* One offline transition event is inserted.
-* `device_availability_state.current_state = offline`.
-* `last_event_time` remains `12:10`, and metadata records the accepted tie-breaker.
-
----
-
 ## TC-AVAIL-030: First event is a disconnection
 
 ### Objective
 
-Verify that a first observed `disconnection` message creates an offline transition.
+Verify the explicit bootstrap behavior when the first accepted availability
+message for a gateway is `disconnection`.
+
+This contract treats an initial unknown-to-offline observation as state
+initialization, not as a counted offline transition, because `offline_count`
+counts observed online-to-offline transitions.
 
 ### Preconditions
 
@@ -1789,10 +2225,9 @@ Verify that a first observed `disconnection` message creates an offline transiti
 
 ### Expected result
 
-* One `offline` event row is inserted.
-* The event uses the gateway `serialNumber`.
+* No `offline` transition event row is inserted.
 * A `device_availability_state` row is created with `current_state = offline` and `last_event_time` equal to the disconnection source timestamp.
-* `offline_count` is `1`.
+* A full-coverage availability-summary response for a window containing the first disconnection reports `data.offline_count = 0`, `meta.coverage = "full"`, and `meta.accuracy = "exact"`.
 
 ---
 
@@ -1939,9 +2374,47 @@ Ethernet reconnected        → online event
 
 ```json
 {
-  "gw_uuid": "60cf84f22290",
-  "fetch_status": "success",
-  "offline_count": 2
+  "meta": {
+    "requestedWindow": {
+      "from": "<startTime>",
+      "till": "<endTime>"
+    },
+    "observedWindow": {
+      "firstSampleAt": "<firstOfflineEventAt>",
+      "lastSampleAt": "<lastOfflineEventAt>"
+    },
+    "sourceWindow": {
+      "firstSampleAt": "<firstSourceAt>",
+      "lastSampleAt": "<lastSourceAt>"
+    },
+    "contributingWindow": {
+      "firstSampleAt": "<firstOfflineEventAt>",
+      "lastSampleAt": "<lastOfflineEventAt>"
+    },
+    "selection": "boundary_assisted",
+    "coverage": "full",
+    "accuracy": "exact",
+    "sampleCount": 2,
+    "effectiveSamplingIntervalSeconds": 0,
+    "allowedGapSeconds": 0,
+    "boundarySamplesUsed": {
+      "beforeStart": true,
+      "atStart": false,
+      "atEnd": false,
+      "afterEnd": false
+    },
+    "availabilityCoverage": {
+      "coverageStart": "<= startTime",
+      "processedThrough": ">= endTime",
+      "ingestionGapKnown": false,
+      "proofSource": "serial_partition_checkpoint"
+    }
+  },
+  "data": {
+    "gw_uuid": "60cf84f22290",
+    "fetch_status": "success",
+    "offline_count": 2
+  }
 }
 ```
 
@@ -2192,6 +2665,56 @@ The result is not truncated to `100`.
 ```text
 min_memfree <= avg_memfree <= max_memfree
 ```
+
+---
+
+## TC-MEM-012A: Negative memory value is excluded
+
+### Test data
+
+```text
+10:00 memory_free = -1      memory_total = 512000
+10:10 memory_free = 200000  memory_total = 512000
+10:20 memory_free = 300000  memory_total = 512000
+```
+
+### Expected result
+
+```json
+{
+  "min_memfree": 200000,
+  "max_memfree": 300000,
+  "avg_memfree": 250000.0
+}
+```
+
+* The negative `memory_free` sample is treated as corrupted telemetry and excluded.
+* It cannot make `min_memfree` negative or affect the average.
+
+---
+
+## TC-MEM-012B: Free memory exceeds total memory
+
+### Test data
+
+```text
+10:00 memory_free = 700000  memory_total = 512000
+10:10 memory_free = 200000  memory_total = 512000
+10:20 memory_free = 300000  memory_total = 512000
+```
+
+### Expected result
+
+```json
+{
+  "min_memfree": 200000,
+  "max_memfree": 300000,
+  "avg_memfree": 250000.0
+}
+```
+
+* When `memory_total` is present and `memory_free > memory_total`, the sample is treated as corrupted telemetry and excluded.
+* If all samples are excluded by this rule, the memory summary uses the same empty-sample response as `TC-MEM-005`.
 
 ---
 
@@ -2571,9 +3094,9 @@ Expected response:
     "rx_bytes": 106487500,
     "tx_bytes": 3851250,
     "total_bytes": 110338750,
-    "data_consume_rx": "851.90 Mb",
-    "data_consume_tx": "30.81 Mb",
-    "total_data_usage": "882.71 Mb",
+    "data_consume_rx": "106.49 MB",
+    "data_consume_tx": "3.85 MB",
+    "total_data_usage": "110.34 MB",
     "usage_accuracy": "exact",
     "incomplete": false
   }
@@ -2608,7 +3131,7 @@ TX usage = 2000 bytes
 Total = 7000 bytes
 ```
 
-The API converts the byte totals to decimal megabits.
+The API converts the byte totals to decimal megabytes.
 
 ---
 
@@ -2822,13 +3345,30 @@ Samples arrive in this order:
 
 ---
 
-## TC-USAGE-013: Same timestamp with deterministic tie-breakers
+## TC-USAGE-013: Same timestamp samples
+
+### Test data
+
+```text
+Case A, same stream and identical counters:
+10:00 BSSID-A SSID-A radio-1 RX=9000 TX=1000
+10:00 BSSID-A SSID-A radio-1 RX=9000 TX=1000
+
+Case B, same stream and different counters:
+10:00 BSSID-A SSID-A radio-1 RX=9000 TX=1000
+10:00 BSSID-A SSID-A radio-1 RX=1000 TX=500
+
+Case C, different stream keys:
+10:00 BSSID-A SSID-A radio-1 RX=9000 TX=1000
+10:00 BSSID-B SSID-B radio-2 RX=1000 TX=500
+```
 
 ### Expected result
 
-* BSSID, SSID, radio or other stable fields provide deterministic ordering.
-* Exact duplicates are removed.
-* Two unrelated streams are not combined incorrectly.
+* Case A is treated as an exact duplicate and collapses to one sample before delta calculation.
+* Case B is ambiguous and is excluded from delta calculation unless a reliable source sequence number proves temporal order.
+* Case C is calculated independently by stream key; different streams are not ordered against each other or combined.
+* BSSID, SSID, radio, or other stable fields identify streams. They must not be used as tie-breakers to invent temporal order for two different counter values with the same stream key and timestamp.
 
 ---
 
@@ -2867,7 +3407,7 @@ e2:51:95:ed:0f:28
 
 ```text
 data_consume_rx > 0
-data_consume_tx = 0.00 Mb
+data_consume_tx = 0.00 MB
 total_data_usage = RX usage
 ```
 
@@ -2878,7 +3418,7 @@ total_data_usage = RX usage
 ### Expected result
 
 ```text
-data_consume_rx = 0.00 Mb
+data_consume_rx = 0.00 MB
 data_consume_tx > 0
 total_data_usage = TX usage
 ```
@@ -2928,7 +3468,7 @@ total = 0
 
 ---
 
-## TC-USAGE-021: Byte-to-megabit conversion
+## TC-USAGE-021: Byte-to-megabyte conversion
 
 ### Test data
 
@@ -2939,13 +3479,13 @@ total = 0
 ### Expected result
 
 ```text
-8.00 Mb
+1.00 MB
 ```
 
 The implementation uses:
 
 ```text
-bytes * 8 / 1,000,000
+bytes / 1,000,000
 ```
 
 ---
@@ -2954,8 +3494,9 @@ bytes * 8 / 1,000,000
 
 ### Expected result
 
-* Decimal megabit conversion is labelled `Mb`.
-* If binary-byte conversion is used instead, it must not still be labelled `Mb`.
+* Decimal megabyte conversion is labelled `MB`.
+* The response must not use `Mb`, which commonly means megabits.
+* If binary-byte conversion is used instead, it must be labelled `MiB`.
 * Response formatting follows the API contract.
 
 ---
@@ -3435,11 +3976,11 @@ Memory API:      null summary fields
 Temperature API: null summary fields
 Usage API:       []
 RSSI API:        []
-Availability:    fetch_status = success, offline_count = 0 (when startTime >= availabilityValidFrom)
+Availability:    data.fetch_status = success, data.offline_count = 0, meta.coverage = full
 ```
 
 * All metric responses use HTTP `200 OK` when queries succeed but return no data.
-* Availability returns `fetch_status = "success"` and `offline_count = 0` only when `startTime >= availabilityValidFrom`.
+* Availability returns `data.fetch_status = "success"` and `data.offline_count = 0` as an exact result only when `startTime >= availabilityValidFrom`, `meta.coverage = "full"`, and `meta.availabilityCoverage.processedThrough >= endTime`.
 * If `startTime < availabilityValidFrom`, Availability returns `400 Bad Request` with `error: "availability_range_before_cutover"`.
 
 ---
@@ -3564,9 +4105,31 @@ rssi_total_samples
 Expected exact fields:
 
 ```text
+meta
+data
+```
+
+Expected `data` fields:
+
+```text
 gw_uuid
 fetch_status
 offline_count
+```
+
+Expected availability-specific `meta` fields:
+
+```text
+requestedWindow
+observedWindow
+sourceWindow
+contributingWindow
+selection
+coverage
+accuracy
+sampleCount
+boundarySamplesUsed
+availabilityCoverage
 ```
 
 ---
@@ -3618,7 +4181,20 @@ total_bytes = rx_bytes + tx_bytes
 * Memory min and max are numeric or `null`.
 * Memory average is numeric or `null`.
 * Temperature fields are numeric or `null`.
-* Usage fields are formatted strings using the documented unit.
+* Usage summary client objects use these exact data types:
+
+```text
+mac                 string
+rx_bytes            non-negative integer
+tx_bytes            non-negative integer
+total_bytes         non-negative integer
+data_consume_rx     formatted string using the documented unit
+data_consume_tx     formatted string using the documented unit
+total_data_usage    formatted string using the documented unit
+usage_accuracy      enum string: "exact" or "lower_bound"
+incomplete          boolean
+```
+
 * RSSI percentages are numeric.
 * RSSI sample count is an integer.
 * Offline count is a non-negative integer.

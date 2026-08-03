@@ -129,6 +129,8 @@ Validation rules:
 
 ```text
 timestampTill must parse as a valid UTC timestamp ending with 'Z'.
+lookbackHours must be present exactly once.
+lookbackHours must parse as a strict whole decimal integer with no trailing characters.
 lookbackHours must be greater than 0.
 maxLookbackHours = floor(configured monitoringDuration / 3600).
 lookbackHours must be less than or equal to maxLookbackHours.
@@ -145,8 +147,9 @@ Return validation errors with field-specific error codes:
 invalid_timestamp:
   timestampTill is missing, malformed, not UTC `Z` format, or otherwise unsupported.
 
-invalid_lookback:
-  lookbackHours is missing, non-numeric, zero, negative, or greater than maxLookbackHours.
+invalid_lookback_hours:
+  lookbackHours is missing, repeated, empty, non-numeric, fractional, partially numeric, overflowing,
+  zero, negative, or greater than maxLookbackHours.
 
 lookback_outside_retention:
   the calculated [startTime, endTime) window is outside the configured retention window.
@@ -692,6 +695,8 @@ For each record:
   read record.resource_data.memory_free
   ignore missing resource_data
   include the sample only when memory_free is present
+  exclude the sample if any present memory value is negative
+  exclude the sample if memory_total is present and memory_free > memory_total
 
 Return:
   min_memfree = min(memory_free samples)
@@ -699,7 +704,7 @@ Return:
   avg_memfree = sum(memory_free samples) / sample_count
 ```
 
-Memory values are bytes and must be nonnegative. For successful responses with samples, the invariant is:
+Memory values are bytes and must be nonnegative. If `memory_total` is present, `memory_free` must not exceed `memory_total`; corrupted samples that violate this consistency rule are ignored rather than contributing to the summary. For successful responses with samples, the invariant is:
 
 ```text
 min_memfree <= avg_memfree <= max_memfree
@@ -1521,11 +1526,20 @@ Build a deterministic sample key from the stable fields available in the associa
 Sort samples by:
   station MAC
   timestamp ASC
-  BSSID/SSID/band/radio tie-breakers
+  stream identity fields for grouping only
 
 Deduplicate exact duplicate samples before calculating deltas.
 
-Discard out-of-order samples for the same calculated stream.
+For the same calculated stream and same timestamp:
+  identical counters are duplicates and collapse to one sample
+  different counters are ambiguous and must be excluded from delta calculation
+  unless a reliable source sequence number proves their temporal order
+
+Different stream keys are calculated independently. BSSID, SSID, band, and radio
+identify counter streams; they must not be used to invent temporal order between
+different counter values at the same timestamp.
+
+Discard out-of-order or ambiguous samples for the same calculated stream.
 
 When an association/session identifier is available:
   calculate deltas only within the same session.
@@ -1882,9 +1896,48 @@ None
 
 ```json
 {
-  "gw_uuid": "60cf84f22290",
-  "fetch_status": "success",
-  "offline_count": 6
+  "meta": {
+    "requestedWindow": {
+      "from": "2026-07-26T12:00:00Z",
+      "till": "2026-07-27T12:00:00Z"
+    },
+    "observedWindow": {
+      "firstSampleAt": "2026-07-26T13:15:00Z",
+      "lastSampleAt": "2026-07-27T09:45:00Z"
+    },
+    "sourceWindow": {
+      "firstSampleAt": "2026-07-26T11:55:00Z",
+      "lastSampleAt": "2026-07-27T09:45:00Z"
+    },
+    "contributingWindow": {
+      "firstSampleAt": "2026-07-26T13:15:00Z",
+      "lastSampleAt": "2026-07-27T09:45:00Z"
+    },
+    "selection": "boundary_assisted",
+    "coverage": "full",
+    "accuracy": "exact",
+    "sampleCount": 6,
+    "effectiveSamplingIntervalSeconds": 0,
+    "allowedGapSeconds": 0,
+    "boundarySamplesUsed": {
+      "beforeStart": true,
+      "atStart": false,
+      "atEnd": false,
+      "afterEnd": false
+    },
+    "availabilityCoverage": {
+      "coverageStart": "2026-07-20T00:00:00Z",
+      "processedThrough": "2026-07-27T12:01:00Z",
+      "allowedIngestionDelaySeconds": 60,
+      "ingestionGapKnown": false,
+      "proofSource": "serial_partition_checkpoint"
+    }
+  },
+  "data": {
+    "gw_uuid": "60cf84f22290",
+    "fetch_status": "success",
+    "offline_count": 6
+  }
 }
 ```
 
@@ -2088,10 +2141,10 @@ Bootstrap rule when no `device_availability_state` row exists:
 
 ```text
 First observed disconnection:
-  insert one offline event
   insert state row with current_state = offline
   set last_event_time = event_time
   set last_idempotency_key = idempotency_key
+  do not insert an offline transition event because the prior state is unknown
 
 First observed ping/capabilities:
   insert state row with current_state = online
@@ -2228,6 +2281,26 @@ Do not include Kafka topic, partition, or offset in the derived logical `idempot
 
 The same delivered logical connection event must always produce the same `idempotency_key`. If the implementation cannot build a stable or deterministic key for an event, it must not write that event as a counted availability transition; log it as an ingestion error instead.
 
+Ordering rule:
+
+```text
+Availability transition detection must process connection events in source-event
+order for each serialNumber.
+
+The preferred implementation is to produce and consume Kafka connection messages
+with serialNumber as the Kafka message key, so all events for one gateway are in
+one partition and retain gateway event order. If the source topic cannot provide
+that guarantee, Analytics must add a bounded event-time reorder window or an
+equivalent serialNumber-scoped ordering mechanism before applying the transition
+state machine.
+
+A newer same-state online event must not advance last_event_time in a way that
+causes an older offline transition for the same serialNumber to be discarded
+silently. If a deployment intentionally chooses best-effort counting instead of
+per-serial ordering, that lower-accuracy behavior must be documented separately
+and surfaced to callers; it must not be reported as exact availability counting.
+```
+
 Atomic transition and insert rule:
 
 ```text
@@ -2294,11 +2367,8 @@ For each valid connection message:
       update device_availability_state metadata, last_event_time, last_idempotency_key, and updated_at
       do not insert a transition event
     else:
-      INSERT offline transition event with conflict-safe semantics
-      if the insert created a row:
-        update device_availability_state to offline and last_event_time
-      else:
-        do not update state
+      update device_availability_state to offline and last_event_time
+      do not insert an initial offline transition event because the prior state is unknown
 
   COMMIT
 
@@ -2380,7 +2450,7 @@ Disconnection handling:
 ```text
 current_state=online  + disconnection -> insert offline event, set current_state=offline, update last_event_time
 current_state=offline + disconnection -> update last_event_time and metadata only when the source message is newer; do not insert another offline event
-no state row + disconnection -> create current_state=offline, update last_event_time, insert one offline event
+no state row + disconnection -> create current_state=offline, update last_event_time, do not insert an offline transition event
 ```
 
 Example:
@@ -2474,11 +2544,56 @@ Use an HTTP error:
 
 ```json
 {
-  "gw_uuid": "60cf84f22290",
-  "fetch_status": "success",
-  "offline_count": 0
+  "meta": {
+    "requestedWindow": {
+      "from": "2026-07-26T12:00:00Z",
+      "till": "2026-07-27T12:00:00Z"
+    },
+    "observedWindow": {
+      "firstSampleAt": null,
+      "lastSampleAt": null
+    },
+    "sourceWindow": {
+      "firstSampleAt": "2026-07-26T11:55:00Z",
+      "lastSampleAt": "2026-07-26T11:55:00Z"
+    },
+    "contributingWindow": {
+      "firstSampleAt": null,
+      "lastSampleAt": null
+    },
+    "selection": "boundary_assisted",
+    "coverage": "full",
+    "accuracy": "exact",
+    "sampleCount": 0,
+    "effectiveSamplingIntervalSeconds": 0,
+    "allowedGapSeconds": 0,
+    "boundarySamplesUsed": {
+      "beforeStart": true,
+      "atStart": false,
+      "atEnd": false,
+      "afterEnd": false
+    },
+    "availabilityCoverage": {
+      "coverageStart": "2026-07-20T00:00:00Z",
+      "processedThrough": "2026-07-27T12:01:00Z",
+      "allowedIngestionDelaySeconds": 60,
+      "ingestionGapKnown": false,
+      "proofSource": "serial_partition_checkpoint"
+    }
+  },
+  "data": {
+    "gw_uuid": "60cf84f22290",
+    "fetch_status": "success",
+    "offline_count": 0
+  }
 }
 ```
+
+An exact zero is valid only when availability coverage proves the complete
+requested interval: `coverageStart <= startTime`, `processedThrough >= endTime`,
+`ingestionGapKnown = false`, and `proofSource != "unavailable"`. Otherwise a
+zero matching event count must be reported as partial/lower-bound or unavailable
+coverage according to the availability coverage rules.
 
 ### Internal Error
 
