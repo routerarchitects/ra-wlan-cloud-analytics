@@ -54,6 +54,7 @@ Recommended query parameters:
 ```http
 ?timestampTill=2026-07-27T12:00:00Z
 &lookbackHours=24
+&metricMode=<latest|all|differential>
 ```
 
 These are `GET` APIs, so no request body is required.
@@ -915,7 +916,7 @@ GET /api/v1/devices/{routerId}/wifi-clients/usage-summary
 ## Example Request
 
 ```http
-GET /api/v1/devices/60cf84f22290/wifi-clients/usage-summary?timestampTill=2026-07-27T12:00:00Z&lookbackHours=24
+GET /api/v1/devices/60cf84f22290/wifi-clients/usage-summary?timestampTill=2026-07-27T12:00:00Z&lookbackHours=24&metricMode=differential
 Authorization: Bearer <token>
 ```
 
