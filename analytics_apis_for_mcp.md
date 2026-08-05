@@ -1278,8 +1278,8 @@ effective boundaries:
   effective_end = min(requested_end, proven_session_end)
 
 effective boundaries:
-  effective_start = max(requested_start_time, proven_session_start)
-  effective_end = min(requested_end_time, proven_session_end)
+  effective_start = max(requested_start, proven_session_start)
+  effective_end = min(requested_end, proven_session_end)
 
 start_sample:
   exact sample at effective_start, if available
