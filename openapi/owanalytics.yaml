@@ -1985,7 +1985,6 @@ paths:
         - $ref: '#/components/parameters/RouterIdPath'
         - $ref: '#/components/parameters/TimestampTill'
         - $ref: '#/components/parameters/LookbackHours'
-        - $ref: '#/components/parameters/MetricRetrievalMode'
       responses:
         200:
           description: Return gateway free memory summary for the requested aggregation window.
@@ -2018,7 +2017,6 @@ paths:
         - $ref: '#/components/parameters/RouterIdPath'
         - $ref: '#/components/parameters/TimestampTill'
         - $ref: '#/components/parameters/LookbackHours'
-        - $ref: '#/components/parameters/MetricRetrievalMode'
       responses:
         200:
           description: Return Wi-Fi radio temperature summary for the effective aggregation window.
@@ -2088,7 +2086,6 @@ paths:
         - $ref: '#/components/parameters/RouterIdPath'
         - $ref: '#/components/parameters/TimestampTill'
         - $ref: '#/components/parameters/LookbackHours'
-        - $ref: '#/components/parameters/MetricRetrievalMode'
       responses:
         200:
           description: Return per-client RSSI quality percentages.
