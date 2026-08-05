@@ -1217,6 +1217,40 @@ Example detailed response for the same calculated result:
 }
 ```
 
+When a client is observed but no usage interval can be calculated, such as when
+only one cumulative-counter sample exists in or bounding the requested range,
+return the safely provable minimum with no calculation segments:
+
+```json
+{
+  "requestedTimeWindow": {
+    "startTime": "2026-08-05T12:00:00Z",
+    "endTime": "2026-08-05T13:00:00Z"
+  },
+  "resultTimeWindow": {
+    "earliestActualStartTime": null,
+    "latestActualEndTime": null,
+    "boundaryFallbackUsed": false
+  },
+  "items": [
+    {
+      "mac": "e2:51:95:ed:0f:28",
+      "rx_bytes": 0,
+      "tx_bytes": 0,
+      "total_bytes": 0,
+      "data_consume_rx": "0.00 MB",
+      "data_consume_tx": "0.00 MB",
+      "total_data_usage": "0.00 MB",
+      "usage_accuracy": "lower_bound",
+      "incomplete": true,
+      "calculation_segments": []
+    }
+  ],
+  "totalClients": 1,
+  "truncated": false
+}
+```
+
 ## API Logic
 
 For gateway-scoped results, use `timepoints.ssid_data[].associations[]` because `wificlienthistory` currently does not store the gateway `serialNumber`.
