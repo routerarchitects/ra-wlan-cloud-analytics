@@ -578,7 +578,7 @@ None
 {
   "min_memfree": 211374,
   "max_memfree": 215050,
-  "avg_memfree": 212074.36
+  "avg_memfree": 212074.360
 }
 ```
 
