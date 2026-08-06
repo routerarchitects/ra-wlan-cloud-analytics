@@ -45,13 +45,16 @@ Before executing the test cases:
 ```text
 device_availability_events
 device_availability_state
+device_availability_ingestion_checkpoint
+device_availability_ingestion_gaps
 timepoints
 wificlienthistory
 ```
 
-8. Gateway availability uses `device_availability_state` as the authoritative restart-safe state table and `device_availability_events` as the transition log. Kafka `disconnection` messages are treated as `offline`; Kafka `ping` and `capabilities` messages are treated as `online`. Every accepted newer source message updates `device_availability_state.last_event_time`. `DeviceInfo.lastContact` is contact/processing metadata and is not used for source-event ordering.
-9. Database records for the test gateway are cleared or isolated before each independent test.
-10. A valid authorization token is available for testing endpoint access.
+8. Gateway availability uses `device_availability_state` as the authoritative restart-safe state table and `device_availability_events` as the transition log. Kafka `disconnection` messages are treated as `offline`; Kafka `ping` and `capabilities` messages are treated as `online`. Exact transition counting requires serialNumber-scoped source-event ordering before state-machine processing. Every accepted source-newer message emitted by that ordering stage updates `device_availability_state.last_event_time`. `DeviceInfo.lastContact` is contact/processing metadata and is not used for source-event ordering.
+9. Availability exact-zero responses require durable per-serial coverage proof in `device_availability_ingestion_checkpoint` and no overlapping persisted gap in `device_availability_ingestion_gaps`.
+10. Database records for the test gateway are cleared or isolated before each independent test.
+11. A valid authorization token is available for testing endpoint access.
 
 Example test parameters:
 
@@ -914,7 +917,7 @@ Example messages:
 ### Expected result
 
 * No additional `online` event is inserted after the first online state.
-* `last_event_time` is updated to the latest newer ping source timestamp.
+* `last_event_time` is updated to the latest source-newer ping timestamp accepted by the per-serial ordering stage.
 * `last_idempotency_key` is updated to the latest accepted ping idempotency key.
 * `current_state` remains `online`.
 * `offline_count` remains `0`.
@@ -1367,7 +1370,7 @@ Example:
 
 * Only the first offline transition is stored.
 * Later same-state disconnection messages are ignored.
-* For newer repeated disconnection messages while `current_state = offline`, `last_event_time` advances.
+* For source-newer repeated disconnection messages accepted by the per-serial ordering stage while `current_state = offline`, `last_event_time` advances.
 * `last_idempotency_key`, `updated_at`, and metadata are updated for the latest accepted same-state message.
 * `offline_count` is `1`.
 
@@ -1479,7 +1482,7 @@ Verify that repeated online messages after an offline-to-online transition do no
 
 * Exactly one online transition event is inserted.
 * No additional offline event is inserted.
-* The newer repeated ping updates `last_event_time`, `last_idempotency_key`, `updated_at`, and metadata.
+* The source-newer repeated ping accepted by the per-serial ordering stage updates `last_event_time`, `last_idempotency_key`, `updated_at`, and metadata.
 * `offline_count` is unchanged.
 
 ---
@@ -1597,6 +1600,8 @@ Verify successful empty results.
 ### Preconditions
 
 * The requested range starts at or after `availabilityValidFrom`.
+* The gateway has a durable `device_availability_ingestion_checkpoint` with `coverage_start <= startTime` and `processed_through_event_time >= endTime`.
+* No `device_availability_ingestion_gaps` row overlaps `[startTime, endTime)`.
 * The cutover behavior for ranges beginning before `availabilityValidFrom` is covered by `TC-COMMON-023`.
 
 ### Steps
@@ -2019,7 +2024,9 @@ Verify that first-row creation is concurrency-safe and does not rely on locking 
 * Exactly one `device_availability_state` row exists.
 * The final state is `current_state = offline`.
 * No offline transition row is inserted because the prior state was unknown.
-* A full-coverage availability-summary response for a window containing these first observations reports `data.offline_count = 0`, `meta.coverage = "full"`, and `meta.accuracy = "exact"`.
+* An availability-summary response for a window containing these first observations does not report an exact zero, because the prior state boundary is unknown.
+* The response uses `meta.coverage = "partial"` and `meta.accuracy = "lower_bound"` when durable coverage begins at the first observation, or `meta.coverage = "none"` and `meta.accuracy = "not_applicable"` when no coverage proof exists.
+* `data.offline_count = 0` may be returned only as the count of stored offline transitions, not as proof that zero outages occurred in the requested interval.
 
 ---
 
@@ -2144,7 +2151,14 @@ last_event_time = 12:10
 
 ### Objective
 
-Verify that an event older than `device_availability_state.last_event_time` cannot change availability history.
+Verify that an event older than `device_availability_state.last_event_time`
+cannot change availability history after the per-serial ordering strategy has
+advanced beyond that source time.
+
+### Preconditions
+
+* The connection topic is serialNumber-keyed and source-event ordered, or the bounded reorder window has already closed for source times up to `12:10`.
+* No ordering strategy can still accept a `12:05` transition for this serialNumber.
 
 ### Steps
 
@@ -2201,6 +2215,36 @@ last_idempotency_key = ping-1210
 
 ---
 
+## TC-AVAIL-029B: Delayed offline before newer same-state ping is not lost
+
+### Objective
+
+Verify that out-of-order Kafka delivery does not silently drop an older offline
+transition when a newer same-state online ping arrives first.
+
+### Preconditions
+
+* Gateway state is initialized as online at `12:00`.
+* The deployment does not rely on raw Kafka arrival order unless the topic is keyed and source-event ordered by serialNumber.
+
+### Steps
+
+1. Deliver a ping with source `event_time = 12:10`.
+2. Deliver a disconnection for the same gateway with source `event_time = 12:05`.
+3. Flush the per-serial ordering mechanism for source times through `12:10`.
+4. Query `device_availability_state` and `device_availability_events`.
+
+### Expected result
+
+* The `12:05` disconnection is accepted as an offline transition.
+* The `12:10` ping is accepted as an online transition after the offline transition.
+* `device_availability_state.current_state = online`.
+* `device_availability_state.last_event_time = 12:10`.
+* `offline_count` for a full-coverage window containing `12:05` is `1`.
+* If the implementation cannot provide serial-keyed source-event ordering or a bounded reorder window for this sequence, the API must not mark the count as `meta.accuracy = "exact"`.
+
+---
+
 ## TC-AVAIL-030: First event is a disconnection
 
 ### Objective
@@ -2227,7 +2271,9 @@ counts observed online-to-offline transitions.
 
 * No `offline` transition event row is inserted.
 * A `device_availability_state` row is created with `current_state = offline` and `last_event_time` equal to the disconnection source timestamp.
-* A full-coverage availability-summary response for a window containing the first disconnection reports `data.offline_count = 0`, `meta.coverage = "full"`, and `meta.accuracy = "exact"`.
+* An availability-summary response for a window containing the first disconnection does not report an exact zero, because the prior state boundary is unknown.
+* The response uses `meta.coverage = "partial"` and `meta.accuracy = "lower_bound"` when durable coverage begins at the first observation, or `meta.coverage = "none"` and `meta.accuracy = "not_applicable"` when no coverage proof exists.
+* A full-coverage exact-zero response is allowed only for a requested window that begins after this state initialization boundary and is fully covered by the per-serial ingestion checkpoint.
 
 ---
 
@@ -4131,6 +4177,20 @@ sampleCount
 boundarySamplesUsed
 availabilityCoverage
 ```
+
+Expected `meta.availabilityCoverage` fields:
+
+```text
+coverageStart
+processedThrough
+allowedIngestionDelaySeconds
+ingestionGapKnown
+proofSource
+```
+
+`coverageStart` and `processedThrough` are derived from durable per-serial
+availability ingestion checkpoint state, and `ingestionGapKnown` reflects
+persisted gaps that overlap the requested interval.
 
 ---
 
