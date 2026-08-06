@@ -1899,8 +1899,8 @@ None
 {
   "meta": {
     "requestedWindow": {
-      "from": "2026-07-26T12:00:00Z",
-      "till": "2026-07-27T12:00:00Z"
+      "startTime": "2026-07-26T12:00:00Z",
+      "endTime": "2026-07-27T12:00:00Z"
     },
     "observedWindow": {
       "firstSampleAt": "2026-07-26T13:15:00Z",
@@ -2662,8 +2662,8 @@ Use an HTTP error:
 {
   "meta": {
     "requestedWindow": {
-      "from": "2026-07-26T12:00:00Z",
-      "till": "2026-07-27T12:00:00Z"
+      "startTime": "2026-07-26T12:00:00Z",
+      "endTime": "2026-07-27T12:00:00Z"
     },
     "observedWindow": {
       "firstSampleAt": null,
@@ -2798,6 +2798,8 @@ struct GatewayOfflineSummary;
 
 JSON field names should match the MCP CSV where the API is directly returning MCP fields. `usage-summary` additionally returns raw byte totals and usage accuracy fields so callers can distinguish exact usage from lower-bound estimates.
 
+Client MAC addresses (`mac`) must be normalized to canonical lowercase colon-separated format matching pattern `^[0-9a-f]{2}(:[0-9a-f]{2}){5}$` across all client metrics endpoints.
+
 ---
 
 ## REST Handlers
@@ -2826,6 +2828,9 @@ Wi-Fi client metrics handler:
 usage-summary
 rssi-summary
 ```
+
+Handler query parsing implementation note:
+REST handlers must inspect and parse the raw HTTP query string parameter collection directly rather than relying solely on generated framework parameter binding. Handlers must verify that `lookbackHours` and `timestampTill` appear exactly once in the raw query string, reject repeated parameters, reject fractional numeric values, and reject 32-bit integer overflow.
 
 Timepoint-backed handlers must call a shared serial-resolution helper before storage access:
 

@@ -914,8 +914,8 @@ updated_at >= processing time
 {
   "meta": {
     "requestedWindow": {
-      "from": "<startTime>",
-      "till": "<endTime>"
+      "startTime": "<startTime>",
+      "endTime": "<endTime>"
     },
     "observedWindow": {
       "firstSampleAt": null,
@@ -1048,8 +1048,8 @@ event_time = disconnection message timestamp
 {
   "meta": {
     "requestedWindow": {
-      "from": "<startTime>",
-      "till": "<endTime>"
+      "startTime": "<startTime>",
+      "endTime": "<endTime>"
     },
     "observedWindow": {
       "firstSampleAt": "<firstOfflineEventAt>",
@@ -1257,8 +1257,8 @@ API result:
 {
   "meta": {
     "requestedWindow": {
-      "from": "<startTime>",
-      "till": "<endTime>"
+      "startTime": "<startTime>",
+      "endTime": "<endTime>"
     },
     "observedWindow": {
       "firstSampleAt": "<firstOfflineEventAt>",
@@ -1377,8 +1377,8 @@ The API returns:
 {
   "meta": {
     "requestedWindow": {
-      "from": "<startTime>",
-      "till": "<endTime>"
+      "startTime": "<startTime>",
+      "endTime": "<endTime>"
     },
     "observedWindow": {
       "firstSampleAt": "<firstOfflineEventAt>",
@@ -1709,8 +1709,8 @@ Verify successful empty results.
 {
   "meta": {
     "requestedWindow": {
-      "from": "<startTime>",
-      "till": "<endTime>"
+      "startTime": "<startTime>",
+      "endTime": "<endTime>"
     },
     "observedWindow": {
       "firstSampleAt": null,
@@ -2590,8 +2590,8 @@ Ethernet reconnected        → online event
 {
   "meta": {
     "requestedWindow": {
-      "from": "<startTime>",
-      "till": "<endTime>"
+      "startTime": "<startTime>",
+      "endTime": "<endTime>"
     },
     "observedWindow": {
       "firstSampleAt": "<firstOfflineEventAt>",
@@ -4445,9 +4445,9 @@ a pre-start boundary event.
 
 ### Expected result
 
-* Usage and RSSI `mac` fields match `^[A-Fa-f0-9]{2}(:[A-Fa-f0-9]{2}){5}$`.
-* MAC addresses are returned as colon-separated six-octet values.
-* Arbitrary strings are not valid client MAC addresses in the response contract.
+* Usage and RSSI `mac` fields match `^[0-9a-f]{2}(:[0-9a-f]{2}){5}$`.
+* MAC addresses are returned as canonical lowercase colon-separated six-octet values.
+* Upper-case hex or arbitrary strings are not valid client MAC addresses in the response contract.
 
 ---
 

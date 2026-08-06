@@ -234,7 +234,12 @@ components:
     LookbackHours:
       in: query
       name: lookbackHours
-      description: Number of hours to look back from timestampTill. Must be greater than 0 and less than or equal to maxLookbackHours, where maxLookbackHours is derived from the configured monitoringDuration; the resulting half-open range must fit inside the configured retention window.
+      description: >
+        Number of hours to look back from timestampTill. Must be greater than 0 and less than or equal to
+        maxLookbackHours, where maxLookbackHours is derived from the configured monitoringDuration; the
+        resulting half-open range must fit inside the configured retention window. Handlers must parse the
+        raw HTTP query parameter collection to ensure lookbackHours appears exactly once, is a non-fractional
+        integer, and does not overflow or repeat.
       schema:
         type: integer
         format: int32
@@ -1592,31 +1597,183 @@ components:
           type: boolean
           description: True when totalClients is greater than the number of returned items.
 
-    GatewayOfflineSummary:
+    GatewayAvailabilitySampleWindow:
       type: object
-      description: >
-        Gateway offline transition count. Count each transition from an online state to an
-        offline state whose offline event timestamp falls within [timestampTill - lookbackHours,
-        timestampTill). Repeated offline samples without an intervening online state are not
-        counted. The latest valid state before the start of the window is used to determine
-        whether the first in-window offline event is a transition. A gateway already offline
-        at the beginning of the requested window is not counted unless it transitions online
-        and then offline again within the window. Events exactly at timestampTill are excluded.
-        Unknown or missing states do not create offline transitions. Availability events do not
-        carry a separate staleness timeout; transition state is determined only from persisted
-        gateway availability events keyed by serial number. HTTP 200 represents successful
-        retrieval; no separate success status field is returned.
+      description: Sample window boundary timestamps for availability metadata.
+      required:
+        - firstSampleAt
+        - lastSampleAt
+      properties:
+        firstSampleAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: ISO timestamp of earliest contributing sample in window.
+        lastSampleAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: ISO timestamp of latest contributing sample in window.
+
+    GatewayAvailabilityBoundarySamplesUsed:
+      type: object
+      description: Indicators of whether boundary-assisted sampling selected events outside or at the window edge.
+      required:
+        - beforeStart
+        - atStart
+        - atEnd
+        - afterEnd
+      properties:
+        beforeStart:
+          type: boolean
+        atStart:
+          type: boolean
+        atEnd:
+          type: boolean
+        afterEnd:
+          type: boolean
+
+    GatewayAvailabilityIngestionCoverage:
+      type: object
+      description: Durable ingestion coverage proof for the requested gateway lookback window.
+      required:
+        - coverageStart
+        - processedThrough
+        - allowedIngestionDelaySeconds
+        - ingestionGapKnown
+        - proofSource
+      properties:
+        coverageStart:
+          type: string
+          format: date-time
+          nullable: true
+          description: ISO timestamp of earliest durable availability coverage; null when coverage is none.
+        processedThrough:
+          type: string
+          format: date-time
+          nullable: true
+          description: ISO timestamp through which availability ingestion is complete; null when coverage is none.
+        allowedIngestionDelaySeconds:
+          type: integer
+          minimum: 0
+          description: Allowed ingestion delay window in seconds.
+        ingestionGapKnown:
+          type: boolean
+          description: True when a known ingestion gap overlaps the requested window.
+        proofSource:
+          type: string
+          description: Proof source mechanism for availability coverage.
+
+    GatewayAvailabilityMeta:
+      type: object
+      description: Metadata proving availability coverage, accuracy, and window boundaries.
+      required:
+        - requestedWindow
+        - observedWindow
+        - sourceWindow
+        - contributingWindow
+        - selection
+        - coverage
+        - accuracy
+        - sampleCount
+        - offlineEventCount
+        - effectiveSamplingIntervalSeconds
+        - allowedGapSeconds
+        - boundarySamplesUsed
+        - availabilityCoverage
+      properties:
+        requestedWindow:
+          $ref: '#/components/schemas/RequestedTimeWindow'
+        observedWindow:
+          $ref: '#/components/schemas/GatewayAvailabilitySampleWindow'
+        sourceWindow:
+          $ref: '#/components/schemas/GatewayAvailabilitySampleWindow'
+        contributingWindow:
+          $ref: '#/components/schemas/GatewayAvailabilitySampleWindow'
+        selection:
+          type: string
+          enum:
+            - boundary_assisted
+          description: Boundary event selection strategy; always "boundary_assisted".
+          example: boundary_assisted
+        coverage:
+          type: string
+          enum:
+            - full
+            - partial
+            - none
+          description: full when durable ingestion coverage proves the complete interval; partial when coverage is incomplete; none when no coverage proof exists.
+        accuracy:
+          type: string
+          enum:
+            - exact
+            - lower_bound
+            - not_applicable
+          description: exact when coverage is full and complete; lower_bound when coverage is partial; not_applicable when coverage is none.
+        sampleCount:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: Number of offline transition rows contributing to offline_count; null when coverage is none.
+        offlineEventCount:
+          type: integer
+          minimum: 0
+          nullable: true
+          description: Alias for sampleCount; null when coverage is none.
+        effectiveSamplingIntervalSeconds:
+          type: integer
+          minimum: 0
+        allowedGapSeconds:
+          type: integer
+          minimum: 0
+        boundarySamplesUsed:
+          $ref: '#/components/schemas/GatewayAvailabilityBoundarySamplesUsed'
+        availabilityCoverage:
+          $ref: '#/components/schemas/GatewayAvailabilityIngestionCoverage'
+
+    GatewayAvailabilityData:
+      type: object
+      description: Gateway availability state summary data.
       required:
         - gw_uuid
+        - fetch_status
         - offline_count
       properties:
         gw_uuid:
           $ref: '#/components/schemas/RouterId'
+        fetch_status:
+          type: string
+          enum:
+            - success
+          description: Status string for availability data retrieval; always "success" in HTTP 200 responses.
+          example: success
         offline_count:
           type: integer
           format: int64
           minimum: 0
-          description: Number of online-to-offline transitions in the requested half-open interval.
+          nullable: true
+          description: >
+            Number of online-to-offline transitions in the requested half-open interval.
+            Non-negative integer when coverage is "full" or "partial"; null when coverage is
+            "none" and accuracy is "not_applicable".
+
+    GatewayAvailabilitySummaryResponse:
+      type: object
+      description: >
+        Wrapped gateway availability summary response containing meta and data. Transition state
+        is determined using the restart-safe device_availability_state table, while
+        device_availability_events stores the counted transition history. The meta object
+        provides proof of coverage, accuracy, and boundary metadata. When coverage is "none"
+        and accuracy is "not_applicable", sampleCount, offlineEventCount, and offline_count
+        are all null.
+      required:
+        - meta
+        - data
+      properties:
+        meta:
+          $ref: '#/components/schemas/GatewayAvailabilityMeta'
+        data:
+          $ref: '#/components/schemas/GatewayAvailabilityData'
 
     SystemCommandDetails:
       type: object
@@ -2120,11 +2277,11 @@ paths:
         - $ref: '#/components/parameters/LookbackHours'
       responses:
         200:
-          description: Return gateway offline transition count.
+          description: Return wrapped gateway availability summary response with coverage proof and transition count.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/GatewayOfflineSummary'
+                $ref: '#/components/schemas/GatewayAvailabilitySummaryResponse'
         400:
           $ref: '#/components/responses/AvailabilityAnalyticsBadRequest'
         401:
