@@ -1342,10 +1342,6 @@ effective boundaries:
   effective_start = max(requested_start, proven_session_start)
   effective_end = min(requested_end, proven_session_end)
 
-effective boundaries:
-  effective_start = max(requested_start, proven_session_start)
-  effective_end = min(requested_end, proven_session_end)
-
 start_sample:
   exact sample at effective_start, if available
   otherwise latest available sample at or before effective_start
@@ -1917,6 +1913,7 @@ None
     "coverage": "full",
     "accuracy": "exact",
     "sampleCount": 6,
+    "offlineEventCount": 6,
     "effectiveSamplingIntervalSeconds": 0,
     "allowedGapSeconds": 0,
     "boundarySamplesUsed": {
@@ -2003,6 +2000,7 @@ Fields:
   serialNumber    TEXT
   event_type      TEXT
   event_time      BIGINT
+  source_sequence TEXT NULL
   reason          TEXT
   connection_ip   TEXT
   session_id      TEXT
@@ -2014,11 +2012,13 @@ Indexes:
   availability_serial_time_index:
     serialNumber ASC
     event_time ASC
+    source_sequence ASC
 
   availability_board_serial_time_index:
     board_id ASC
     serialNumber ASC
     event_time ASC
+    source_sequence ASC
 
 Unique constraints:
   availability_idempotency_key_unique:
@@ -2042,6 +2042,7 @@ serialNumber
 board_id
 current_state
 last_event_time
+last_source_sequence
 last_idempotency_key
 updated_at
 metadata
@@ -2055,6 +2056,7 @@ Fields:
   board_id             TEXT NULL
   current_state        TEXT
   last_event_time      BIGINT
+  last_source_sequence TEXT NULL
   last_idempotency_key TEXT
   updated_at           BIGINT
   metadata             TEXT
@@ -2067,9 +2069,9 @@ Constraints:
   current_state must be one of: online, offline, unknown
 ```
 
-`device_availability_events` stores only online/offline transition history. `device_availability_state` stores the authoritative current state and the latest accepted source availability event time.
+`device_availability_events` stores only online/offline transition history. `device_availability_state` stores the authoritative current state and the latest accepted source availability ordering key.
 
-`last_event_time` is the source-event ordering watermark after events have passed the required per-serial ordering mechanism. It must be populated from the normalized Kafka source timestamp (`event_time`) and used for stale detection only after Analytics has established that no older transition for the same serialNumber can still be accepted. `DeviceInfo.lastContact` may remain local contact or processing metadata, but it must not be used to order source events because Kafka delivery can be delayed.
+`last_event_time` and `last_source_sequence` form the persisted source ordering key after events have passed the required per-serial ordering mechanism. `last_event_time` must be populated from the normalized Kafka source timestamp (`event_time`), and `last_source_sequence` must be populated from a reliable source sequence, source offset within the producing system, or another deterministic source-provided ordering value when one exists. The composite key is used for stale detection only after Analytics has established that no older transition for the same serialNumber can still be accepted. `DeviceInfo.lastContact` may remain local contact or processing metadata, but it must not be used to order source events because Kafka delivery can be delayed.
 
 Add persisted ingestion coverage tables for availability exactness:
 
@@ -2097,11 +2099,26 @@ detected_at
 metadata
 ```
 
-`processed_through_event_time` is a source-event-time watermark, not a Kafka processing-time or `DeviceInfo.lastContact` value. Kafka topic, partition, and offset are stored only as proof metadata. An exact zero is allowed only when the serialNumber checkpoint proves `coverage_start <= startTime`, `processed_through_event_time >= endTime`, and no persisted gap overlaps the requested range.
+`processed_through_event_time` is a source-event-time watermark, not a Kafka processing-time or `DeviceInfo.lastContact` value. Kafka topic, partition, and offset are stored only as proof metadata.
+
+For availability coverage decisions, compute:
+
+```text
+coverageTargetEnd = endTime - allowedIngestionDelaySeconds
+```
+
+An exact result is allowed only when the serialNumber checkpoint proves
+`coverage_start <= startTime`, `processed_through_event_time >=
+coverageTargetEnd`, and no persisted gap overlaps `[startTime,
+coverageTargetEnd)`. This permits healthy near-real-time requests whose most
+recent gateway message is slightly before `endTime`, while still surfacing
+stale ingestion as partial coverage. Set `allowedIngestionDelaySeconds` to the
+configured maximum tolerated ingestion/source-message delay for availability
+queries, and return it in `meta.availabilityCoverage`.
 
 The checkpoint must be advanced durably with event processing. For a message that changes availability state or updates same-state metadata, the state update, optional transition insert, and checkpoint update must commit in one database transaction before the corresponding Kafka offset is committed. Rebalances and restarts must reload the checkpoint and any persisted reorder-buffer state needed by the selected ordering strategy. If the implementation cannot prove continuity after a restart, rebalance, topic retention truncation, skipped unparseable connection message, reorder-window overflow, or offset discontinuity, it must persist an ingestion gap and stop returning exact coverage for overlapping ranges.
 
-When one serialNumber has no recent messages, do not infer coverage from an empty event table. The API may return an exact zero only if that serialNumber has a durable checkpoint whose `processed_through_event_time` reaches the requested `endTime`; otherwise the result is partial/lower-bound or unavailable according to the coverage rules.
+When one serialNumber has no recent messages, do not infer coverage from an empty event table. The API may return an exact zero only if that serialNumber has a durable checkpoint whose `processed_through_event_time` reaches `coverageTargetEnd`; otherwise the result is partial/lower-bound or unavailable according to the coverage rules. A partition-level or source-level watermark may be used instead of per-message checkpoint advancement only if it is durable, serialNumber-scoped for the queried gateway, and can prove that no earlier source event for that gateway remains unprocessed.
 
 Add a `DeviceAvailabilityEvent` REST/storage object with `to_json` and `from_json` support in:
 
@@ -2358,15 +2375,33 @@ For each valid connection message emitted by the per-serial ordering stage:
       serializable transaction with retry
     treat previous state as unknown
 
-  if event_time < last_event_time:
+  order_key = (event_time, source_sequence)
+  last_order_key = (last_event_time, last_source_sequence)
+
+  if order_key < last_order_key:
     treat the message as stale
     do not insert an availability event
     do not update device_availability_state
     COMMIT
     stop processing this message
 
-  if event_time == last_event_time and no deterministic source tie-breaker proves this message is later:
-    treat the message as duplicate or non-advancing
+  if order_key == last_order_key:
+    if idempotency_key equals last_idempotency_key:
+      treat the message as an exact duplicate
+    else:
+      persist an ingestion ambiguity gap for this serialNumber and order_key
+      treat the message as ambiguous, not exact
+    do not insert an availability event
+    do not update device_availability_state
+    COMMIT
+    stop processing this message
+
+  if event_time == last_event_time and source_sequence is missing or not comparable:
+    if idempotency_key equals last_idempotency_key:
+      treat the message as an exact duplicate
+    else:
+      persist an ingestion ambiguity gap for this serialNumber and event_time
+      treat the message as unordered, not exact
     do not insert an availability event
     do not update device_availability_state
     COMMIT
@@ -2383,15 +2418,16 @@ For each valid connection message emitted by the per-serial ordering stage:
         update device_availability_state:
           current_state = online
           last_event_time = event_time
+          last_source_sequence = source_sequence
           last_idempotency_key = idempotency_key
           updated_at = processing time
       else:
         treat as duplicate and do not update state
     else if current_state is online:
-      update device_availability_state metadata, last_event_time, last_idempotency_key, and updated_at
+      update device_availability_state metadata, last_event_time, last_source_sequence, last_idempotency_key, and updated_at
       do not insert a transition event
     else:
-      update device_availability_state to online and last_event_time
+      update device_availability_state to online, last_event_time, and last_source_sequence
       do not insert an initial online transition event
 
   if incomingState is offline:
@@ -2401,15 +2437,16 @@ For each valid connection message emitted by the per-serial ordering stage:
         update device_availability_state:
           current_state = offline
           last_event_time = event_time
+          last_source_sequence = source_sequence
           last_idempotency_key = idempotency_key
           updated_at = processing time
       else:
         treat as duplicate and do not update state
     else if current_state is offline:
-      update device_availability_state metadata, last_event_time, last_idempotency_key, and updated_at
+      update device_availability_state metadata, last_event_time, last_source_sequence, last_idempotency_key, and updated_at
       do not insert a transition event
     else:
-      update device_availability_state to offline and last_event_time
+      update device_availability_state to offline, last_event_time, and last_source_sequence
       do not insert an initial offline transition event because the prior state is unknown
 
   COMMIT
@@ -2436,14 +2473,16 @@ Atomically create or lock the device_availability_state row for :serialNumber.
 Read:
   current_state
   last_event_time
+  last_source_sequence
   last_idempotency_key
 
--- Validate timestamp and determine whether state changed.
+-- Validate composite ordering key and determine whether state changed.
 -- Insert into device_availability_events only if state changed.
 
 Update device_availability_state only when timestamp and idempotency checks allow it:
   current_state = :newState
   last_event_time = :eventTime
+  last_source_sequence = :sourceSequence
   last_idempotency_key = :idempotencyKey
   updated_at = :processingTime
   board_id = :boardId when known, otherwise keep existing or NULL according to metadata policy
@@ -2455,18 +2494,22 @@ COMMIT;
 Staleness rule after ordering:
 
 ```text
-An event is stale when its source event_time is older than the persisted
-device_availability_state.last_event_time for the same serialNumber and the
-selected ordering strategy has already advanced the serialNumber beyond that
-source time.
+An event is stale when its source ordering key `(event_time, source_sequence)` is
+older than the persisted
+`device_availability_state.(last_event_time, last_source_sequence)` for the same
+serialNumber and the selected ordering strategy has already advanced the
+serialNumber beyond that source key.
 
 Stale or non-advancing events must not insert counted availability events and must
 not update device_availability_state, even if their idempotency_key has not been
 seen before.
 
-An event with the same event_time is non-advancing unless a deterministic source
-tie-breaker proves it occurred later. Exact Kafka redelivery should be ignored by
-the idempotency key.
+Two different logical events with the same `event_time` must be ordered by a
+deterministic source sequence. Exact Kafka redelivery should be ignored by the
+idempotency key. If two different logical events share the same `event_time` and
+no reliable source sequence exists, Analytics must persist an ingestion ambiguity
+gap for that source time and downgrade overlapping availability queries instead
+of silently discarding one transition as non-advancing.
 ```
 
 ### Store Only State Transitions
@@ -2565,6 +2608,10 @@ If startTime >= availabilityValidFrom:
   query device_availability_events normally
 ```
 
+For `meta.coverage = "none"` and `meta.accuracy = "not_applicable"`, return
+`data.offline_count = null`. Do not return a numeric `0` when the API has no
+coverage proof for the requested interval.
+
 Rejecting pre-cutover ranges prevents a successful zero response from meaning either
 "no outages occurred" or "Analytics was not collecting availability events yet."
 
@@ -2621,6 +2668,7 @@ Use an HTTP error:
     "coverage": "full",
     "accuracy": "exact",
     "sampleCount": 0,
+    "offlineEventCount": 0,
     "effectiveSamplingIntervalSeconds": 0,
     "allowedGapSeconds": 0,
     "boundarySamplesUsed": {
@@ -2646,10 +2694,22 @@ Use an HTTP error:
 ```
 
 An exact zero is valid only when availability coverage proves the complete
-requested interval: `coverageStart <= startTime`, `processedThrough >= endTime`,
+requested interval after the configured ingestion allowance: `coverageStart <=
+startTime`, `processedThrough >= endTime - allowedIngestionDelaySeconds`,
 `ingestionGapKnown = false`, and `proofSource != "unavailable"`. Otherwise a
-zero matching event count must be reported as partial/lower-bound or unavailable
-coverage according to the availability coverage rules.
+zero matching event count must be reported as partial/lower-bound, or as
+unavailable with `offline_count: null` when no coverage proof exists.
+
+For the availability endpoint, `sampleCount` is retained for response-shape
+consistency with the other summary APIs and means the number of offline
+transition rows contributing to `offline_count`. `offlineEventCount` is the
+availability-specific alias for the same value. Online transition rows may
+contribute to `observedWindow` and `sourceWindow`, but they do not contribute to
+`sampleCount`, `offlineEventCount`, or `offline_count`.
+
+`boundarySamplesUsed.beforeStart` is `true` only when a pre-start boundary event
+was actually selected. Event counting does not require a pre-start boundary
+event when durable availability coverage proves the requested interval.
 
 ### Internal Error
 

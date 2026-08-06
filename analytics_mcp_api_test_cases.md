@@ -858,17 +858,19 @@ updated_at >= processing time
     "coverage": "full",
     "accuracy": "exact",
     "sampleCount": 0,
+    "offlineEventCount": 0,
     "effectiveSamplingIntervalSeconds": 0,
     "allowedGapSeconds": 0,
     "boundarySamplesUsed": {
-      "beforeStart": true,
+      "beforeStart": false,
       "atStart": false,
       "atEnd": false,
       "afterEnd": false
     },
     "availabilityCoverage": {
       "coverageStart": "<= startTime",
-      "processedThrough": ">= endTime",
+      "processedThrough": ">= endTime - allowedIngestionDelaySeconds",
+      "allowedIngestionDelaySeconds": "<configured availability ingestion delay>",
       "ingestionGapKnown": false,
       "proofSource": "serial_partition_checkpoint"
     }
@@ -990,17 +992,19 @@ event_time = disconnection message timestamp
     "coverage": "full",
     "accuracy": "exact",
     "sampleCount": 1,
+    "offlineEventCount": 1,
     "effectiveSamplingIntervalSeconds": 0,
     "allowedGapSeconds": 0,
     "boundarySamplesUsed": {
-      "beforeStart": true,
+      "beforeStart": false,
       "atStart": false,
       "atEnd": false,
       "afterEnd": false
     },
     "availabilityCoverage": {
       "coverageStart": "<= startTime",
-      "processedThrough": ">= endTime",
+      "processedThrough": ">= endTime - allowedIngestionDelaySeconds",
+      "allowedIngestionDelaySeconds": "<configured availability ingestion delay>",
       "ingestionGapKnown": false,
       "proofSource": "serial_partition_checkpoint"
     }
@@ -1197,17 +1201,19 @@ API result:
     "coverage": "full",
     "accuracy": "exact",
     "sampleCount": 1,
+    "offlineEventCount": 1,
     "effectiveSamplingIntervalSeconds": 0,
     "allowedGapSeconds": 0,
     "boundarySamplesUsed": {
-      "beforeStart": true,
+      "beforeStart": false,
       "atStart": false,
       "atEnd": false,
       "afterEnd": false
     },
     "availabilityCoverage": {
       "coverageStart": "<= startTime",
-      "processedThrough": ">= endTime",
+      "processedThrough": ">= endTime - allowedIngestionDelaySeconds",
+      "allowedIngestionDelaySeconds": "<configured availability ingestion delay>",
       "ingestionGapKnown": false,
       "proofSource": "serial_partition_checkpoint"
     }
@@ -1315,17 +1321,19 @@ The API returns:
     "coverage": "full",
     "accuracy": "exact",
     "sampleCount": 3,
+    "offlineEventCount": 3,
     "effectiveSamplingIntervalSeconds": 0,
     "allowedGapSeconds": 0,
     "boundarySamplesUsed": {
-      "beforeStart": true,
+      "beforeStart": false,
       "atStart": false,
       "atEnd": false,
       "afterEnd": false
     },
     "availabilityCoverage": {
       "coverageStart": "<= startTime",
-      "processedThrough": ">= endTime",
+      "processedThrough": ">= endTime - allowedIngestionDelaySeconds",
+      "allowedIngestionDelaySeconds": "<configured availability ingestion delay>",
       "ingestionGapKnown": false,
       "proofSource": "serial_partition_checkpoint"
     }
@@ -1600,7 +1608,7 @@ Verify successful empty results.
 ### Preconditions
 
 * The requested range starts at or after `availabilityValidFrom`.
-* The gateway has a durable `device_availability_ingestion_checkpoint` with `coverage_start <= startTime` and `processed_through_event_time >= endTime`.
+* The gateway has a durable `device_availability_ingestion_checkpoint` with `coverage_start <= startTime` and `processed_through_event_time >= endTime - allowedIngestionDelaySeconds`.
 * No `device_availability_ingestion_gaps` row overlaps `[startTime, endTime)`.
 * The cutover behavior for ranges beginning before `availabilityValidFrom` is covered by `TC-COMMON-023`.
 
@@ -1615,7 +1623,7 @@ Verify successful empty results.
 * `meta.coverage = "full"`.
 * `meta.accuracy = "exact"`.
 * `meta.availabilityCoverage.coverageStart <= startTime`.
-* `meta.availabilityCoverage.processedThrough >= endTime`.
+* `meta.availabilityCoverage.processedThrough >= endTime - meta.availabilityCoverage.allowedIngestionDelaySeconds`.
 * `meta.availabilityCoverage.ingestionGapKnown = false`.
 * `meta.availabilityCoverage.proofSource != "unavailable"`.
 * `data.gw_uuid = "60cf84f22290"`.
@@ -1645,17 +1653,19 @@ Verify successful empty results.
     "coverage": "full",
     "accuracy": "exact",
     "sampleCount": 0,
+    "offlineEventCount": 0,
     "effectiveSamplingIntervalSeconds": 0,
     "allowedGapSeconds": 0,
     "boundarySamplesUsed": {
-      "beforeStart": true,
+      "beforeStart": false,
       "atStart": false,
       "atEnd": false,
       "afterEnd": false
     },
     "availabilityCoverage": {
       "coverageStart": "<= startTime",
-      "processedThrough": ">= endTime",
+      "processedThrough": ">= endTime - allowedIngestionDelaySeconds",
+      "allowedIngestionDelaySeconds": "<configured availability ingestion delay>",
       "ingestionGapKnown": false,
       "proofSource": "serial_partition_checkpoint"
     }
@@ -1686,7 +1696,7 @@ availability ingestion stream does not prove full interval coverage.
 
 * The requested range starts at or after `availabilityValidFrom`.
 * No `offline` rows match `[startTime, endTime)`.
-* `availabilityCoverage.processedThrough < endTime` or a known ingestion gap overlaps the requested range.
+* `availabilityCoverage.processedThrough < endTime - allowedIngestionDelaySeconds` or a known ingestion gap overlaps the covered portion of the requested range.
 
 ### Steps
 
@@ -1729,7 +1739,39 @@ interval result when no durable availability coverage proof exists.
 * `meta.coverage = "none"`.
 * `meta.accuracy = "not_applicable"`.
 * `meta.availabilityCoverage.proofSource = "unavailable"`.
-* `data.offline_count` is not asserted as an exact outage count for the interval.
+* `data.offline_count = null`.
+
+---
+
+## TC-AVAIL-018C: No offline events with last message inside ingestion allowance
+
+### Objective
+
+Verify that a healthy near-real-time query can still return exact coverage when
+the latest gateway source message is slightly before `endTime`.
+
+### Preconditions
+
+* The requested range starts at or after `availabilityValidFrom`.
+* No `offline` rows match `[startTime, endTime)`.
+* `allowedIngestionDelaySeconds = 60`.
+* The per-serial checkpoint has `coverage_start <= startTime`.
+* The latest processed source event for the gateway is a ping at `endTime - 30 seconds`.
+* No `device_availability_ingestion_gaps` row overlaps `[startTime, endTime - allowedIngestionDelaySeconds)`.
+
+### Steps
+
+1. Set the availability checkpoint `processed_through_event_time = endTime - 30 seconds`.
+2. Call the availability-summary API with `timestampTill = endTime`.
+
+### Expected result
+
+* HTTP `200 OK`.
+* `meta.coverage = "full"`.
+* `meta.accuracy = "exact"`.
+* `meta.availabilityCoverage.processedThrough >= endTime - meta.availabilityCoverage.allowedIngestionDelaySeconds`.
+* `meta.availabilityCoverage.ingestionGapKnown = false`.
+* `data.offline_count = 0`.
 
 ---
 
@@ -1753,7 +1795,7 @@ Requested lookback: 24 hours
 * `meta.coverage = "full"`.
 * `meta.accuracy = "exact"`.
 * `meta.availabilityCoverage.coverageStart <= startTime`.
-* `meta.availabilityCoverage.processedThrough >= endTime`.
+* `meta.availabilityCoverage.processedThrough >= endTime - meta.availabilityCoverage.allowedIngestionDelaySeconds`.
 * `meta.availabilityCoverage.ingestionGapKnown = false`.
 * `meta.availabilityCoverage.proofSource != "unavailable"`.
 
@@ -2188,11 +2230,12 @@ last_idempotency_key = ping-1210
 
 ---
 
-## TC-AVAIL-029A: Equal timestamp without tie-breaker is non-advancing
+## TC-AVAIL-029A: Equal timestamp without source sequence creates ambiguity gap
 
 ### Objective
 
-Verify that an opposite-state message with the same source timestamp does not create an arbitrary transition.
+Verify that a distinct opposite-state message with the same source timestamp is
+not silently discarded when no reliable source sequence can prove ordering.
 
 ### Steps
 
@@ -2204,18 +2247,63 @@ last_event_time = 12:10
 last_idempotency_key = ping-1210
 ```
 
-2. Deliver a disconnection for the same gateway with `event_time = 12:10` and no reliable source sequence.
+2. Deliver a disconnection for the same gateway with `event_time = 12:10`, a different logical `idempotency_key`, and no reliable source sequence.
+3. Query `device_availability_state`, `device_availability_events`, and `device_availability_ingestion_gaps`.
+
+### Expected result
+
+* The disconnection is treated as unordered or ambiguous, not as an exact duplicate.
+* No offline transition event is inserted.
+* `device_availability_state` remains unchanged.
+* An ingestion ambiguity gap is persisted for the overlapping source time.
+* Availability queries overlapping the ambiguous source time do not return `meta.accuracy = "exact"`.
+
+---
+
+## TC-AVAIL-029B: Equal timestamp with source sequence preserves transitions
+
+### Objective
+
+Verify that distinct opposite-state events sharing a timestamp are processed when
+a deterministic source sequence orders them.
+
+### Preconditions
+
+* Gateway state is initialized as online before `12:00:00`.
+* The source provides a reliable per-serial sequence field.
+
+### Steps
+
+1. Deliver a disconnection with:
+
+```text
+event_time = 12:00:00
+source_sequence = 100
+idempotency_key = offline-120000-100
+```
+
+2. Deliver a ping with:
+
+```text
+event_time = 12:00:00
+source_sequence = 101
+idempotency_key = online-120000-101
+```
+
 3. Query `device_availability_state` and `device_availability_events`.
 
 ### Expected result
 
-* The disconnection is treated as duplicate or non-advancing.
-* No offline transition event is inserted.
-* `device_availability_state` remains unchanged.
+* The offline transition is inserted with ordering key `(12:00:00, 100)`.
+* The online transition is inserted with ordering key `(12:00:00, 101)`.
+* `device_availability_state.current_state = online`.
+* `device_availability_state.last_event_time = 12:00:00`.
+* `device_availability_state.last_source_sequence = 101`.
+* A full-coverage query over this interval returns `offline_count = 1`.
 
 ---
 
-## TC-AVAIL-029B: Delayed offline before newer same-state ping is not lost
+## TC-AVAIL-029C: Delayed offline before newer same-state ping is not lost
 
 ### Objective
 
@@ -2369,6 +2457,8 @@ Verify that online transition rows do not affect `offline_count`.
 
 * The API counts only the two stored `offline` rows.
 * Stored `online` rows are ignored by the offline count.
+* `meta.sampleCount = 2`.
+* `meta.offlineEventCount = 2`.
 * `offline_count` is `2`.
 
 ---
@@ -2441,17 +2531,19 @@ Ethernet reconnected        → online event
     "coverage": "full",
     "accuracy": "exact",
     "sampleCount": 2,
+    "offlineEventCount": 2,
     "effectiveSamplingIntervalSeconds": 0,
     "allowedGapSeconds": 0,
     "boundarySamplesUsed": {
-      "beforeStart": true,
+      "beforeStart": false,
       "atStart": false,
       "atEnd": false,
       "afterEnd": false
     },
     "availabilityCoverage": {
       "coverageStart": "<= startTime",
-      "processedThrough": ">= endTime",
+      "processedThrough": ">= endTime - allowedIngestionDelaySeconds",
+      "allowedIngestionDelaySeconds": "<configured availability ingestion delay>",
       "ingestionGapKnown": false,
       "proofSource": "serial_partition_checkpoint"
     }
@@ -4026,7 +4118,7 @@ Availability:    data.fetch_status = success, data.offline_count = 0, meta.cover
 ```
 
 * All metric responses use HTTP `200 OK` when queries succeed but return no data.
-* Availability returns `data.fetch_status = "success"` and `data.offline_count = 0` as an exact result only when `startTime >= availabilityValidFrom`, `meta.coverage = "full"`, and `meta.availabilityCoverage.processedThrough >= endTime`.
+* Availability returns `data.fetch_status = "success"` and `data.offline_count = 0` as an exact result only when `startTime >= availabilityValidFrom`, `meta.coverage = "full"`, and `meta.availabilityCoverage.processedThrough >= endTime - meta.availabilityCoverage.allowedIngestionDelaySeconds`.
 * If `startTime < availabilityValidFrom`, Availability returns `400 Bad Request` with `error: "availability_range_before_cutover"`.
 
 ---
@@ -4163,6 +4255,9 @@ fetch_status
 offline_count
 ```
 
+`offline_count` is an integer for `coverage = "full"` or `coverage = "partial"`.
+It is `null` for `coverage = "none"` and `accuracy = "not_applicable"`.
+
 Expected availability-specific `meta` fields:
 
 ```text
@@ -4174,6 +4269,7 @@ selection
 coverage
 accuracy
 sampleCount
+offlineEventCount
 boundarySamplesUsed
 availabilityCoverage
 ```
@@ -4191,6 +4287,13 @@ proofSource
 `coverageStart` and `processedThrough` are derived from durable per-serial
 availability ingestion checkpoint state, and `ingestionGapKnown` reflects
 persisted gaps that overlap the requested interval.
+
+For availability responses, `sampleCount` and `offlineEventCount` both mean the
+number of offline transition rows contributing to `offline_count`; online
+transition rows do not contribute to either field. `boundarySamplesUsed` is
+data-dependent: `beforeStart` is `true` only when a pre-start boundary event was
+actually selected by the query setup, and event counting does not require a
+pre-start boundary event.
 
 ---
 
