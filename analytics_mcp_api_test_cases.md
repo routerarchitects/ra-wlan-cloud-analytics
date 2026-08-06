@@ -3107,23 +3107,24 @@ Expected response:
 ### Test data
 
 ```text
-temperature_migration_cutover_time = 2026-07-29T10:00:00Z
-sample time = 2026-07-29T09:59:59Z
-wifi_temp = 62
+temperatureMigrationCutoverTime = 2026-07-29T10:00:00Z
+API requested startTime = 2026-07-29T10:00:00Z
+Database contains historical row: sample time = 2026-07-29T09:59:59Z, wifi_temp = 62
 ```
 
 ### Expected result
 
-* Sample is excluded because it is before `temperature_migration_cutover_time`.
+* The pre-cutover database sample is excluded by the database query filter `timestamp >= startTime`.
 * It does not affect minimum, maximum or average.
+* Note: If API requested `startTime` were before `temperatureMigrationCutoverTime` (e.g. `09:55:00Z`), the request would return `400 Bad Request` per `TC-TEMP-017`.
 
 ---
 
-## TC-TEMP-008: Post-cutover measured zero temperature
+## TC-TEMP-008: Zero temperature treated as missing-sensor sentinel
 
 ### Preconditions
 
-The sample is at or after `temperature_migration_cutover_time`:
+The sample contains:
 
 ```text
 wifi_temp = 0
@@ -3131,8 +3132,9 @@ wifi_temp = 0
 
 ### Expected result
 
-* The sample is included as a valid measured value.
-* It is not replaced with `20`.
+* `wifi_temp = 0` is treated as an uninitialized or missing-sensor sentinel across all OpenWiFi telemetry.
+* The sample is excluded from temperature aggregation and does not contribute to min, max, or average calculations.
+* If all samples for a band have `wifi_temp = 0`, the response returns `null` for that band's min, max, and average fields.
 
 ---
 
@@ -3157,12 +3159,13 @@ wifi_temp = 0
 
 ### Preconditions
 
-* Record timestamp is before `temperature_migration_cutover_time`.
-* `wifi_temp = 20`.
+* `temperatureMigrationCutoverTime = 2026-07-29T10:00:00Z`.
+* API requested `startTime = 2026-07-29T10:00:00Z`.
+* Database contains pre-cutover record timestamp `2026-07-29T09:59:00Z` with `wifi_temp = 20`.
 
 ### Expected result
 
-* The pre-cutover value is excluded because historical temperature values cannot reliably distinguish measured values from synthetic fallback values.
+* The pre-cutover database row is excluded by `timestamp >= startTime` filtering because historical temperature values cannot reliably distinguish measured values from synthetic fallback values.
 * It does not affect minimum, maximum or average.
 
 ---
@@ -3172,13 +3175,14 @@ wifi_temp = 0
 ### Test data
 
 ```text
-Record timestamp is before temperature_migration_cutover_time
-wifi_temp = 62
+temperatureMigrationCutoverTime = 2026-07-29T10:00:00Z
+API requested startTime = 2026-07-29T10:00:00Z
+Database contains pre-cutover record timestamp 2026-07-29T09:55:00Z with wifi_temp = 62
 ```
 
 ### Expected result
 
-* The sample is excluded because all pre-cutover temperature records are ignored.
+* The sample is excluded by `timestamp >= startTime` filtering because all pre-cutover temperature records are ignored.
 
 ---
 
@@ -3202,13 +3206,16 @@ wifi_temp = 20
 
 ### Test data
 
+`temperatureMigrationCutoverTime` = `2026-07-29T10:00:00Z`
+API requested window: `startTime = 2026-07-29T10:00:00Z`, `endTime = 2026-07-29T10:05:00Z`
+
 ```text
-2.4 GHz:
-60 valid
-20 historical ambiguous
-65 valid
-null invalid
-70 valid
+2.4 GHz database samples:
+09:59:00Z  wifi_temp = 20   (pre-cutover DB row -> excluded by timestamp >= startTime)
+10:01:00Z  wifi_temp = 60   (post-cutover valid sample -> included)
+10:02:00Z  wifi_temp = 65   (post-cutover valid sample -> included)
+10:03:00Z  wifi_temp = null (missing sample -> excluded)
+10:04:00Z  wifi_temp = 70   (post-cutover valid sample -> included)
 ```
 
 ### Expected result
@@ -3219,7 +3226,7 @@ max = 70
 avg = 65
 ```
 
-Only `60`, `65`, and `70` are included.
+Only post-cutover valid samples `60`, `65`, and `70` are included. Pre-cutover DB row (`09:59:00Z`) and `null` are excluded.
 
 ---
 
@@ -3252,11 +3259,24 @@ Two 5 GHz radios publish valid temperatures.
 
 ---
 
-## TC-TEMP-017: Temperature samples outside the requested range
+## TC-TEMP-017: Requested range starts before temperature migration cutover
+
+### Test data
+
+Query requested `startTime` is strictly before `temperatureMigrationCutoverTime` (`startTime < temperatureMigrationCutoverTime`).
 
 ### Expected result
 
-* Only samples where `effective_start_time <= sample_time < endTime` are included, where `effective_start_time = max(startTime, temperature_migration_cutover_time)`.
+* HTTP `400 Bad Request`.
+* Response JSON envelope:
+
+```json
+{
+  "error": "temperature_range_before_cutover",
+  "message": "The requested summary interval starts before the temperature migration cutover timestamp."
+}
+```
+* No truncated or partial temperature summary is returned for pre-cutover intervals.
 
 ---
 
@@ -3290,6 +3310,87 @@ A timepoint contains invalid JSON in `radio_data`.
 * Other valid records in the requested range are processed.
 * Service does not crash and does not return an internal error solely because one row is malformed.
 * Partial invalid data must not produce fabricated temperatures.
+
+---
+
+## TC-CONFIG-TEMP-001: Valid file configuration starts service
+
+### Preconditions
+
+`temperature.migration_cutover_time = "2026-07-01T00:00:00Z"` in configuration file. `TEMPERATURE_MIGRATION_CUTOVER_TIME` environment variable is unset.
+
+### Expected result
+
+* Service initializes successfully.
+* `temperatureMigrationCutoverTime` is set to `2026-07-01T00:00:00Z`.
+
+---
+
+## TC-CONFIG-TEMP-002: Valid environment configuration starts service
+
+### Preconditions
+
+`TEMPERATURE_MIGRATION_CUTOVER_TIME = "2026-07-01T00:00:00Z"` in environment. `temperature.migration_cutover_time` configuration file key is unset.
+
+### Expected result
+
+* Service initializes successfully.
+* `temperatureMigrationCutoverTime` is set to `2026-07-01T00:00:00Z`.
+
+---
+
+## TC-CONFIG-TEMP-003: Environment configuration takes precedence over file configuration
+
+### Preconditions
+
+* Configuration file: `temperature.migration_cutover_time = "2026-06-01T00:00:00Z"`.
+* Environment variable: `TEMPERATURE_MIGRATION_CUTOVER_TIME = "2026-07-01T00:00:00Z"`.
+
+### Expected result
+
+* Service initializes successfully.
+* `temperatureMigrationCutoverTime` evaluates to `"2026-07-01T00:00:00Z"` (environment variable takes precedence).
+
+---
+
+## TC-CONFIG-TEMP-004: Missing configuration causes fatal startup failure
+
+### Preconditions
+
+Both `temperature.migration_cutover_time` file key and `TEMPERATURE_MIGRATION_CUTOVER_TIME` environment variable are absent or empty.
+
+### Expected result
+
+* Service fails startup immediately.
+* Logs a `FATAL` error: `FATAL: Missing required configuration 'temperature.migration_cutover_time'`.
+* Service process terminates with a non-zero exit code.
+
+---
+
+## TC-CONFIG-TEMP-005: Malformed timestamp causes fatal startup failure
+
+### Preconditions
+
+`temperature.migration_cutover_time = "invalid-date-string"`.
+
+### Expected result
+
+* Service fails startup immediately.
+* Logs a `FATAL` error: `FATAL: Unparseable configuration 'temperature.migration_cutover_time'`.
+* Service process terminates with a non-zero exit code.
+
+---
+
+## TC-CONFIG-TEMP-006: Timezone offset handling
+
+### Preconditions
+
+`temperature.migration_cutover_time = "2026-07-01T05:30:00+05:30"`.
+
+### Expected result
+
+* Timestamp is parsed and normalized to UTC `2026-07-01T00:00:00Z`.
+* Service initializes successfully with canonical UTC timestamp.
 
 ---
 

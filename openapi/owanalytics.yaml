@@ -57,6 +57,33 @@ components:
               value:
                 error: lookback_outside_retention
                 message: Requested range is outside the configured monitoring retention window
+    TemperatureAnalyticsBadRequest:
+      description: Invalid request or temperature range before the supported migration cutover.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TemperatureBadRequestError'
+          examples:
+            invalidRouterId:
+              value:
+                error: invalid_router_id
+                message: routerId must be a 12 to 29 character hexadecimal OWPROV gateway serial number
+            invalidTimestamp:
+              value:
+                error: invalid_timestamp
+                message: timestampTill must be a valid UTC timestamp in YYYY-MM-DDTHH:mm:ssZ format
+            invalidLookbackHours:
+              value:
+                error: invalid_lookback_hours
+                message: lookbackHours must be greater than 0 and within the configured monitoring retention
+            lookbackOutsideRetention:
+              value:
+                error: lookback_outside_retention
+                message: Requested range is outside the configured monitoring retention window
+            temperatureBeforeCutover:
+              value:
+                error: temperature_range_before_cutover
+                message: Temperature summary is only available for ranges starting at or after temperatureMigrationCutoverTime
     AvailabilityAnalyticsBadRequest:
       description: Invalid request or availability range before the supported cutover.
       content:
@@ -1095,6 +1122,23 @@ components:
             - invalid_timestamp
             - invalid_lookback_hours
             - lookback_outside_retention
+        message:
+          type: string
+
+    TemperatureBadRequestError:
+      type: object
+      required:
+        - error
+        - message
+      properties:
+        error:
+          type: string
+          enum:
+            - invalid_router_id
+            - invalid_timestamp
+            - invalid_lookback_hours
+            - lookback_outside_retention
+            - temperature_range_before_cutover
         message:
           type: string
 
@@ -2182,7 +2226,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/GatewayWifiTemperatureSummary'
         400:
-          $ref: '#/components/responses/CommonAnalyticsBadRequest'
+          $ref: '#/components/responses/TemperatureAnalyticsBadRequest'
         401:
           $ref: '#/components/responses/AnalyticsUnauthorized'
         404:

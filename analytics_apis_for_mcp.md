@@ -818,24 +818,29 @@ Do not synthesize a numeric fallback temperature for missing data.
 Do not store a placeholder in wifi_temp for a missing temperature.
 ```
 
-Migration boundary rule:
+Migration boundary configuration & rule:
 
 ```text
-Define a fixed temperature_migration_cutover_time as the deployment/migration
-timestamp where radios[].wifi_temp starts being written consistently.
+temperatureMigrationCutoverTime:
+  source: Analytics service configuration (file key 'temperature.migration_cutover_time' or ENV 'TEMPERATURE_MIGRATION_CUTOVER_TIME')
+  scope: global per deployment
+  format: ISO 8601 / RFC 3339 UTC string (e.g. "2026-07-01T00:00:00Z")
+  required: true (Analytics service fails startup with a FATAL log if missing or unparseable)
 
-Only use temperature records created at or after temperature_migration_cutover_time.
+Only use temperature records created at or after temperatureMigrationCutoverTime.
 Ignore all earlier records because historical temperature values cannot reliably
 distinguish measured values from synthetic fallback values.
 
-If the requested range starts before temperature_migration_cutover_time:
-  effective_start_time = temperature_migration_cutover_time
-else:
-  effective_start_time = startTime
+If the requested range starts before temperatureMigrationCutoverTime (startTime < temperatureMigrationCutoverTime):
+  return 400 Bad Request with JSON error envelope:
+  {
+    "error": "temperature_range_before_cutover",
+    "message": "The requested summary interval starts before the temperature migration cutover timestamp."
+  }
 
 Do not filter out post-cutover samples only because the measured value is 20°C.
-After the cutover, a present wifi_temp value is treated as a legitimate
-measurement.
+After the cutover, a present wifi_temp value is treated as a legitimate measurement.
+However, wifi_temp = 0 is defined as an uninitialized or missing-sensor sentinel across all OpenWiFi telemetry. A sample with wifi_temp = 0, null, 255, or outside the valid range [-40, 125] is treated as a missing sensor reading and MUST be excluded from aggregation for all samples regardless of timestamp.
 ```
 
 The current radio-band mapping is:
@@ -855,20 +860,20 @@ band = 5 → fields ending in _5G
 
 ### Aggregation Logic
 
-Use the current `timepoints.radio_data` JSON array:
+After validating `startTime >= temperatureMigrationCutoverTime`, query the `timepoints.radio_data` JSON array:
 
 ```text
 Load TimePointDB records where:
   boardId == resolvedBoardId
   stored serialNumber == request routerId
-  timestamp >= effective_start_time
+  timestamp >= startTime
   timestamp < endTime
 
 For each record:
   parse radio_data
   for each radio in radio_data:
     if radio.band is 2 or 5:
-      if radio.wifi_temp is present and non-null:
+      if radio.wifi_temp is present, non-null, != 0, and -40 <= radio.wifi_temp <= 125:
         add radio.wifi_temp to that band's sample list
 
 For each band:
@@ -880,8 +885,8 @@ For each band:
 A valid temperature sample is:
 
 ```text
-record timestamp is at or after temperature_migration_cutover_time
-radio.wifi_temp is present and non-null
+record timestamp is at or after temperatureMigrationCutoverTime
+radio.wifi_temp is present, non-null, != 0, and within range [-40, 125]
 ```
 
 If all samples for a band are invalid or missing, return `null` for that band's min, max, and average fields.
