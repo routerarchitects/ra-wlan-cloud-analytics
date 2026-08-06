@@ -670,7 +670,7 @@ Call `GET /api/v1/devices/{routerId}/availability-summary` with a calculated `st
 
 ### Objective
 
-Verify that the required restart-safe state table exists with deterministic fields and constraints.
+Verify that the required restart-safe state table exists with deterministic fields, sequence tracking, and constraints.
 
 ### Expected result
 
@@ -683,11 +683,13 @@ serialNumber
 board_id
 current_state
 last_event_time
+last_source_sequence
 last_idempotency_key
 updated_at
 metadata
 ```
 
+* `last_source_sequence` exists, is nullable (`BIGINT NULL`), and is stored as a 64-bit integer to preserve numeric ordering.
 * `current_state` accepts only `online`, `offline`, or `unknown`.
 * An index exists for `board_id` when board-scoped maintenance queries need it.
 
@@ -697,7 +699,7 @@ metadata
 
 ### Objective
 
-Verify that transition history is stored separately from current state.
+Verify that transition history is stored separately from current state with sequence-aware ordering indexes.
 
 ### Expected result
 
@@ -710,6 +712,7 @@ serialNumber
 board_id
 event_type
 event_time
+source_sequence
 event_id
 idempotency_key
 reason
@@ -722,31 +725,95 @@ metadata
 * `serialNumber` is non-null.
 * `event_type` is non-null.
 * `event_time` is non-null.
+* `source_sequence` exists, is nullable (`BIGINT NULL`), and is stored as a 64-bit integer.
 * `idempotency_key` is non-null and unique.
 * `session_id` exists and is nullable.
-* At least one index supports lookup by `serialNumber` and `event_time`.
+* Sequence-aware composite indexes exist to support deterministic event lookup and ordering, verified via `pg_get_indexdef()` or schema inspection:
+  * `availability_serial_time_index`: `(serialNumber ASC, event_time ASC, source_sequence ASC NULLS FIRST)`
+  * `availability_board_serial_time_index`: `(board_id ASC, serialNumber ASC, event_time ASC, source_sequence ASC NULLS FIRST)`
 * `event_type` accepts only stored transition values `online` and `offline`.
 
 ---
 
-## TC-AVAIL-SCHEMA-003: Availability migrations are idempotent
+## TC-AVAIL-SCHEMA-003: Availability migrations are idempotent across all availability tables
 
 ### Objective
 
-Verify that migration from a database without availability tables creates both required tables safely.
+Verify that migration from a database without availability objects, or with a partial prior release schema missing sequence columns or coverage tables, creates all four required tables and sequence columns safely and idempotently.
 
 ### Steps
 
-1. Start with a previous-version database that has no availability tables.
+1. Start with a database that has no availability objects, or a partial deployment database missing sequence columns or ingestion coverage tables.
 2. Run Analytics migrations.
 3. Run Analytics migrations again.
-4. Inspect the schema.
+4. Inspect the schema and table definitions.
 
 ### Expected result
 
-* `device_availability_events` and `device_availability_state` exist after migration.
-* Re-running migration does not drop or duplicate tables, indexes, or constraints.
+* All four availability storage objects exist after migration:
+  * `device_availability_state`
+  * `device_availability_events`
+  * `device_availability_ingestion_checkpoint`
+  * `device_availability_ingestion_gaps`
+* Both `source_sequence` (`device_availability_events`) and `last_source_sequence` (`device_availability_state`) exist as `BIGINT NULL`.
+* All sequence-aware indexes, primary keys, uniqueness constraints, and state check constraints exist.
+* Re-running migration does not drop, fail, or duplicate tables, columns, indexes, or constraints.
 * Existing `timepoints` and `wificlienthistory` data remains intact.
+
+---
+
+## TC-AVAIL-SCHEMA-004: Ingestion checkpoint table schema exists
+
+### Objective
+
+Verify that durable per-serial ingestion coverage watermarks are stored in a dedicated checkpoint table.
+
+### Expected result
+
+* `device_availability_ingestion_checkpoint` exists.
+* `serialNumber` is the primary key.
+* Required fields exist:
+
+```text
+serialNumber
+coverage_start
+processed_through_event_time
+partition
+offset
+ordering_strategy
+reorder_window_ms
+ingestion_gap_known
+updated_at
+metadata
+```
+
+* `coverage_start` and `processed_through_event_time` exist and are 64-bit integers (`BIGINT`).
+* `ingestion_gap_known` exists and is boolean.
+
+---
+
+## TC-AVAIL-SCHEMA-005: Ingestion gaps table schema exists
+
+### Objective
+
+Verify that persisted availability ingestion gaps are stored in a dedicated gaps table.
+
+### Expected result
+
+* `device_availability_ingestion_gaps` exists.
+* Required fields exist:
+
+```text
+serialNumber
+gap_start_event_time
+gap_end_event_time
+reason
+detected_at
+metadata
+```
+
+* `gap_start_event_time` and `gap_end_event_time` exist and are 64-bit integers (`BIGINT`).
+* An index exists to support range overlapping queries on `(serialNumber ASC, gap_start_event_time ASC, gap_end_event_time ASC)`.
 
 ---
 
@@ -757,6 +824,7 @@ SELECT serialNumber,
        board_id,
        current_state,
        last_event_time,
+       last_source_sequence,
        last_idempotency_key,
        updated_at,
        metadata
@@ -771,7 +839,7 @@ FOR UPDATE;
 SELECT *
 FROM device_availability_events
 WHERE serialNumber = '60cf84f22290'
-ORDER BY event_time DESC
+ORDER BY event_time DESC, source_sequence DESC NULLS LAST
 LIMIT 1;
 ```
 
@@ -781,7 +849,14 @@ LIMIT 1;
 SELECT *
 FROM device_availability_events
 WHERE serialNumber = '60cf84f22290'
-ORDER BY event_time ASC;
+ORDER BY event_time ASC, source_sequence ASC NULLS FIRST;
+```
+
+SQL composite sequence ordering rules:
+
+```text
+- Ascending queries use ORDER BY event_time ASC, source_sequence ASC NULLS FIRST so unsequenced events (source_sequence = NULL) at a timestamp sort before sequenced events at the same timestamp.
+- Descending queries use ORDER BY event_time DESC, source_sequence DESC NULLS LAST so the event with the highest sequence number at a timestamp sorts first, and unsequenced events sort last.
 ```
 
 ### Offline event count query
@@ -1738,6 +1813,8 @@ interval result when no durable availability coverage proof exists.
 * HTTP `200 OK` when the storage query itself succeeds.
 * `meta.coverage = "none"`.
 * `meta.accuracy = "not_applicable"`.
+* `meta.sampleCount = null`.
+* `meta.offlineEventCount = null`.
 * `meta.availabilityCoverage.proofSource = "unavailable"`.
 * `data.offline_count = null`.
 
@@ -2067,7 +2144,8 @@ Verify that first-row creation is concurrency-safe and does not rely on locking 
 * No offline transition row is inserted because the prior state was unknown.
 * An availability-summary response for a window containing these first observations does not report an exact zero, because the prior state boundary is unknown.
 * The response uses `meta.coverage = "partial"` and `meta.accuracy = "lower_bound"` when durable coverage begins at the first observation, or `meta.coverage = "none"` and `meta.accuracy = "not_applicable"` when no coverage proof exists.
-* `data.offline_count = 0` may be returned only as the count of stored offline transitions, not as proof that zero outages occurred in the requested interval.
+* When `meta.coverage = "partial"`, `data.offline_count = 0` is allowed as a lower-bound count of stored offline transitions.
+* When `meta.coverage = "none"`, `meta.sampleCount = null`, `meta.offlineEventCount = null`, and `data.offline_count = null`.
 
 ---
 
@@ -3226,19 +3304,34 @@ GET /api/v1/devices/{routerId}/wifi-clients/usage-summary
 Expected response:
 
 ```json
-[
-  {
-    "mac": "e2:51:95:ed:0f:28",
-    "rx_bytes": 106487500,
-    "tx_bytes": 3851250,
-    "total_bytes": 110338750,
-    "data_consume_rx": "106.49 MB",
-    "data_consume_tx": "3.85 MB",
-    "total_data_usage": "110.34 MB",
-    "usage_accuracy": "exact",
-    "incomplete": false
-  }
-]
+{
+  "requestedTimeWindow": {
+    "startTime": "2026-07-26T12:00:00Z",
+    "endTime": "2026-07-27T12:00:00Z"
+  },
+  "resultTimeWindow": {
+    "earliestActualStartTime": "2026-07-26T12:00:00Z",
+    "latestActualEndTime": "2026-07-27T12:00:00Z",
+    "boundaryFallbackUsed": false
+  },
+  "items": [
+    {
+      "mac": "e2:51:95:ed:0f:28",
+      "rx_bytes": 106487500,
+      "tx_bytes": 3851250,
+      "total_bytes": 110338750,
+      "data_consume_rx": "106.49 MB",
+      "data_consume_tx": "3.85 MB",
+      "total_data_usage": "110.34 MB",
+      "usage_accuracy": "exact",
+      "incomplete": false,
+      "segment_count": 1,
+      "boundary_fallback_used": false
+    }
+  ],
+  "totalClients": 1,
+  "truncated": false
+}
 ```
 
 ---
@@ -3589,7 +3682,20 @@ total = 0
 ### Expected result
 
 ```json
-[]
+{
+  "requestedTimeWindow": {
+    "startTime": "2026-07-26T12:00:00Z",
+    "endTime": "2026-07-27T12:00:00Z"
+  },
+  "resultTimeWindow": {
+    "earliestActualStartTime": null,
+    "latestActualEndTime": null,
+    "boundaryFallbackUsed": false
+  },
+  "items": [],
+  "totalClients": 0,
+  "truncated": false
+}
 ```
 
 * HTTP `200 OK`.
@@ -3643,15 +3749,16 @@ bytes / 1,000,000
 
 ### Expected result
 
-For every client:
+For every client, the total usage invariant is defined on raw byte counters, and each display field is derived using the documented unit formatter:
 
 ```text
 total_bytes = rx_bytes + tx_bytes
-total_data_usage =
-    data_consume_rx + data_consume_tx
+data_consume_rx  = format_bytes(rx_bytes)
+data_consume_tx  = format_bytes(tx_bytes)
+total_data_usage = format_bytes(total_bytes)
 ```
 
-The total must be calculated before display rounding or with consistent rounding rules.
+Direct string addition on formatted fields (e.g. `"10.00 MB" + "20.00 MB"`) is invalid because independent rounding of component display strings can differ from formatted raw byte totals. The test suite asserts `total_bytes = rx_bytes + tx_bytes` on raw integer counters, and verifies `data_consume_rx`, `data_consume_tx`, and `total_data_usage` independently against `format_bytes(...)`.
 
 ---
 
@@ -4021,7 +4128,20 @@ NULL
 ### Expected result
 
 ```json
-[]
+{
+  "requestedTimeWindow": {
+    "startTime": "2026-07-26T12:00:00Z",
+    "endTime": "2026-07-27T12:00:00Z"
+  },
+  "resultTimeWindow": {
+    "firstSampleTime": null,
+    "lastSampleTime": null,
+    "totalSamples": 0
+  },
+  "items": [],
+  "totalClients": 0,
+  "truncated": false
+}
 ```
 
 * HTTP `200 OK`.
@@ -4112,8 +4232,8 @@ Five separate MCP metric HTTP requests are made for the same gateway `routerId`.
 ```text
 Memory API:      null summary fields
 Temperature API: null summary fields
-Usage API:       []
-RSSI API:        []
+Usage API:       object envelope with items: [], totalClients: 0, truncated: false
+RSSI API:        object envelope with items: [], totalClients: 0, truncated: false
 Availability:    data.fetch_status = success, data.offline_count = 0, meta.coverage = full
 ```
 
@@ -4169,7 +4289,7 @@ Availability:    data.fetch_status = success, data.offline_count = 0, meta.cover
 * Existing data remains available.
 * Missing new fields in old rows are handled safely.
 * New fields are stored correctly.
-* Availability tables and indexes are created.
+* All four availability storage tables (`device_availability_state`, `device_availability_events`, `device_availability_ingestion_checkpoint`, `device_availability_ingestion_gaps`), both sequence columns (`source_sequence`, `last_source_sequence`), and associated sequence-aware indexes/constraints are created.
 * No existing data is deleted unintentionally.
 
 ---
@@ -4219,6 +4339,8 @@ data_consume_tx
 total_data_usage
 usage_accuracy
 incomplete
+segment_count
+boundary_fallback_used
 ```
 
 ---
@@ -4270,6 +4392,8 @@ coverage
 accuracy
 sampleCount
 offlineEventCount
+effectiveSamplingIntervalSeconds
+allowedGapSeconds
 boundarySamplesUsed
 availabilityCoverage
 ```
@@ -4288,21 +4412,32 @@ proofSource
 availability ingestion checkpoint state, and `ingestionGapKnown` reflects
 persisted gaps that overlap the requested interval.
 
-For availability responses, `sampleCount` and `offlineEventCount` both mean the
-number of offline transition rows contributing to `offline_count`; online
-transition rows do not contribute to either field. `boundarySamplesUsed` is
-data-dependent: `beforeStart` is `true` only when a pre-start boundary event was
-actually selected by the query setup, and event counting does not require a
-pre-start boundary event.
+For availability responses, `sampleCount` is retained for response-shape
+consistency with the other summary APIs. When `meta.coverage` is `"full"` or `"partial"`, `sampleCount` is defined as:
+
+```text
+sampleCount = offlineEventCount = offline_count
+```
+
+`sampleCount` and `offlineEventCount` both mean the number of offline transition rows in
+`device_availability_events` contributing to `offline_count`. Online recovery transition rows
+(`event_type = 'online'`) are stored in transition history for state tracking and `observedWindow` /
+`sourceWindow` bounds, but they do not contribute to `sampleCount`, `offlineEventCount`, or `offline_count`.
+For `"full"` or `"partial"` coverage, `sampleCount` always equals `offlineEventCount`.
+
+When `meta.coverage = "none"` and `meta.accuracy = "not_applicable"`, `sampleCount`, `offlineEventCount`,
+and `offline_count` are all `null`. `boundarySamplesUsed` is data-dependent: `beforeStart` is `true` only
+when a pre-start boundary event was actually selected by the query setup, and event counting does not require
+a pre-start boundary event.
 
 ---
 
-## TC-CONTRACT-006: Client summary array shape
+## TC-CONTRACT-006: Client summary envelope shape
 
 ### Expected result
 
-* Usage and RSSI summary responses are arrays, not wrapper objects.
-* The endpoints do not define `limit`, `cursor`, `totalClients`, or `truncated` response behavior unless those fields are added to the API contract first.
+* Usage (`GET /api/v1/devices/{routerId}/wifi-clients/usage-summary`) and RSSI (`GET /api/v1/devices/{routerId}/wifi-clients/rssi-summary`) summary responses are object envelopes containing `requestedTimeWindow`, `resultTimeWindow`, `items`, `totalClients`, and `truncated`.
+* When no clients match the requested interval, `items` is an empty array `[]`, `totalClients` is `0`, and `truncated` is `false`.
 
 ---
 
@@ -4354,13 +4489,16 @@ total_bytes         non-negative integer
 data_consume_rx     formatted string using the documented unit
 data_consume_tx     formatted string using the documented unit
 total_data_usage    formatted string using the documented unit
-usage_accuracy      enum string: "exact" or "lower_bound"
+usage_accuracy      enum string: "exact", "bounded_interval", or "lower_bound"
 incomplete          boolean
+segment_count       non-negative integer
+boundary_fallback_used boolean
 ```
 
 * RSSI percentages are numeric.
 * RSSI sample count is an integer.
-* Offline count is a non-negative integer.
+* Offline count is a non-negative integer when coverage is "full" or "partial".
+* It is null when coverage is "none" and accuracy is "not_applicable".
 
 ---
 
@@ -4382,7 +4520,7 @@ The PR implementation is functionally accepted when:
 12. RSSI thresholds and boundary values are classified correctly.
 13. Invalid RSSI values are ignored.
 14. RSSI percentages are calculated per client.
-15. Usage and RSSI client-summary responses use the documented array shape and do not invent pagination or truncation fields.
+15. Usage and RSSI client-summary responses use the documented object envelope shape (`requestedTimeWindow`, `resultTimeWindow`, `items`, `totalClients`, `truncated`) matching TC-CONTRACT-006.
 16. Gateway shutdown and network loss create one offline transition each.
 17. Repeated pings and disconnections do not create duplicate transitions.
 18. Availability events remain queryable after board reassignment.

@@ -1274,6 +1274,8 @@ return the safely provable minimum with no calculation segments:
       "total_data_usage": "0.00 MB",
       "usage_accuracy": "lower_bound",
       "incomplete": true,
+      "segment_count": 0,
+      "boundary_fallback_used": false,
       "calculation_segments": []
     }
   ],
@@ -1370,10 +1372,13 @@ samples between start_sample and end_sample:
   do not sum raw cumulative values as usage
   do sum proven segment deltas when resets or session splits are confirmed
 
-data_consume_rx = SUM(stream rx_bytes segment differentials or lower-bound deltas)
-data_consume_tx = SUM(stream tx_bytes segment differentials or lower-bound deltas)
-total_data_usage = data_consume_rx + data_consume_tx
+rx_bytes    = SUM(stream rx_bytes segment differentials or lower-bound deltas)
+tx_bytes    = SUM(stream tx_bytes segment differentials or lower-bound deltas)
 total_bytes = rx_bytes + tx_bytes
+
+data_consume_rx  = format_bytes(rx_bytes)
+data_consume_tx  = format_bytes(tx_bytes)
+total_data_usage = format_bytes(total_bytes)
 
 stream accuracy =
   exact when the segment has authoritative counter evidence at effective_start
@@ -2012,13 +2017,13 @@ Indexes:
   availability_serial_time_index:
     serialNumber ASC
     event_time ASC
-    source_sequence ASC
+    source_sequence ASC NULLS FIRST
 
   availability_board_serial_time_index:
     board_id ASC
     serialNumber ASC
     event_time ASC
-    source_sequence ASC
+    source_sequence ASC NULLS FIRST
 
 Unique constraints:
   availability_idempotency_key_unique:
@@ -2027,6 +2032,14 @@ Unique constraints:
 Optional indexes:
   availability_event_id_index:
     event_id ASC
+```
+
+SQL composite ordering semantics:
+
+```text
+When querying device_availability_events by (event_time, source_sequence):
+- Ascending queries use ORDER BY event_time ASC, source_sequence ASC NULLS FIRST so unsequenced events (source_sequence = NULL) at a timestamp sort before sequenced events at the same timestamp.
+- Descending queries use ORDER BY event_time DESC, source_sequence DESC NULLS LAST so the event with the highest sequence number at a timestamp sorts first, and unsequenced events sort last.
 ```
 
 `event_id` stores the normalized source event id when the payload provides one, using `payload.ping.uuid`, `payload.uuid`, or `payload.disconnection.uuid` only when that `uuid` is stable for the same logical source event.
@@ -2696,11 +2709,20 @@ Use an HTTP error:
 An exact zero is valid only when availability coverage proves the complete requested interval up to `endTime`: `coverageStart <= startTime`, `processedThrough >= endTime`, `ingestionGapKnown = false`, and `proofSource != "unavailable"`. When `processedThrough < endTime` (even if `processedThrough >= endTime - allowedIngestionDelaySeconds`), the requested interval is not fully covered up to `endTime` and a zero matching event count must be reported as partial/lower-bound (`meta.coverage = "partial"`), or as unavailable with `offline_count: null` when no coverage proof exists.
 
 For the availability endpoint, `sampleCount` is retained for response-shape
-consistency with the other summary APIs and means the number of offline
-transition rows contributing to `offline_count`. `offlineEventCount` is the
-availability-specific alias for the same value. Online transition rows may
-contribute to `observedWindow` and `sourceWindow`, but they do not contribute to
-`sampleCount`, `offlineEventCount`, or `offline_count`.
+consistency with the other summary APIs. When `meta.coverage` is `"full"` or `"partial"`, `sampleCount` is defined as:
+
+```text
+sampleCount = offlineEventCount = offline_count
+```
+
+`sampleCount` is the number of offline transition rows in `device_availability_events`
+contributing to `offline_count`. Online recovery transition rows (`event_type = 'online'`)
+are stored in transition history for state tracking and `observedWindow` / `sourceWindow`
+bounds, but they do not contribute to `sampleCount`, `offlineEventCount`, or `offline_count`.
+For `"full"` or `"partial"` coverage, `sampleCount` always equals `offlineEventCount`.
+
+When `meta.coverage = "none"` and `meta.accuracy = "not_applicable"`, `sampleCount`, `offlineEventCount`,
+and `offline_count` are all `null`.
 
 `boundarySamplesUsed.beforeStart` is `true` only when a pre-start boundary event
 was actually selected. Event counting does not require a pre-start boundary
