@@ -8,6 +8,11 @@ This document defines the request format, response format, and implementation lo
 - `get_device_rssi_quality`
 - `get_gateway_offline_count`
 
+The specification is structured across three distinct component layers:
+1. **Public API Contract Specifications**: External OpenAPI schemas (`openapi/owanalytics.yaml`) defining HTTP requests, parameter validation, and response envelopes.
+2. **Persistence & Pipeline Architecture Design**: Internal storage structures (`device_availability_events`, `device_availability_state`), Kafka event consumption/ordering, and cutover semantics.
+3. **Test Specifications Matrix**: Independent verification matrix documented in `analytics_mcp_api_test_cases.md`.
+
 The API contracts match the MCP tool names and response fields from the provided CSV.
 
 ---
@@ -32,7 +37,7 @@ Internal storage field: serialNumber
 serialNumber = routerId
 ```
 
-Public `routerId` validation should require the supported OWPROV gateway serial form: 12 to 29 hexadecimal characters, for example `dc6279652334`. This intentionally rejects path dot-segments such as `.` and `..`, path separators, UUID punctuation, and punctuation-only values before OWPROV ownership resolution. After syntax validation, OWPROV ownership resolution determines whether the serial exists and belongs to the caller's scope.
+Public `routerId` validation requires a path-safe string: 1 to 64 alphanumeric characters, hyphens, or underscores (matching `^[a-zA-Z0-9_-]+$`). Syntax validation intentionally rejects path dot-segments such as `.` and `..`, path separators (`/`, `\`), spaces, control characters, and URL-encoded path separators (`%2F`) before OWPROV ownership resolution. Any path-safe serial format (whether hexadecimal or non-hex serial string) passes syntax validation and is sent to OWPROV, letting OWPROV serve as the authoritative entity for verifying serial existence.
 
 The Analytics API should calculate the requested time range as:
 
@@ -1253,7 +1258,7 @@ Example detailed response for the same calculated result:
 }
 ```
 
-When a client is observed but no usage interval can be calculated, such as when
+When a client is observed in-window (`[startTime, endTime)`) but no usage interval can be calculated, such as when
 only one cumulative-counter sample exists in or bounding the requested range,
 return the safely provable minimum with no calculation segments:
 
@@ -1444,9 +1449,7 @@ returned usage is a lower-bound estimate. The algorithm must avoid overcounting
 unknown traffic, so it adds only safely provable nonnegative consecutive segment
 deltas inside the requested range and treats the result as incomplete/estimated.
 If no positive interval can be safely proven, return 0 bytes for that stream with
-`lower_bound`. Include a client in the response when it has at least one
-qualifying sample in or bounding the requested interval, even if the safely
-provable lower-bound delta is 0. If no differential segment can be calculated
+`lower_bound`. Include a client in `items[]` and count it in `totalClients` only when it has at least one in-window observation (`[startTime, endTime)`) or proven session overlap during the requested interval, even if the safely provable lower-bound delta is 0. Outside-window bounding samples (e.g. pre-window baseline or post-window fallback samples) are used exclusively as boundary calculation aids for clients that have proven in-window presence or session overlap. A station MAC with only outside-window samples and no in-window observation or session overlap during `[startTime, endTime)` must be excluded from `items[]` and `totalClients`. If no differential segment can be calculated
 for that client, return `segment_count: 0` and `boundary_fallback_used: false`;
 do not create a segment with fabricated effective or actual boundary timestamps.
 If details are enabled, return `calculation_segments: []` for that client.
@@ -1649,6 +1652,8 @@ Formatting:
 ```cpp
 fmt::format("{:.2f} MB", value);
 ```
+
+This uses standard floating point formatting semantics (formatting two decimal places with the `" MB"` suffix) rather than tying calculations to a custom round-half-up implementation.
 
 ### Query Flow
 

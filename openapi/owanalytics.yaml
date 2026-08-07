@@ -44,7 +44,7 @@ components:
             invalidRouterId:
               value:
                 error: invalid_router_id
-                message: routerId must be a 12 to 29 character hexadecimal OWPROV gateway serial number
+                message: routerId must be a valid path-safe OWPROV gateway serial number (1 to 64 alphanumeric characters, hyphens, or underscores)
             invalidTimestamp:
               value:
                 error: invalid_timestamp
@@ -67,7 +67,7 @@ components:
             invalidRouterId:
               value:
                 error: invalid_router_id
-                message: routerId must be a 12 to 29 character hexadecimal OWPROV gateway serial number
+                message: routerId must be a valid path-safe OWPROV gateway serial number (1 to 64 alphanumeric characters, hyphens, or underscores)
             invalidTimestamp:
               value:
                 error: invalid_timestamp
@@ -94,7 +94,7 @@ components:
             invalidRouterId:
               value:
                 error: invalid_router_id
-                message: routerId must be a 12 to 29 character hexadecimal OWPROV gateway serial number
+                message: routerId must be a valid path-safe OWPROV gateway serial number (1 to 64 alphanumeric characters, hyphens, or underscores)
             invalidTimestamp:
               value:
                 error: invalid_timestamp
@@ -248,7 +248,7 @@ components:
       in: path
       name: routerId
       required: true
-      description: Gateway serial number accepted by OWPROV inventory. Current supported router IDs are hexadecimal serial numbers such as dc6279652334; values containing path dot-segments, separators, UUID punctuation, or other non-hex characters are rejected before OWPROV ownership resolution.
+      description: Gateway serial number accepted by OWPROV inventory. Path-safe serial identifiers (1 to 64 alphanumeric characters, hyphens, and underscores; free of path separators and dot-segments) are accepted by syntax validation and resolved via OWPROV. Values containing path dot-segments, path separators, or spaces are rejected before OWPROV ownership resolution.
       schema:
         $ref: '#/components/schemas/RouterId'
     TimestampTill:
@@ -288,9 +288,9 @@ components:
   schemas:
     RouterId:
       type: string
-      minLength: 12
-      maxLength: 29
-      pattern: '^[A-Fa-f0-9]+$'
+      minLength: 1
+      maxLength: 64
+      pattern: '^[a-zA-Z0-9_-]+$'
       example: "dc6279652334"
 
     TimestampTill:
@@ -1387,8 +1387,8 @@ components:
       description: >
         Per-client usage totals. Raw byte counters are authoritative; total_bytes is always
         rx_bytes + tx_bytes. Formatted string fields are display-only decimal megabytes using
-        bytes / 1,000,000, formatted with exactly two decimal places using round-half-up
-        rounding, followed by the literal " MB" suffix. Wi-Fi usage is a cumulative-counter
+        bytes / 1,000,000, formatted with standard floating point two decimal places
+        and the literal " MB" suffix. Wi-Fi usage is a cumulative-counter
         differential summary. For an uninterrupted stream, delta = ending counter value - starting
         counter value. For confirmed independent session splits or resets, calculate each proven
         stream segment separately and sum the segment differentials; do not sum raw cumulative
@@ -1447,15 +1447,15 @@ components:
           minimum: 0
         data_consume_rx:
           type: string
-          description: Display-only decimal megabytes derived from rx_bytes / 1,000,000. Format using exactly two decimal places, round-half-up rounding, and the literal " MB" suffix. Use raw byte fields for calculations.
+          description: Display-only decimal megabytes derived from rx_bytes / 1,000,000. Format using standard floating point two decimal places and the literal " MB" suffix. Use raw byte fields for calculations.
           example: 106.49 MB
         data_consume_tx:
           type: string
-          description: Display-only decimal megabytes derived from tx_bytes / 1,000,000. Format using exactly two decimal places, round-half-up rounding, and the literal " MB" suffix. Use raw byte fields for calculations.
+          description: Display-only decimal megabytes derived from tx_bytes / 1,000,000. Format using standard floating point two decimal places and the literal " MB" suffix. Use raw byte fields for calculations.
           example: 3.85 MB
         total_data_usage:
           type: string
-          description: Display-only decimal megabytes derived from total_bytes / 1,000,000. Format using exactly two decimal places, round-half-up rounding, and the literal " MB" suffix. Use raw byte fields for calculations.
+          description: Display-only decimal megabytes derived from total_bytes / 1,000,000. Format using standard floating point two decimal places and the literal " MB" suffix. Use raw byte fields for calculations.
           example: 110.34 MB
         usage_accuracy:
           type: string
@@ -1547,7 +1547,7 @@ components:
         totalClients:
           type: integer
           minimum: 0
-          description: Total number of distinct client MAC addresses having at least one qualifying usage sample in or bounding the requested interval, calculated before applying the 500-client limit. A qualifying usage sample has a canonical client MAC address and nonnegative cumulative rx_bytes or tx_bytes counters. Exact usage requires authoritative counter evidence at each segment's effective boundaries; bounded_interval usage reports the actual bounding sample timestamps used.
+          description: Total number of distinct client MAC addresses having at least one in-window observation or proven session overlap during the requested interval [startTime, endTime), calculated before applying the 500-client limit. Outside-window bounding samples are used solely for calculating boundary deltas of clients with proven in-window presence. Exact usage requires authoritative counter evidence at each segment's effective boundaries; bounded_interval usage reports the actual bounding sample timestamps used.
         truncated:
           type: boolean
           description: True when totalClients is greater than the number of returned items.

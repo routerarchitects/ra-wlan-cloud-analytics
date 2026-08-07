@@ -22,6 +22,14 @@ get_device_rssi_quality
 get_gateway_offline_count
 ```
 
+The specification and test suite are modularized into three distinct architectural components:
+1. **Public API Contract Specification**: OpenAPI 3.0 schemas (`openapi/owanalytics.yaml` v2.7.0) defining external REST endpoints, query parameters, HTTP status codes, and response envelopes.
+2. **Persistence & Pipeline Architecture Design**: Backend storage structures (`device_availability_events`, `device_availability_state`), Kafka event consumption/ordering semantics, and cutover/migration behavior.
+3. **Test Specification & Verification Matrix**: Independent verification matrix (this document) defining assertion criteria for API contracts, integration workflows, white-box database rules, and failure modes.
+
+> [!NOTE]
+> Approving or executing this test specification validates implementation compliance with defined assertion logic. It does not replace or bypass separate architectural design approval for backend production schema additions or Kafka pipeline designs.
+
 The test cases cover:
 * API contract tests for request shapes, HTTP status codes, response schemas, parameter validation, filtering, and half-open time-range window semantics `[startTime, endTime)`.
 * Service integration tests for Kafka topic consumption, OWPROV fallback resolution, `VenueCoordinator` maintained ownership map, process-level router resolution cache, and PostgreSQL storage queries.
@@ -186,21 +194,20 @@ GET /api/v1/devices/unknown-router/memory-summary
 
 ### Objective
 
-Verify the public `routerId` contract: 12 to 29 hexadecimal characters only. Syntax validation runs before OWPROV ownership resolution.
+Verify the public `routerId` contract: path-safe strings only (1 to 64 alphanumeric characters, hyphens, or underscores matching `^[a-zA-Z0-9_-]+$`). Syntax validation runs before OWPROV ownership resolution.
 
 ### Requests and expected results
 
 | routerId path segment | Expected result |
 | --- | --- |
-| `abcdef12345` | HTTP `400 Bad Request`, `error: "invalid_router_id"` because the value has 11 hex characters. |
 | `abcdef123456` | Syntax is accepted. If the gateway does not exist or is outside scope, return HTTP `404 Not Found`, `error: "not_found"`. |
-| `abcdef123456abcdef123456abcde` | Syntax is accepted. If the gateway does not exist or is outside scope, return HTTP `404 Not Found`, `error: "not_found"`. |
-| `abcdef123456abcdef123456abcdef` | HTTP `400 Bad Request`, `error: "invalid_router_id"` because the value has 30 hex characters. |
+| `gateway-serial-1234` | Syntax is accepted (non-hex alphanumeric string with hyphens). If the gateway does not exist in OWPROV, return HTTP `404 Not Found`, `error: "not_found"`. |
 | `ABCDEF123456` | Syntax is accepted. If the gateway does not exist or is outside scope, return HTTP `404 Not Found`, `error: "not_found"`. |
-| `abcdef12345G` | HTTP `400 Bad Request`, `error: "invalid_router_id"` because `G` is not hexadecimal. |
 | `.` | Handler-level validation returns HTTP `400 Bad Request`, `error: "invalid_router_id"`. End-to-end route tests may observe framework-level rejection first if the server normalizes dot-segments, but OWPROV lookup must not run. |
 | `..` | Handler-level validation returns HTTP `400 Bad Request`, `error: "invalid_router_id"`. End-to-end route tests may observe framework-level rejection first if the server normalizes dot-segments, but OWPROV lookup must not run. |
 | `abc%2Fdef123456` | Rejected before OWPROV lookup. Encoded path separators must not be decoded into a router ID that reaches ownership resolution. |
+| `:::`, `router space` | HTTP `400 Bad Request`, `error: "invalid_router_id"` because punctuation or spaces violate path-safety validation. |
+| (string > 64 chars) | HTTP `400 Bad Request`, `error: "invalid_router_id"` because max length is 64 characters. |
 
 For all rejected syntax cases, OWPROV ownership lookup and metric aggregation are not executed.
 
@@ -1923,42 +1930,30 @@ GET /api/v1/devices/deadbeef1234/availability-summary
 
 ### Objective
 
-Verify that syntactically invalid router IDs (such as non-hexadecimal values or invalid punctuation) are rejected with HTTP 400 before OWPROV ownership lookup or availability database queries are executed.
+Verify that syntactically invalid router IDs (such as path dot-segments, path separators, spaces, or invalid punctuation) are rejected with HTTP 400 before OWPROV ownership lookup or availability database queries are executed.
 
 ### Requests
 
-1. Handler-level validation requests (length, non-hexadecimal, or invalid punctuation):
+1. Handler-level validation requests (invalid path characters or out-of-bounds length):
 
 ```http
-GET /api/v1/devices/unknown-router/availability-summary
-    ?timestampTill=2026-07-29T12:00:00Z
-    &lookbackHours=24
-
 GET /api/v1/devices/:::/availability-summary
     ?timestampTill=2026-07-29T12:00:00Z
     &lookbackHours=24
 
-GET /api/v1/devices/abcdef12345/availability-summary
-    ?timestampTill=2026-07-29T12:00:00Z
-    &lookbackHours=24
-
-GET /api/v1/devices/abcdef123456abcdef123456abcdef/availability-summary
-    ?timestampTill=2026-07-29T12:00:00Z
-    &lookbackHours=24
-
-GET /api/v1/devices/abcdef12345G/availability-summary
+GET /api/v1/devices/router%20id/availability-summary
     ?timestampTill=2026-07-29T12:00:00Z
     &lookbackHours=24
 ```
 
-2. Syntax-accepted nonexistent values:
+2. Syntax-accepted nonexistent values (hexadecimal and non-hex serial strings):
 
 ```http
 GET /api/v1/devices/abcdef123456/availability-summary
     ?timestampTill=2026-07-29T12:00:00Z
     &lookbackHours=24
 
-GET /api/v1/devices/abcdef123456abcdef123456abcde/availability-summary
+GET /api/v1/devices/gateway-serial-1234/availability-summary
     ?timestampTill=2026-07-29T12:00:00Z
     &lookbackHours=24
 
@@ -1977,21 +1972,21 @@ GET /api/v1/devices/abc%2Fdef123456/availability-summary
 
 ### Expected result
 
-* For handler-level validation requests (`unknown-router`, `:::`, 11 hex characters, 30 hex characters, non-hex `G`):
+* For handler-level validation requests (`:::`, spaces):
   * HTTP `400 Bad Request`.
   * Response resembles:
 
 ```json
 {
   "error": "invalid_router_id",
-  "message": "routerId must be a valid 12-29 hex character gateway serial number"
+  "message": "routerId must be a valid path-safe OWPROV gateway serial number (1 to 64 alphanumeric characters, hyphens, or underscores)"
 }
 ```
 
   * OWPROV resolution is not called.
   * No availability query is executed.
 
-* For syntax-accepted nonexistent values (12 hex characters, 29 hex characters, and uppercase hexadecimal):
+* For syntax-accepted nonexistent values (`abcdef123456`, `gateway-serial-1234`, and uppercase hexadecimal):
   * HTTP `404 Not Found`.
   * Error is `not_found`.
   * The response proves the value passed syntax validation before OWPROV ownership resolution determined it was nonexistent or outside scope.
@@ -3908,6 +3903,22 @@ serialNumber = routerId
 * Malformed record is skipped and logged.
 * Other valid records in the requested range are processed.
 * Fabricated usage is not returned.
+
+---
+
+## TC-USAGE-027: Client with only outside-window boundary fallback samples
+
+### Test data
+
+* Requested time window: `[10:00:00Z, 11:00:00Z)`.
+* Database contains a sample for station MAC `aa:bb:cc:dd:ee:ff` at `09:58:00Z` (pre-window boundary sample within 2x interval tolerance).
+* Database contains NO in-window observations (`[10:00:00Z, 11:00:00Z)`) and no proven session overlap during `[10:00:00Z, 11:00:00Z)` for station `aa:bb:cc:dd:ee:ff`.
+
+### Expected result
+
+* Station MAC `aa:bb:cc:dd:ee:ff` is EXCLUDED from `items[]` and NOT counted in `totalClients`.
+* Outside-window fallback samples are used solely for calculating boundary differentials for clients with proven in-window presence or session overlap.
+* Response returns `items: []`, `totalClients: 0`, and `truncated: false`.
 
 ---
 
