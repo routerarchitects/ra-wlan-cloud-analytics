@@ -3997,13 +3997,15 @@ Query with `includeCalculationDetails=true` vs `includeCalculationDetails=false`
 
 ### Test data
 
-Observations for requested window `[10:00:00Z, 11:00:00Z)` occur at `10:05:00Z` and `10:55:00Z`.
+* Requested time window `[10:00:00Z, 11:00:00Z)`.
+* Observations occur exactly at start boundary `10:00:00Z` and end boundary `11:00:00Z`.
 
 ### Expected result
 
-* `resultTimeWindow.earliestActualStartTime` = `"2026-07-27T10:05:00Z"` (earliest contributing sample in window).
-* `resultTimeWindow.latestActualEndTime` = `"2026-07-27T10:55:00Z"` (latest contributing sample in window).
-* `resultTimeWindow.boundaryFallbackUsed` = `false`.
+* `resultTimeWindow.earliestActualStartTime` = `"2026-07-27T10:00:00Z"` (earliest contributing sample at effective start).
+* `resultTimeWindow.latestActualEndTime` = `"2026-07-27T11:00:00Z"` (latest contributing sample at effective end).
+* `resultTimeWindow.boundaryFallbackUsed` = `false` (exact boundary samples present).
+* `items[].usage_accuracy` = `"exact"`.
 * `requestedTimeWindow` remains `"2026-07-27T10:00:00Z"` to `"2026-07-27T11:00:00Z"`.
 
 ---

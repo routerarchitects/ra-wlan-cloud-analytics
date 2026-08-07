@@ -1496,18 +1496,15 @@ components:
             - bounded_interval
             - lower_bound
           description: >
-            exact when each segment's overlap with the requested interval can be calculated from
-            authoritative counter evidence exactly at effective_start and effective_end, without
-            counter resets or missing-sample gaps. bounded_interval when one or both exact boundary samples are
-            unavailable and the calculation uses the latest available starting sample at or before
-            effective_start and the earliest available ending sample at or after effective_end, with
-            both fallback samples within two times the configured telemetry sampling interval of
-            the effective boundaries. lower_bound when no usable boundary pair exists, when either fallback
-            boundary exceeds the tolerance, when any ambiguous counter reset/session change is
-            detected, or when gaps larger than two times the configured telemetry sampling
-            interval prevent a complete differential from being calculated. When a client was
-            observed but no usage differential segment can be calculated, return zero byte totals,
-            usage_accuracy lower_bound, incomplete true, segment_count 0, and
+            exact when each contributing calculation segment has authoritative effective-boundary evidence
+            (actual_start <= effective_start and actual_end >= effective_end) and every counter reset,
+            rollover, or session transition is unambiguously proven and accounted for. bounded_interval
+            when exact effective-boundary samples are unavailable and fallback samples within two times
+            the configured telemetry sampling interval are used. lower_bound when no usable boundary pair
+            exists, when either fallback boundary exceeds tolerance, when an unconfirmed or ambiguous counter
+            reset/session change is detected, or when unbridgeable gaps prevent a complete differential
+            calculation. When a client was observed but no usage differential segment can be calculated,
+            return zero byte totals, usage_accuracy lower_bound, incomplete true, segment_count 0, and
             boundary_fallback_used false.
         incomplete:
           type: boolean

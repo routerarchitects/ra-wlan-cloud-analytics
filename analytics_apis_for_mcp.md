@@ -64,11 +64,13 @@ All REST handlers must enforce request validation in three distinct sequential p
    - Resolve `routerId` to `boardId` via local cache / OWPROV -> HTTP `404 not_found` if router serial does not exist in OWPROV.
    - Load router scope monitoring configuration (`monitoringDuration`) to derive `maxLookbackHours = floor(monitoringDuration / 3600)`.
 
-3. **Phase 3: Duration, Retention & Domain Cutover Validation**
-   - Validate duration against scope maximum: `lookbackHours > maxLookbackHours` -> HTTP `400 invalid_lookback_hours`.
-   - Validate requested range against data retention window: requested window outside retention -> HTTP `400 lookback_outside_retention`.
-   - Validate `start_time` against temperature cutover threshold (`start_time < temperatureMigrationCutoverTime`) -> HTTP `400 temperature_range_before_cutover`.
-   - Validate `start_time` against availability cutover threshold (`start_time < availabilityValidFrom`) -> HTTP `400 availability_range_before_cutover`.
+3. **Phase 3: Duration, Retention & Endpoint Cutover Validation**
+   - Validate duration against scope maximum (all endpoints): `lookbackHours > maxLookbackHours` -> HTTP `400 invalid_lookback_hours`.
+   - Validate requested range against data retention window (all endpoints): requested window outside retention -> HTTP `400 lookback_outside_retention`.
+   - Validate endpoint-specific domain cutover thresholds:
+     - `radio-temperature-summary` endpoint only: `start_time < temperatureMigrationCutoverTime` -> HTTP `400 temperature_range_before_cutover`.
+     - `availability-summary` endpoint only: `start_time < availabilityValidFrom` -> HTTP `400 availability_range_before_cutover`.
+     - `memory-summary`, `rssi-summary`, and `bandwidth-consumption` endpoints: no domain cutover validation unless explicitly defined by that endpoint.
 
 Example:
 
@@ -1463,13 +1465,13 @@ Client MAC values in API responses must be normalized canonical lowercase colon-
 Usage accuracy contract:
 
 ```text
-Returned usage is exact only when every contributing segment has enough
-information to account for its overlap with the requested window:
+Returned usage is exact only when every contributing calculation segment has
+authoritative effective-boundary evidence:
   effective_start = max(requested_start, proven_session_start), and
   effective_end = min(requested_end, proven_session_end), and
-  authoritative counter evidence exists exactly at effective_start and
-  effective_end, and any counter rollover is confirmed and handled with
-  rollover arithmetic.
+  authoritative counter evidence exists at effective_start and effective_end,
+  and every counter reset, rollover, or session transition is unambiguously proven
+  and accounted for using independent segment differentials or verified rollover arithmetic.
 
 Returned usage is bounded_interval when exact boundary samples are unavailable but
 the latest available starting sample at or before `effective_start` and the
@@ -2786,7 +2788,7 @@ Use an HTTP error:
 }
 ```
 
-An exact zero is valid only when availability coverage proves the complete requested interval up to `endTime`: `coverageStart <= startTime`, `processedThrough >= endTime`, `ingestionGapKnown = false`, and `proofSource != "unavailable"`. When `processedThrough < endTime` (even if `processedThrough >= endTime - allowedIngestionDelaySeconds`), the requested interval is not fully covered up to `endTime` and a zero matching event count must be reported as partial/lower-bound (`meta.coverage = "partial"`), or as unavailable with `offline_count: null` when no coverage proof exists.
+An exact zero is valid only when availability coverage proves the complete requested interval up to `endTime`: `coverageStart <= startTime`, `stateKnownFrom <= startTime`, `processedThrough >= endTime`, `ingestionGapKnown = false`, and `proofSource != "unavailable"`. When `processedThrough < endTime` (even if `processedThrough >= endTime - allowedIngestionDelaySeconds`), the requested interval is not fully covered up to `endTime` and a zero matching event count must be reported as partial/lower-bound (`meta.coverage = "partial"`), or as unavailable with `offline_count: null` when no coverage proof exists.
 
 For the availability endpoint, `sampleCount` is retained for response-shape
 consistency with the other summary APIs. When `meta.coverage` is `"full"` or `"partial"`, `sampleCount` is defined as:
