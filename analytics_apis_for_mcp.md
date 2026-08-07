@@ -1731,7 +1731,7 @@ Build stream_key values and sort samples by stream_key and timestamp ASC
     ↓
 Calculate reset-safe RX/TX deltas using effective start and end boundary samples
     ↓
-Aggregate stream-level deltas by station MAC (including only clients with in-window observations or proven session overlap)
+Aggregate stream-level deltas by station MAC (including only clients with in-window observations or proven session overlap), sort clients deterministically by raw total_bytes DESC then normalized mac ASC, and apply the 500-client limit (truncated = totalClients > 500)
     ↓
 Convert bytes to decimal megabytes
     ↓

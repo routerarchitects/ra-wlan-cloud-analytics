@@ -3965,7 +3965,7 @@ Query with `includeCalculationDetails=true` vs `includeCalculationDetails=false`
 
 ### Expected result
 
-* When `includeCalculationDetails=false` or omitted: `items[]` contain `mac`, `data_consume_rx`, `data_consume_tx`, `total_data_usage`, and `usage_accuracy`; `calculation_segments` array is omitted.
+* When `includeCalculationDetails=false` or omitted: `items[]` contain all mandatory `ClientBandwidthConsumption` fields (`mac`, `rx_bytes`, `tx_bytes`, `total_bytes`, `data_consume_rx`, `data_consume_tx`, `total_data_usage`, `incomplete`, `segment_count`, `boundary_fallback_used`, `usage_accuracy`). The `calculation_segments` array is omitted.
 * When `includeCalculationDetails=true`: `items[]` additionally expose `calculation_segments[]`. Each segment object has non-null required integer fields `rx_bytes`, `tx_bytes`, and `total_bytes`.
 * The byte invariant `rx_bytes + tx_bytes == total_bytes` holds for every segment.
 
@@ -3981,12 +3981,12 @@ Query with `includeCalculationDetails=true` vs `includeCalculationDetails=false`
 
 ### Expected result
 
-* Client A uses the 09:51:00Z sample as boundary baseline (accuracy `exact` or `bounded_interval`).
+* Client A uses the 09:51:00Z sample as boundary baseline; expected accuracy is deterministically `bounded_interval` (because actual start 09:51 != effective start 10:00).
 * Client B cannot use the 09:48:00Z sample because it exceeds 2x collection interval tolerance; Client B starts delta calculation from the first in-window sample at 10:05:00Z (accuracy `lower_bound`).
 
 ---
 
-## TC-USAGE-031: Result time window calculation
+## TC-USAGE-031: Result time window calculation and OpenAPI property naming
 
 ### Test data
 
@@ -3994,13 +3994,14 @@ Observations for requested window `[10:00:00Z, 11:00:00Z)` occur at `10:05:00Z` 
 
 ### Expected result
 
-* `resultTimeWindow.startTime` = `"2026-07-27T10:05:00Z"` (earliest contributing sample in window).
-* `resultTimeWindow.endTime` = `"2026-07-27T10:55:00Z"` (latest contributing sample in window).
+* `resultTimeWindow.earliestActualStartTime` = `"2026-07-27T10:05:00Z"` (earliest contributing sample in window).
+* `resultTimeWindow.latestActualEndTime` = `"2026-07-27T10:55:00Z"` (latest contributing sample in window).
+* `resultTimeWindow.boundaryFallbackUsed` = `false`.
 * `requestedTimeWindow` remains `"2026-07-27T10:00:00Z"` to `"2026-07-27T11:00:00Z"`.
 
 ---
 
-## TC-USAGE-032: Client truncation threshold and deterministic ordering
+## TC-USAGE-032: Client truncation threshold and total_bytes deterministic ordering
 
 ### Test data
 
@@ -4011,7 +4012,7 @@ Observations for requested window `[10:00:00Z, 11:00:00Z)` occur at `10:05:00Z` 
 * `totalClients` = 501.
 * `items[]` array length = 500.
 * `truncated` = `true`.
-* Returned 500 items are deterministically sorted by `total_data_usage` DESC, then station `mac` ASC (canonical lowercase) as tie-breaker.
+* Returned 500 items are deterministically sorted by raw `total_bytes` DESC, then normalized station `mac` ASC (canonical lowercase) as tie-breaker (not by rounded `total_data_usage` string).
 
 ---
 

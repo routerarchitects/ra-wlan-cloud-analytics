@@ -1862,9 +1862,13 @@ components:
             meta:
               properties:
                 coverage:
-                  const: full
+                  type: string
+                  enum:
+                    - full
                 accuracy:
-                  const: exact
+                  type: string
+                  enum:
+                    - exact
             data:
               properties:
                 offline_count:
@@ -1875,9 +1879,13 @@ components:
             meta:
               properties:
                 coverage:
-                  const: partial
+                  type: string
+                  enum:
+                    - partial
                 accuracy:
-                  const: lower_bound
+                  type: string
+                  enum:
+                    - lower_bound
             data:
               properties:
                 offline_count:
@@ -1888,13 +1896,17 @@ components:
             meta:
               properties:
                 coverage:
-                  const: none
+                  type: string
+                  enum:
+                    - none
                 accuracy:
-                  const: not_applicable
+                  type: string
+                  enum:
+                    - not_applicable
             data:
               properties:
                 offline_count:
-                  type: null
+                  nullable: true
 
     SystemCommandDetails:
       type: object
