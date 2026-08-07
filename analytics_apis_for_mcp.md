@@ -2487,6 +2487,7 @@ bool GetGatewayAvailabilitySummary(...);
 
 ---
 
+
 # Recommended Implementation Order
 
 1. `get_gateway_wifi_temp`
