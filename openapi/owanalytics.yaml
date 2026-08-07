@@ -1869,11 +1869,20 @@ components:
                   type: string
                   enum:
                     - exact
+                sampleCount:
+                  type: integer
+                  minimum: 0
+                  nullable: false
+                offlineEventCount:
+                  type: integer
+                  minimum: 0
+                  nullable: false
             data:
               properties:
                 offline_count:
                   type: integer
                   minimum: 0
+                  nullable: false
         - description: Partial coverage lower_bound state
           properties:
             meta:
@@ -1886,11 +1895,20 @@ components:
                   type: string
                   enum:
                     - lower_bound
+                sampleCount:
+                  type: integer
+                  minimum: 0
+                  nullable: false
+                offlineEventCount:
+                  type: integer
+                  minimum: 0
+                  nullable: false
             data:
               properties:
                 offline_count:
                   type: integer
                   minimum: 0
+                  nullable: false
         - description: No coverage unavailable state
           properties:
             meta:
@@ -1903,10 +1921,20 @@ components:
                   type: string
                   enum:
                     - not_applicable
+                sampleCount:
+                  nullable: true
+                  enum:
+                    - null
+                offlineEventCount:
+                  nullable: true
+                  enum:
+                    - null
             data:
               properties:
                 offline_count:
                   nullable: true
+                  enum:
+                    - null
 
     SystemCommandDetails:
       type: object

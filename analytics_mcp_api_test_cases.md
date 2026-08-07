@@ -3975,14 +3975,21 @@ Query with `includeCalculationDetails=true` vs `includeCalculationDetails=false`
 
 ### Test data
 
+* Requested time window: `[10:00:00Z, 11:00:00Z)`.
 * Expected collection interval = 300 seconds (5 minutes). Tolerance threshold = 2 * 300 = 600 seconds (10 minutes).
-* Client A has pre-start fallback sample at 09:51:00Z (9 minutes before 10:00:00Z start, within tolerance threshold).
-* Client B has pre-start fallback sample at 09:48:00Z (12 minutes before 10:00:00Z start, outside tolerance threshold).
+* Client A samples:
+  * `09:51:00Z`: `rx_bytes = 1000000`, `tx_bytes = 1000000` (pre-start fallback sample, 9 minutes before start, within 2x tolerance)
+  * `10:30:00Z`: `rx_bytes = 2000000`, `tx_bytes = 2000000` (in-window observation proving presence)
+  * `11:00:00Z`: `rx_bytes = 3000000`, `tx_bytes = 3000000` (exact end-boundary sample at effective end)
+* Client B samples:
+  * `09:48:00Z`: `rx_bytes = 1000000`, `tx_bytes = 1000000` (pre-start fallback sample, 12 minutes before start, outside 2x tolerance)
+  * `10:30:00Z`: `rx_bytes = 2000000`, `tx_bytes = 2000000` (in-window observation proving presence)
+  * `11:00:00Z`: `rx_bytes = 3000000`, `tx_bytes = 3000000` (exact end-boundary sample at effective end)
 
 ### Expected result
 
-* Client A uses the 09:51:00Z sample as boundary baseline; expected accuracy is deterministically `bounded_interval` (because actual start 09:51 != effective start 10:00).
-* Client B cannot use the 09:48:00Z sample because it exceeds 2x collection interval tolerance; Client B starts delta calculation from the first in-window sample at 10:05:00Z (accuracy `lower_bound`).
+* Client A uses the 09:51:00Z sample as start boundary baseline and 11:00:00Z as exact end boundary; expected usage accuracy is deterministically `bounded_interval` (because `actual_start_time` 09:51 != `effective_start` 10:00).
+* Client B discards the 09:48:00Z sample because it exceeds 2x collection interval tolerance; Client B calculates delta starting from in-window sample at 10:30:00Z to exact end sample at 11:00:00Z, and is classified as `lower_bound`.
 
 ---
 

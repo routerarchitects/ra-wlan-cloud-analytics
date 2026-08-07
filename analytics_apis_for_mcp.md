@@ -62,9 +62,13 @@ All REST handlers must enforce request validation in three distinct sequential p
 
 2. **Phase 2: Router Ownership & Serial Resolution**
    - Resolve `routerId` to `boardId` via local cache / OWPROV -> HTTP `404 not_found` if router serial does not exist in OWPROV.
+   - Load router scope monitoring configuration (`monitoringDuration`) to derive `maxLookbackHours = floor(monitoringDuration / 3600)`.
 
-3. **Phase 3: Domain Cutover & Range Validation**
-   - Verify `start_time` against service cutover thresholds (`availabilityValidFrom`, `temperatureMigrationCutoverTime`, `maxLookbackHours`) -> HTTP `400 availability_range_before_cutover` / `temperature_range_before_cutover` if before cutover.
+3. **Phase 3: Duration, Retention & Domain Cutover Validation**
+   - Validate duration against scope maximum: `lookbackHours > maxLookbackHours` -> HTTP `400 invalid_lookback_hours`.
+   - Validate requested range against data retention window: requested window outside retention -> HTTP `400 lookback_outside_retention`.
+   - Validate `start_time` against temperature cutover threshold (`start_time < temperatureMigrationCutoverTime`) -> HTTP `400 temperature_range_before_cutover`.
+   - Validate `start_time` against availability cutover threshold (`start_time < availabilityValidFrom`) -> HTTP `400 availability_range_before_cutover`.
 
 Example:
 
