@@ -51,7 +51,12 @@ start_time = end_time - (lookback_hours * 3600)
 
 Validation & Processing Order:
 
-All REST handlers must enforce request validation in three distinct sequential phases:
+All REST handlers must enforce request validation in four distinct sequential phases:
+
+0. **Phase 0: Request Authentication (Bearer Token)**
+   - Extract and validate HTTP `Authorization` header (`Bearer <token>`).
+   - If missing, malformed, expired, or invalid: return HTTP `401 Unauthorized` (`error: "unauthorized"`) immediately.
+   - Authentication takes precedence over parameter validation; unauthenticated callers receive HTTP `401 Unauthorized` regardless of whether `routerId`, `timestampTill`, or `lookbackHours` are malformed, missing, or invalid.
 
 1. **Phase 1: Pure Request Parsing & Input Validation (No DB or I/O lookups)**
    - Validate `routerId` syntax (1–64 characters matching `^[a-zA-Z0-9_-]+$`) -> HTTP `400 invalid_router_id` if malformed.

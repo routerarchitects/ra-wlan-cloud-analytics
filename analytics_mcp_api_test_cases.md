@@ -582,6 +582,24 @@ GET /api/v1/devices/60cf84f22290/memory-summary
 
 ---
 
+## TC-COMMON-018A: Unauthenticated request with malformed query parameters
+
+### Request
+
+```http
+GET /api/v1/devices/unknown.router/wifi-clients/bandwidth-consumption?timestampTill=invalid-date&lookbackHours=-5
+```
+
+Headers: missing `Authorization` header.
+
+### Expected result
+
+* HTTP `401 Unauthorized`.
+* Error is `unauthorized`.
+* Phase 0 Bearer token authentication takes precedence over Phase 1 parameter validation. The request is rejected as unauthorized before parsing or validating `routerId`, `timestampTill`, or `lookbackHours`.
+
+---
+
 ## TC-COMMON-019: User is not authorized for the gateway scope
 
 ### Preconditions
