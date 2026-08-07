@@ -8,6 +8,14 @@ This document defines the request format, response format, and implementation lo
 - `get_device_rssi_quality`
 - `get_gateway_offline_count`
 
+The specification is structured across three distinct component layers:
+1. **Public API Contract Specifications**: External OpenAPI schemas (`openapi/owanalytics.yaml`) defining HTTP requests, parameter validation, and response envelopes.
+2. **Persistence & Pipeline Architecture Design**: Internal storage structures (`device_availability_events`, `device_availability_state`, `device_availability_ingestion_checkpoint`, `device_availability_ingestion_gaps`), Kafka event consumption/ordering, and cutover semantics.
+3. **Test Specifications Matrix**: Independent verification matrix documented in `analytics_mcp_api_test_cases.md`.
+
+> [!IMPORTANT]
+> The specified production architecture changes—including four new availability persistence structures (`device_availability_events`, `device_availability_state`, `device_availability_ingestion_checkpoint`, `device_availability_ingestion_gaps`), Kafka event ordering/checkpointing rules, cutover migration rules, and OpenAPI v2.7.0 endpoint schemas—constitute a production architecture specification. Approving or merging this test specification PR does NOT bypass separate explicit architecture design sign-off for backend schema additions and production Kafka pipeline changes prior to production deployment.
+
 The API contracts match the MCP tool names and response fields from the provided CSV.
 
 ---
@@ -32,12 +40,42 @@ Internal storage field: serialNumber
 serialNumber = routerId
 ```
 
-The Analytics API should calculate the requested time range as:
+Public `routerId` validation requires a path-safe string: 1 to 64 alphanumeric characters, hyphens, or underscores (matching `^[a-zA-Z0-9_-]+$`). Syntax validation intentionally rejects path dot-segments such as `.` and `..`, path separators (`/`, `\`), spaces, control characters, and URL-encoded path separators (`%2F`) before OWPROV ownership resolution. Any path-safe serial format (whether hexadecimal or non-hex serial string) passes syntax validation and is sent to OWPROV, letting OWPROV serve as the authoritative entity for verifying serial existence.
+
+The Analytics API calculates the requested time range using checked 64-bit signed epoch arithmetic:
 
 ```text
 end_time = parse(timestamp_till)
 start_time = end_time - (lookback_hours * 3600)
 ```
+
+Validation & Processing Order:
+
+All REST handlers must enforce request validation in four distinct sequential phases:
+
+0. **Phase 0: Request Authentication (Bearer Token)**
+   - Extract and validate HTTP `Authorization` header (`Bearer <token>`).
+   - If missing, malformed, expired, or invalid: return HTTP `401 Unauthorized` (`error: "unauthorized"`) immediately.
+   - Authentication takes precedence over parameter validation; unauthenticated callers receive HTTP `401 Unauthorized` regardless of whether `routerId`, `timestampTill`, or `lookbackHours` are malformed, missing, or invalid.
+
+1. **Phase 1: Pure Request Parsing & Input Validation (No DB or I/O lookups)**
+   - Validate `routerId` syntax (1–64 characters matching `^[a-zA-Z0-9_-]+$`) -> HTTP `400 invalid_router_id` if malformed.
+   - Inspect raw query collection for exact-once presence of `timestampTill` and `lookbackHours` -> HTTP `400 invalid_timestamp` / `invalid_lookback_hours` if missing or repeated.
+   - Parse `timestampTill` shape & UTC semantics -> HTTP `400 invalid_timestamp` if malformed or invalid date/time.
+   - Parse `lookbackHours` strict positive integer -> HTTP `400 invalid_lookback_hours` if zero, negative, or non-numeric.
+   - Checked epoch calculation: Compute `start_time = end_time - (lookback_hours * 3600)` using signed 64-bit integers. Verify `start_time >= 0` (minimum supported Unix epoch `1970-01-01T00:00:00Z`) -> HTTP `400 invalid_timestamp` if underflowing before epoch.
+
+2. **Phase 2: Router Ownership & Serial Resolution**
+   - Resolve `routerId` to `boardId` via local cache / OWPROV -> HTTP `404 not_found` if router serial does not exist in OWPROV.
+   - Load router scope monitoring configuration (`monitoringDuration`) to derive `maxLookbackHours = floor(monitoringDuration / 3600)`.
+
+3. **Phase 3: Duration, Retention & Endpoint Cutover Validation**
+   - Validate duration against scope maximum (all endpoints): `lookbackHours > maxLookbackHours` -> HTTP `400 invalid_lookback_hours`.
+   - Validate requested range against data retention window (all endpoints): requested window outside retention -> HTTP `400 lookback_outside_retention`.
+   - Validate endpoint-specific domain cutover thresholds:
+     - `radio-temperature-summary` endpoint only: `start_time < temperatureMigrationCutoverTime` -> HTTP `400 temperature_range_before_cutover`.
+     - `availability-summary` endpoint only: `start_time < availabilityValidFrom` -> HTTP `400 availability_range_before_cutover`.
+     - `memory-summary`, `rssi-summary`, and `bandwidth-consumption` endpoints: no domain cutover validation unless explicitly defined by that endpoint.
 
 Example:
 
@@ -58,20 +96,77 @@ Recommended query parameters:
 
 These are `GET` APIs, so no request body is required.
 
-### Time Conversion and Validation
+### Internal Retrieval Categories
 
-The public MCP-facing parameters use ISO-8601/RFC3339 time, but the existing Analytics API style uses integer `fromDate` and `endDate` timestamps. Handlers should convert the request as:
+Retrieval behavior is intrinsic to each endpoint. Do not expose a public
+`metricMode` query parameter unless the endpoint also defines separate
+mode-specific response schemas.
+
+Endpoint retrieval mapping:
 
 ```text
-timestampTill: RFC3339 UTC string, for example 2026-07-27T12:00:00Z
+memory-summary:
+  dataset retrieval = all
+  response = fixed gauge aggregation schema
+
+radio-temperature-summary:
+  dataset retrieval = all
+  response = fixed gauge aggregation schema
+
+wifi-clients/usage-summary:
+  dataset retrieval = differential
+  response = calculated cumulative-counter deltas
+
+wifi-clients/rssi-summary:
+  dataset retrieval = all
+  response = fixed RSSI quality percentage aggregation schema
+
+availability-summary:
+  dataset retrieval = all_with_baseline
+  response = offline transition count
+```
+
+For `all`, retrieve every record in the requested range. For state-transition
+calculations, also retrieve the latest valid state at or before the requested
+start; this is `all_with_baseline`.
+
+For `differential`, return the change in cumulative counter values over the
+requested time range:
+
+```text
+delta = ending metric value - starting metric value
+```
+
+Use exact effective-boundary samples when available. Effective boundaries are
+the requested boundaries clipped to any proven session lifetime. Otherwise, use
+the latest available starting sample at or before the effective start and the
+earliest available ending sample at or after the effective end. Each fallback
+boundary sample must be within two times the configured telemetry sampling
+interval from the effective boundary. When fallback samples are used, the
+default response exposes the requested time range, aggregate result time window,
+usage accuracy, segment count, and fallback status. Effective boundaries and
+per-segment actual sample timestamps are included only when
+`includeCalculationDetails=true`.
+
+### Time Conversion and Validation
+
+The public MCP-facing parameters use ISO-8601/RFC3339 UTC time, but the existing Analytics API style uses integer `fromDate` and `endDate` timestamps. Handlers should convert the request as:
+
+```text
+timestampTill: RFC3339 UTC string ending with 'Z', for example 2026-07-27T12:00:00Z
 endTime:       Unix epoch seconds parsed from timestampTill
 startTime:     endTime - (lookbackHours * 3600)
 ```
 
+Timezone Requirement:
+`timestampTill` MUST use the UTC `Z` suffix format (e.g., `2026-07-27T12:00:00Z`). Explicit numeric timezone offsets (such as `+05:30` or `-08:00`) and timestamps without a timezone designator are unsupported and MUST be rejected with `400 Bad Request` and `error: "invalid_timestamp"`.
+
 Validation rules:
 
 ```text
-timestampTill must parse as a valid timestamp.
+timestampTill must parse as a valid UTC timestamp ending with 'Z'.
+lookbackHours must be present exactly once.
+lookbackHours must parse as a strict whole decimal integer with no trailing characters.
 lookbackHours must be greater than 0.
 maxLookbackHours = floor(configured monitoringDuration / 3600).
 lookbackHours must be less than or equal to maxLookbackHours.
@@ -82,7 +177,21 @@ All APIs in this document derive `maxLookbackHours` from the configured `monitor
 
 For a one-year monitoring configuration, `maxLookbackHours` is `365 * 24` only when the configured monitoring duration is exactly 365 days. Do not assume every calendar year is 8760 hours; use the configured duration and effective retention timestamps when validating the request.
 
-Return `400 Bad Request` for invalid timestamps, unsupported timezones, non-positive `lookbackHours`, or values above the applicable maximum. Internally, query `timepoints.timestamp` and `wificlienthistory.timestamp` using epoch seconds.
+Return validation errors with field-specific error codes:
+
+```text
+invalid_timestamp:
+  timestampTill is missing, malformed, not UTC `Z` format, or otherwise unsupported.
+
+invalid_lookback_hours:
+  lookbackHours is missing, repeated, empty, non-numeric, fractional, partially numeric, overflowing,
+  zero, negative, or greater than maxLookbackHours.
+
+lookback_outside_retention:
+  the calculated [startTime, endTime) window is outside the configured retention window.
+```
+
+A valid timestamp with an invalid `lookbackHours` value must not return `invalid_timestamp`. Internally, query `timepoints.timestamp` and `wificlienthistory.timestamp` using epoch seconds.
 
 ### Monitoring Configuration
 
@@ -150,6 +259,35 @@ timestamp < endTime
 ```
 
 `timestampTill` is the exclusive upper bound. This prevents adjacent requests from double-counting samples or events at the shared boundary.
+
+For cumulative-counter differential summaries, exact effective-boundary samples
+are preferred. For endpoints with proven session lifetimes, effective boundaries
+are the requested boundaries clipped to the proven session start and end. For
+endpoints without session lifetimes, effective boundaries equal the requested
+boundaries. Otherwise, the handler must use the latest available sample at or
+before `effective_start` and the earliest available sample at or after
+`effective_end`, provided each fallback sample is within two times the configured
+telemetry sampling interval from the effective boundary. These fallback samples
+can fall outside `[startTime, endTime)`, so the response must expose:
+
+```text
+requestedTimeWindow.startTime = startTime
+requestedTimeWindow.endTime = endTime
+resultTimeWindow.earliestActualStartTime =
+  earliest actual starting sample used by any calculable segment contributing
+  to returned clients
+resultTimeWindow.latestActualEndTime =
+  latest actual ending sample used by any calculable segment contributing
+  to returned clients
+resultTimeWindow.boundaryFallbackUsed =
+  true when any calculable segment contributing to returned clients used a
+  fallback boundary sample
+```
+
+When no calculable usage segment exists for an observed client, the client
+response uses `segment_count: 0` instead of inventing effective or actual
+boundary timestamps. If `includeCalculationDetails=true`, that client has
+`calculation_segments: []`.
 
 Example:
 
@@ -563,19 +701,35 @@ Do not represent missing memory fields as `0`. A missing `memory_free` value and
 
 ```cpp
 AnalyticsObjects::DeviceResourceTimePoint resource;
-if (memory.has("free")) {
-    resource.memory_free = memory["free"].as<uint64_t>();
+
+// Validate numeric type, integral value, non-negative range (>= 0), and 64-bit non-overflow before unsigned conversion.
+// Sample-level rejection policy for negative telemetry: If ANY present memory field (free, total, cached, buffered) is negative (< 0), non-numeric, or invalid, mark the entire memory sample invalid and omit resource_data so the entire corrupted memory timepoint is excluded during aggregation.
+bool sampleValid = true;
+auto parseMemoryField = [&sampleValid](const Poco::JSON::Object::Ptr &obj, const std::string &key) -> std::optional<uint64_t> {
+    if (!obj->has(key) || obj->isNull(key)) return std::nullopt;
+    try {
+        if (!obj->isNumeric(key)) { sampleValid = false; return std::nullopt; }
+        int64_t val = obj->getElement<int64_t>(key);
+        if (val < 0) { sampleValid = false; return std::nullopt; }
+        return static_cast<uint64_t>(val);
+    } catch (...) {
+        sampleValid = false;
+        return std::nullopt;
+    }
+};
+
+auto freeVal = parseMemoryField(memory, "free");
+auto totalVal = parseMemoryField(memory, "total");
+auto cachedVal = parseMemoryField(memory, "cached");
+auto bufferedVal = parseMemoryField(memory, "buffered");
+
+if (sampleValid) {
+    if (freeVal)     resource.memory_free = *freeVal;
+    if (totalVal)    resource.memory_total = *totalVal;
+    if (cachedVal)   resource.memory_cached = *cachedVal;
+    if (bufferedVal) resource.memory_buffered = *bufferedVal;
+    DTP.resource_data = resource;
 }
-if (memory.has("total")) {
-    resource.memory_total = memory["total"].as<uint64_t>();
-}
-if (memory.has("cached")) {
-    resource.memory_cached = memory["cached"].as<uint64_t>();
-}
-if (memory.has("buffered")) {
-    resource.memory_buffered = memory["buffered"].as<uint64_t>();
-}
-DTP.resource_data = resource;
 ```
 
 ### Aggregation Logic
@@ -593,11 +747,19 @@ For each record:
   read record.resource_data.memory_free
   ignore missing resource_data
   include the sample only when memory_free is present
+  exclude the sample if any present memory value is negative
+  exclude the sample if memory_total is present and memory_free > memory_total
 
 Return:
   min_memfree = min(memory_free samples)
   max_memfree = max(memory_free samples)
   avg_memfree = sum(memory_free samples) / sample_count
+```
+
+Memory values are bytes and must be nonnegative. If `memory_total` is present, `memory_free` must not exceed `memory_total`; corrupted samples that violate this consistency rule are ignored rather than contributing to the summary. For successful responses with samples, the invariant is:
+
+```text
+min_memfree <= avg_memfree <= max_memfree
 ```
 
 Do not query `device_timepoints.memory_free` unless a separate normalized table and migration are introduced.
@@ -693,6 +855,8 @@ radios[].band
 radios[].wifi_temp
 ```
 
+`radios[].wifi_temp` and all `*_wifi_temp_*` response fields use degrees Celsius.
+
 Required ingestion rule:
 
 ```text
@@ -706,24 +870,29 @@ Do not synthesize a numeric fallback temperature for missing data.
 Do not store a placeholder in wifi_temp for a missing temperature.
 ```
 
-Migration boundary rule:
+Migration boundary configuration & rule:
 
 ```text
-Define a fixed temperature_migration_cutover_time as the deployment/migration
-timestamp where radios[].wifi_temp starts being written consistently.
+temperatureMigrationCutoverTime:
+  source: Analytics service configuration (file key 'temperature.migration_cutover_time' or ENV 'TEMPERATURE_MIGRATION_CUTOVER_TIME')
+  scope: global per deployment
+  format: ISO 8601 / RFC 3339 UTC string (e.g. "2026-07-01T00:00:00Z")
+  required: true (Analytics service fails startup with a FATAL log if missing or unparseable)
 
-Only use temperature records created at or after temperature_migration_cutover_time.
+Only use temperature records created at or after temperatureMigrationCutoverTime.
 Ignore all earlier records because historical temperature values cannot reliably
 distinguish measured values from synthetic fallback values.
 
-If the requested range starts before temperature_migration_cutover_time:
-  effective_start_time = temperature_migration_cutover_time
-else:
-  effective_start_time = startTime
+If the requested range starts before temperatureMigrationCutoverTime (startTime < temperatureMigrationCutoverTime):
+  return 400 Bad Request with JSON error envelope:
+  {
+    "error": "temperature_range_before_cutover",
+    "message": "The requested summary interval starts before the temperature migration cutover timestamp."
+  }
 
 Do not filter out post-cutover samples only because the measured value is 20°C.
-After the cutover, a present wifi_temp value is treated as a legitimate
-measurement.
+After the cutover, a present wifi_temp value is treated as a legitimate measurement.
+However, wifi_temp = 0 is defined as an uninitialized or missing-sensor sentinel across all OpenWiFi telemetry. A sample with wifi_temp = 0, null, 255, or outside the valid range [-40, 125] is treated as a missing sensor reading and MUST be excluded from aggregation for all samples regardless of timestamp.
 ```
 
 The current radio-band mapping is:
@@ -743,20 +912,20 @@ band = 5 → fields ending in _5G
 
 ### Aggregation Logic
 
-Use the current `timepoints.radio_data` JSON array:
+After validating `startTime >= temperatureMigrationCutoverTime`, query the `timepoints.radio_data` JSON array:
 
 ```text
 Load TimePointDB records where:
   boardId == resolvedBoardId
   stored serialNumber == request routerId
-  timestamp >= effective_start_time
+  timestamp >= startTime
   timestamp < endTime
 
 For each record:
   parse radio_data
   for each radio in radio_data:
     if radio.band is 2 or 5:
-      if radio.wifi_temp is present and non-null:
+      if radio.wifi_temp is present, non-null, != 0, and -40 <= radio.wifi_temp <= 125:
         add radio.wifi_temp to that band's sample list
 
 For each band:
@@ -768,8 +937,8 @@ For each band:
 A valid temperature sample is:
 
 ```text
-record timestamp is at or after temperature_migration_cutover_time
-radio.wifi_temp is present and non-null
+record timestamp is at or after temperatureMigrationCutoverTime
+radio.wifi_temp is present, non-null, != 0, and within range [-40, 125]
 ```
 
 If all samples for a band are invalid or missing, return `null` for that band's min, max, and average fields.
@@ -825,7 +994,11 @@ get_device_bandwidth_consumption(
 GET /api/v1/devices/{routerId}/wifi-clients/usage-summary
     ?timestampTill=2026-07-27T12:00:00Z
     &lookbackHours=24
+    &includeCalculationDetails=false
 ```
+
+`includeCalculationDetails` is optional and defaults to `false`. Set it to
+`true` only for diagnostic calculation provenance.
 
 ## Example Request
 
@@ -842,31 +1015,330 @@ None
 
 ## Response
 
+By default, usage-summary returns concise calculation quality metadata for MCP
+consumers. Segment-level provenance is verbose and is omitted unless
+`includeCalculationDetails=true` is requested.
+
 ```json
-[
-  {
-    "mac": "e2:51:95:ed:0f:28",
-    "rx_bytes": 106487500,
-    "tx_bytes": 3851250,
-    "total_bytes": 110338750,
-    "data_consume_rx": "851.9 Mb",
-    "data_consume_tx": "30.81 Mb",
-    "total_data_usage": "882.71 Mb",
-    "usage_accuracy": "exact",
-    "incomplete": false
+{
+  "requestedTimeWindow": {
+    "startTime": "2026-07-26T12:00:00Z",
+    "endTime": "2026-07-27T12:00:00Z"
   },
-  {
-    "mac": "28:39:26:a1:7c:a5",
-    "rx_bytes": 30071250,
-    "tx_bytes": 16486250,
-    "total_bytes": 46557500,
-    "data_consume_rx": "240.57 Mb",
-    "data_consume_tx": "131.89 Mb",
-    "total_data_usage": "372.46 Mb",
-    "usage_accuracy": "lower_bound",
-    "incomplete": true
-  }
-]
+  "resultTimeWindow": {
+    "earliestActualStartTime": "2026-07-26T11:55:00Z",
+    "latestActualEndTime": "2026-07-27T12:05:00Z",
+    "boundaryFallbackUsed": true
+  },
+  "items": [
+    {
+      "mac": "e2:51:95:ed:0f:28",
+      "rx_bytes": 106487500,
+      "tx_bytes": 3851250,
+      "total_bytes": 110338750,
+      "data_consume_rx": "106.49 MB",
+      "data_consume_tx": "3.85 MB",
+      "total_data_usage": "110.34 MB",
+      "usage_accuracy": "exact",
+      "incomplete": false,
+      "segment_count": 1,
+      "boundary_fallback_used": false
+    },
+    {
+      "mac": "28:39:26:a1:7c:a5",
+      "rx_bytes": 30071250,
+      "tx_bytes": 16486250,
+      "total_bytes": 46557500,
+      "data_consume_rx": "30.07 MB",
+      "data_consume_tx": "16.49 MB",
+      "total_data_usage": "46.56 MB",
+      "usage_accuracy": "bounded_interval",
+      "incomplete": false,
+      "segment_count": 1,
+      "boundary_fallback_used": true
+    },
+    {
+      "mac": "54:6c:0e:44:11:09",
+      "rx_bytes": 4200000,
+      "tx_bytes": 600000,
+      "total_bytes": 4800000,
+      "data_consume_rx": "4.20 MB",
+      "data_consume_tx": "0.60 MB",
+      "total_data_usage": "4.80 MB",
+      "usage_accuracy": "exact",
+      "incomplete": false,
+      "segment_count": 2,
+      "boundary_fallback_used": false
+    }
+  ],
+  "totalClients": 3,
+  "truncated": false
+}
+```
+
+`resultTimeWindow` is aggregate response metadata:
+
+```text
+earliestActualStartTime =
+  minimum actual_start_time among the server's internal calculable segments
+  contributing to returned clients
+
+latestActualEndTime =
+  maximum actual_end_time among the server's internal calculable segments
+  contributing to returned clients
+
+boundaryFallbackUsed =
+  true when any internal calculable segment contributing to returned clients
+  used a fallback boundary sample
+```
+
+It describes only the overall result envelope. It does not mean every client or
+segment used the entire envelope, and it is identical whether or not
+`includeCalculationDetails` is enabled.
+
+When no clients are returned:
+
+```json
+{
+  "requestedTimeWindow": {
+    "startTime": "2026-07-26T12:00:00Z",
+    "endTime": "2026-07-27T12:00:00Z"
+  },
+  "resultTimeWindow": {
+    "earliestActualStartTime": null,
+    "latestActualEndTime": null,
+    "boundaryFallbackUsed": false
+  },
+  "items": [],
+  "totalClients": 0,
+  "truncated": false
+}
+```
+
+When a client is observed but no usage interval can be calculated, such as when
+only one cumulative-counter sample exists in or bounding the requested range,
+return the safely provable minimum with `segment_count: 0`:
+
+```json
+{
+  "requestedTimeWindow": {
+    "startTime": "2026-08-05T12:00:00Z",
+    "endTime": "2026-08-05T13:00:00Z"
+  },
+  "resultTimeWindow": {
+    "earliestActualStartTime": null,
+    "latestActualEndTime": null,
+    "boundaryFallbackUsed": false
+  },
+  "items": [
+    {
+      "mac": "e2:51:95:ed:0f:28",
+      "rx_bytes": 0,
+      "tx_bytes": 0,
+      "total_bytes": 0,
+      "data_consume_rx": "0.00 MB",
+      "data_consume_tx": "0.00 MB",
+      "total_data_usage": "0.00 MB",
+      "usage_accuracy": "lower_bound",
+      "incomplete": true,
+      "segment_count": 0,
+      "boundary_fallback_used": false
+    }
+  ],
+  "totalClients": 1,
+  "truncated": false
+}
+```
+
+## Calculation Details
+
+Use `includeCalculationDetails=true` only for diagnostics, troubleshooting, or
+calculation provenance. Ordinary MCP decisions should use `usage_accuracy`,
+`segment_count`, `boundary_fallback_used`, and the aggregate `resultTimeWindow`.
+
+```http
+GET /api/v1/devices/60cf84f22290/wifi-clients/usage-summary?timestampTill=2026-07-27T12:00:00Z&lookbackHours=24&includeCalculationDetails=true
+Authorization: Bearer <token>
+```
+
+When details are enabled, every returned calculation segment has non-null
+`actual_start_time` and `actual_end_time`. `stream_id` and `segment_id` are
+opaque identifiers scoped to the response. Clients must not persist them,
+compare them across requests, parse them, or depend on their format; the
+examples below are illustrative only. If no differential can be calculated, the
+client still has `segment_count: 0` and
+`calculation_segments: []`.
+
+Detailed response invariants:
+
+```text
+client.rx_bytes == SUM(calculation_segments[].rx_bytes)
+client.tx_bytes == SUM(calculation_segments[].tx_bytes)
+client.total_bytes == SUM(calculation_segments[].total_bytes)
+client.segment_count == calculation_segments.length
+client.boundary_fallback_used ==
+  true when any calculation segment has boundary_fallback_used = true
+```
+
+Example detailed response for the same calculated result:
+
+```json
+{
+  "requestedTimeWindow": {
+    "startTime": "2026-07-26T12:00:00Z",
+    "endTime": "2026-07-27T12:00:00Z"
+  },
+  "resultTimeWindow": {
+    "earliestActualStartTime": "2026-07-26T11:55:00Z",
+    "latestActualEndTime": "2026-07-27T12:05:00Z",
+    "boundaryFallbackUsed": true
+  },
+  "items": [
+    {
+      "mac": "e2:51:95:ed:0f:28",
+      "rx_bytes": 106487500,
+      "tx_bytes": 3851250,
+      "total_bytes": 110338750,
+      "data_consume_rx": "106.49 MB",
+      "data_consume_tx": "3.85 MB",
+      "total_data_usage": "110.34 MB",
+      "usage_accuracy": "exact",
+      "incomplete": false,
+      "segment_count": 1,
+      "boundary_fallback_used": false,
+      "calculation_segments": [
+        {
+          "stream_id": "e2:51:95:ed:0f:28|bssid=18:34:af:01:02:03|ssid=Corp|band=5G",
+          "segment_id": "e2:51:95:ed:0f:28|session=42|segment=0",
+          "segment_start_reason": "window_start",
+          "segment_end_reason": "window_end",
+          "effective_start_time": "2026-07-26T12:00:00Z",
+          "effective_end_time": "2026-07-27T12:00:00Z",
+          "actual_start_time": "2026-07-26T12:00:00Z",
+          "actual_end_time": "2026-07-27T12:00:00Z",
+          "boundary_fallback_used": false,
+          "accuracy": "exact",
+          "rx_bytes": 106487500,
+          "tx_bytes": 3851250,
+          "total_bytes": 110338750
+        }
+      ]
+    },
+    {
+      "mac": "28:39:26:a1:7c:a5",
+      "rx_bytes": 30071250,
+      "tx_bytes": 16486250,
+      "total_bytes": 46557500,
+      "data_consume_rx": "30.07 MB",
+      "data_consume_tx": "16.49 MB",
+      "total_data_usage": "46.56 MB",
+      "usage_accuracy": "bounded_interval",
+      "incomplete": false,
+      "segment_count": 1,
+      "boundary_fallback_used": true,
+      "calculation_segments": [
+        {
+          "stream_id": "28:39:26:a1:7c:a5|bssid=18:34:af:04:05:06|ssid=Corp|band=5G",
+          "segment_id": "28:39:26:a1:7c:a5|session=99|segment=0",
+          "segment_start_reason": "window_start",
+          "segment_end_reason": "window_end",
+          "effective_start_time": "2026-07-26T12:00:00Z",
+          "effective_end_time": "2026-07-27T12:00:00Z",
+          "actual_start_time": "2026-07-26T11:55:00Z",
+          "actual_end_time": "2026-07-27T12:05:00Z",
+          "boundary_fallback_used": true,
+          "accuracy": "bounded_interval",
+          "rx_bytes": 30071250,
+          "tx_bytes": 16486250,
+          "total_bytes": 46557500
+        }
+      ]
+    },
+    {
+      "mac": "54:6c:0e:44:11:09",
+      "rx_bytes": 4200000,
+      "tx_bytes": 600000,
+      "total_bytes": 4800000,
+      "data_consume_rx": "4.20 MB",
+      "data_consume_tx": "0.60 MB",
+      "total_data_usage": "4.80 MB",
+      "usage_accuracy": "exact",
+      "incomplete": false,
+      "segment_count": 2,
+      "boundary_fallback_used": false,
+      "calculation_segments": [
+        {
+          "stream_id": "54:6c:0e:44:11:09|bssid=18:34:af:07:08:09|ssid=Corp|band=5G",
+          "segment_id": "54:6c:0e:44:11:09|session=10|segment=0",
+          "segment_start_reason": "window_start",
+          "segment_end_reason": "session_end",
+          "effective_start_time": "2026-07-26T12:00:00Z",
+          "effective_end_time": "2026-07-26T18:30:00Z",
+          "actual_start_time": "2026-07-26T12:00:00Z",
+          "actual_end_time": "2026-07-26T18:30:00Z",
+          "boundary_fallback_used": false,
+          "accuracy": "exact",
+          "rx_bytes": 1800000,
+          "tx_bytes": 250000,
+          "total_bytes": 2050000
+        },
+        {
+          "stream_id": "54:6c:0e:44:11:09|bssid=18:34:af:07:08:09|ssid=Corp|band=5G",
+          "segment_id": "54:6c:0e:44:11:09|session=11|segment=0",
+          "segment_start_reason": "session_start",
+          "segment_end_reason": "window_end",
+          "effective_start_time": "2026-07-26T19:00:00Z",
+          "effective_end_time": "2026-07-27T12:00:00Z",
+          "actual_start_time": "2026-07-26T19:00:00Z",
+          "actual_end_time": "2026-07-27T12:00:00Z",
+          "boundary_fallback_used": false,
+          "accuracy": "exact",
+          "rx_bytes": 2400000,
+          "tx_bytes": 350000,
+          "total_bytes": 2750000
+        }
+      ]
+    }
+  ],
+  "totalClients": 3,
+  "truncated": false
+}
+```
+
+When a client is observed in-window (`[startTime, endTime)`) but no usage interval can be calculated, such as when
+only one cumulative-counter sample exists in or bounding the requested range,
+return the safely provable minimum with no calculation segments:
+
+```json
+{
+  "requestedTimeWindow": {
+    "startTime": "2026-08-05T12:00:00Z",
+    "endTime": "2026-08-05T13:00:00Z"
+  },
+  "resultTimeWindow": {
+    "earliestActualStartTime": null,
+    "latestActualEndTime": null,
+    "boundaryFallbackUsed": false
+  },
+  "items": [
+    {
+      "mac": "e2:51:95:ed:0f:28",
+      "rx_bytes": 0,
+      "tx_bytes": 0,
+      "total_bytes": 0,
+      "data_consume_rx": "0.00 MB",
+      "data_consume_tx": "0.00 MB",
+      "total_data_usage": "0.00 MB",
+      "usage_accuracy": "lower_bound",
+      "incomplete": true,
+      "segment_count": 0,
+      "boundary_fallback_used": false,
+      "calculation_segments": []
+    }
+  ],
+  "totalClients": 1,
+  "truncated": false
+}
 ```
 
 ## API Logic
@@ -902,62 +1374,168 @@ The values are cumulative counters, so they must not be summed directly.
 ### Correct Calculation
 
 ```text
+For an uninterrupted stream:
+  delta = ending metric value - starting metric value
+
+For confirmed rollover:
+  apply known-width rollover arithmetic
+
+For confirmed independent session split/reset:
+  calculate each proven session segment separately
+  sum segment differentials
+
+For ambiguous reset/session split:
+  calculate only safely observed nonnegative segment deltas
+  mark the stream lower_bound
+
 stream_key = association/session id when available, otherwise:
   station MAC
   BSSID
   SSID
   band/radio when present
 
-baseline = last sample before start_time for the same stream_key, if available
+requested_start = startTime
+requested_end = endTime
 
-first in-window delta:
-  if baseline exists:
-    counterDelta(first.rx_bytes, baseline.rx_bytes)
-    counterDelta(first.tx_bytes, baseline.tx_bytes)
-  else if this is a confirmed new association/session that began within the window:
-    first.rx_bytes
-    first.tx_bytes
-  else:
-    0
+effective boundaries:
+  effective_start = max(requested_start, proven_session_start)
+  effective_end = min(requested_end, proven_session_end)
 
-subsequent deltas:
-  counterDelta(current.rx_bytes, previous.rx_bytes)
-  counterDelta(current.tx_bytes, previous.tx_bytes)
+start_sample:
+  exact sample at effective_start, if available
+  otherwise latest available sample at or before effective_start
 
-data_consume_rx = SUM(reset-safe rx_bytes deltas)
-data_consume_tx = SUM(reset-safe tx_bytes deltas)
-total_data_usage = data_consume_rx + data_consume_tx
+end_sample:
+  exact sample at effective_end, if available
+  otherwise earliest available sample at or after effective_end
 
-usage_accuracy = exact when no contributing stream is incomplete, otherwise lower_bound
+boundary tolerance:
+  abs(effective_start - actual_start_time) <= 2 * expected_collection_interval
+  abs(actual_end_time - effective_end) <= 2 * expected_collection_interval
+
+actual_start_time = start_sample.timestamp
+actual_end_time = end_sample.timestamp
+boundary_fallback_used =
+  actual_start_time != effective_start ||
+  actual_end_time != effective_end
+
+uninterrupted segment differential:
+  counterDelta(end_sample.rx_bytes, start_sample.rx_bytes)
+  counterDelta(end_sample.tx_bytes, start_sample.tx_bytes)
+
+samples between start_sample and end_sample:
+  use to detect counter resets, confirmed rollovers, duplicate or
+  out-of-order telemetry, missing-sample gaps, and session boundaries
+  do not sum raw cumulative values as usage
+  do sum proven segment deltas when resets or session splits are confirmed
+
+rx_bytes    = SUM(stream rx_bytes segment differentials or lower-bound deltas)
+tx_bytes    = SUM(stream tx_bytes segment differentials or lower-bound deltas)
+total_bytes = rx_bytes + tx_bytes
+
+data_consume_rx  = format_bytes(rx_bytes)
+data_consume_tx  = format_bytes(tx_bytes)
+total_data_usage = format_bytes(total_bytes)
+
+stream accuracy =
+  exact when the segment has authoritative counter evidence at effective_start
+    and effective_end, and every internal sub-segment is fully proven
+  bounded_interval when the segment uses immediate fallback samples within
+    tolerance and every internal sub-segment is fully proven
+  lower_bound when the stream lacks a usable boundary pair, exceeds boundary
+    tolerance, has an ambiguous reset/session change, or only has partially
+    observed segments
+
+client usage_accuracy precedence =
+  lower_bound if any contributing stream is lower_bound
+  otherwise bounded_interval if any contributing stream is bounded_interval
+  otherwise exact
+
 incomplete = true when usage_accuracy is lower_bound
 ```
 
-Calculate counter deltas independently for RX and TX per `stream_key`. After stream-level deltas are calculated, aggregate the resulting RX/TX deltas by station MAC for the response. If any stream contributing to a station MAC is incomplete/estimated, that station's usage is incomplete/estimated.
+Calculate counter deltas independently for RX and TX per `stream_key` and
+internal calculable segment. After segment deltas are calculated, aggregate the
+resulting RX/TX deltas by station MAC for the response. Client `rx_bytes` and
+`tx_bytes` must equal the sum of internal segment RX/TX deltas; each internal
+segment's `total_bytes` must equal its `rx_bytes + tx_bytes`. The default
+response exposes `segment_count` and `boundary_fallback_used` instead of the
+segment objects. When `includeCalculationDetails=true`, the detailed
+`calculation_segments[]` array must satisfy the same byte-sum invariants. If
+any segment contributing to a station MAC is lower_bound, that station's usage
+is lower_bound.
+
+Client MAC values in API responses must be normalized canonical lowercase colon-separated MAC addresses matching `^[0-9a-f]{2}(:[0-9a-f]{2}){5}$`.
 
 Usage accuracy contract:
 
 ```text
-Returned usage is exact only when every stream has enough information to account
-for the requested window:
-  a pre-window baseline exists for an ongoing stream, or
-  the stream is confirmed to have begun within the requested window, or
-  any counter rollover is confirmed and handled with rollover arithmetic.
+Returned usage is exact only when every contributing calculation segment has
+authoritative boundary evidence matching effective boundaries exactly:
+  effective_start = max(requested_start, proven_session_start), and
+  effective_end = min(requested_end, proven_session_end), and
+  actual_start_time == effective_start and actual_end_time == effective_end,
+  and every counter reset, rollover, or session transition is unambiguously proven
+  and accounted for using independent segment differentials or verified rollover arithmetic.
 
-When a stream lacks a pre-window baseline, has no reliable session/association
-start, or has an ambiguous counter decrease, the returned usage is a lower-bound
-estimate. The algorithm must avoid overcounting unknown traffic, so it adds zero
-for ambiguous intervals and treats the result as incomplete/estimated.
+Returned usage is bounded_interval when exact boundary samples are unavailable but
+the latest available starting sample at or before `effective_start` and the
+earliest available ending sample at or after `effective_end` are available
+within two times the configured telemetry sampling interval, and no reset or gap
+prevents the segment differential from being calculated. The response must
+include requested timestamps and aggregate actual sample timestamps. When
+`includeCalculationDetails=true`, it must also include the effective and actual
+timestamps for each returned segment. This is usage over an interval containing
+the segment's overlap with the requested interval; when counters are monotonic
+and uninterrupted, the returned value is greater than or equal to usage in that
+overlap.
 
-The response must expose `usage_accuracy` per client:
+When a stream lacks a usable bounding sample pair or has an ambiguous counter
+decrease/session change, or when either fallback boundary exceeds tolerance, the
+returned usage is a lower-bound estimate. The algorithm must avoid overcounting
+unknown traffic, so it adds only safely provable nonnegative consecutive segment
+deltas inside the requested range and treats the result as incomplete/estimated.
+If no positive interval can be safely proven, return 0 bytes for that stream with
+`lower_bound`. Include a client in `items[]` and count it in `totalClients` only when it has at least one in-window observation (`[startTime, endTime)`) or proven session overlap during the requested interval, even if the safely provable lower-bound delta is 0. Outside-window bounding samples (e.g. pre-window baseline or post-window fallback samples) are used exclusively as boundary calculation aids for clients that have proven in-window presence or session overlap. A station MAC with only outside-window samples and no in-window observation or session overlap during `[startTime, endTime)` must be excluded from `items[]` and `totalClients`. If no differential segment can be calculated
+for that client, return `segment_count: 0` and `boundary_fallback_used: false`;
+do not create a segment with fabricated effective or actual boundary timestamps.
+If details are enabled, return `calculation_segments: []` for that client.
+
+The response must expose `usage_accuracy`, `segment_count`, and
+`boundary_fallback_used` per client:
   exact: all contributing streams are fully accounted for
+  bounded_interval: at least one contributing segment used fallback samples
+    within tolerance that bound the requested range
   lower_bound: at least one contributing stream used a conservative zero delta
-    for an ambiguous interval or missing baseline
+    for an ambiguous interval, missing usable boundary pair, or out-of-tolerance
+    boundary
 
 When `usage_accuracy` is `lower_bound`, the reported byte and formatted usage
 values are the safely observed minimum. Actual usage may be higher.
 ```
 
-A fixed-width rollover is confirmed only when the counter width is known for that source and the observed decrease is consistent with a rollover for that counter. If the counter width is unknown, or the decrease could also be a reset/reconnect/stale sample, treat it as ambiguous.
+Differential response decision table:
+
+| Condition | Result |
+|---|---|
+| Exact effective start and effective end counter evidence exists, no reset/session ambiguity | `exact` differential |
+| Fallback start and end samples bound the effective segment range and both are within `2 * expected_collection_interval`, no reset/session ambiguity | `bounded_interval` differential |
+| Session starts inside the requested window with proven zero/session baseline and authoritative end evidence | `exact` if effective boundaries are fully proven |
+| Session ends inside the requested window with authoritative start and proven session-end evidence | `exact` if effective boundaries are fully proven |
+| Start sample missing and session start inside the requested window is confirmed but complete effective-boundary evidence is unavailable | sum safely provable nonnegative segment deltas; `lower_bound` |
+| Start sample missing and session origin is unknown | `lower_bound` |
+| End sample missing | sum safely provable nonnegative consecutive segment deltas through the latest usable sample; `lower_bound` |
+| Both boundary samples missing | sum safely provable nonnegative consecutive segment deltas inside the requested range; `lower_bound` |
+| Only one in-window sample exists | return 0 bytes, `lower_bound`, `segment_count: 0`, and `boundary_fallback_used: false`; if details are enabled, return `calculation_segments: []` |
+| Client appears during the window without reliable session-start proof | sum safely provable post-appearance segment deltas only; `lower_bound` |
+| Client disappears before the end boundary | sum safely provable segment deltas through the last usable sample; `lower_bound` |
+| Client reconnects and counters reset | split only when session identity proves independent streams; otherwise `lower_bound` |
+| Multiple sessions for the same MAC | calculate per proven session stream, then aggregate by MAC; mark client `lower_bound` if any contributing stream is incomplete |
+| Ambiguous counter reset, stale sample, duplicate conflict, or out-of-order telemetry | `lower_bound` |
+
+A fixed-width rollover is confirmed only when the counter width is known for that source, the observed decrease is consistent with a rollover for that counter, and the maximum possible counter increase during the observation gap cannot exceed one full counter range. If the counter width is unknown, if multiple wraps may have occurred, or if the decrease could also be a reset/reconnect/stale sample, treat it as ambiguous and return `lower_bound`.
+
+If the expected collection interval is missing, zero, invalid, or cannot be resolved reliably for the requested retention period, fallback boundary samples cannot qualify as `bounded_interval`; exact boundary samples are required to avoid `lower_bound`.
 
 ### Reset-Safe Delta Logic
 
@@ -969,28 +1547,27 @@ struct CounterDeltaResult {
 
 CounterDeltaResult counterDelta(uint64_t current,
                                 uint64_t previous,
-                                bool confirmedNewSession,
-                                bool newSessionStartedInWindow,
                                 bool confirmedFixedWidthRollover,
+                                bool singleRolloverBoundProven,
                                 uint64_t counterMax) {
     if (current >= previous) {
         return {current - previous, false};
     }
 
-    if (confirmedNewSession) {
-        if (newSessionStartedInWindow) {
-            return {current, false};
-        }
-        return {0, true};
-    }
-
-    if (confirmedFixedWidthRollover) {
+    if (confirmedFixedWidthRollover && singleRolloverBoundProven) {
         return {(counterMax - previous) + current + 1, false};
     }
 
     return {0, true};
 }
 ```
+
+Session starts are handled by segment construction, not by blindly adding the
+current counter on every decrease. When reliable session evidence proves a new
+session started inside the requested window, use that session's first valid
+counter sample as the segment baseline and sum only subsequent proven segment
+deltas. If there is no subsequent usable sample, that segment contributes 0 with
+`lower_bound`.
 
 Do not treat every lower counter as a reset where `current` should be added. A lower value can mean a new association session, movement between radios/BSSIDs, stale or out-of-order telemetry, duplicate station records inside one timepoint, or counter-width rollover. Adding `current` on every decrease can overcount traffic by attributing unknown pre-window traffic to the requested window.
 
@@ -1005,11 +1582,20 @@ Build a deterministic sample key from the stable fields available in the associa
 Sort samples by:
   station MAC
   timestamp ASC
-  BSSID/SSID/band/radio tie-breakers
+  stream identity fields for grouping only
 
 Deduplicate exact duplicate samples before calculating deltas.
 
-Discard out-of-order samples for the same calculated stream.
+For the same calculated stream and same timestamp:
+  identical counters are duplicates and collapse to one sample
+  different counters are ambiguous and must be excluded from delta calculation
+  unless a reliable source sequence number proves their temporal order
+
+Different stream keys are calculated independently. BSSID, SSID, band, and radio
+identify counter streams; they must not be used to invent temporal order between
+different counter values at the same timestamp.
+
+Deterministically sort all stream samples by timestamp ASC before calculating deltas. Valid out-of-order historical telemetry must be sorted and included in differential calculation; valid samples must not be discarded or treated as stale merely because they arrived out of temporal sequence. Discarding is strictly reserved for exact duplicate samples or ambiguous conflicting counter samples at the same timestamp without sequence proof.
 
 When an association/session identifier is available:
   calculate deltas only within the same session.
@@ -1018,21 +1604,50 @@ When no session identifier is available:
   use station MAC as the result grouping key,
   but use BSSID/SSID/band/radio changes as stream boundaries when possible.
 
+Independent Directional Counter Rules (RX vs TX):
+1. RX and TX counters are calculated independently per stream.
+2. If RX is present and valid but TX is missing, non-numeric, negative (< 0), or uncalculable:
+   - RX bytes are calculated normally and included in data_consume_rx.
+   - TX bytes return 0 as a required non-null integer in calculation_segments (and formatted "0.00 MB" in summary strings).
+   - Total segment bytes total_bytes = rx_bytes + 0 = rx_bytes.
+   - The stream accuracy is classified as lower_bound.
+3. If TX is present and valid but RX is missing/invalid:
+   - TX bytes are calculated normally and included in data_consume_tx.
+   - RX bytes return 0 as a required non-null integer in calculation_segments (and formatted "0.00 MB" in summary strings).
+   - Total segment bytes total_bytes = 0 + tx_bytes = tx_bytes.
+   - The stream accuracy is classified as lower_bound.
+4. If a boundary sample has RX but not TX (or vice versa), the missing direction cannot form a calculable boundary delta; that direction returns 0 bytes and is marked uncalculable (lower_bound).
+5. segment_count is incremented if at least one direction (RX or TX) produces a valid calculable segment delta.
+6. A client MAC is included in totalClients and items[] if it has proven in-window presence or session overlap, regardless of whether one counter direction was missing or uncalculable.
+
 If current < previous:
   if a new association/session is confirmed:
     if the new session start time is within [startTime, endTime):
-      add current as post-session-start traffic
+      close the previous segment at the last pre-reset sample
+      start a new segment with current as its baseline
+      add only subsequent proven nonnegative deltas for the new segment
+      mark the stream lower_bound unless both session segments can be fully proven
     else:
       treat current as the new baseline, add delta 0, and mark the result
       incomplete/estimated
-  else if fixed-width rollover is known and can be confirmed:
+  else if fixed-width rollover is known, one-wrap bound is proven, and can be confirmed:
     apply rollover math
   else:
     treat current as the new baseline, add delta 0, and mark the result
     incomplete/estimated
 ```
 
-Without the pre-window baseline for the same calculated stream, the first sample inside the requested window can include traffic that occurred before `start_time`. Do not add the first in-window cumulative counter directly unless it is known to be a fresh association/session that started inside the requested window. If the stream may have started before `start_time`, add zero for the first sample and mark the result incomplete/estimated.
+For usage differential calculation, choose the start and end samples first, then
+calculate the boundary differential for each segment. Exact usage requires
+authoritative counter evidence exactly at each segment's `effective_start` and
+`effective_end`, where effective boundaries are clipped to proven session
+lifetime and the requested window. If fallback samples within tolerance are used,
+classify the result as `bounded_interval`. The default response exposes the
+requested time window, aggregate result time window, and fallback summary
+fields. When `includeCalculationDetails=true`, each returned segment
+additionally exposes its effective and actual boundary timestamps. Do not add a
+cumulative counter directly unless it is known to represent traffic that started inside the
+segment's effective interval.
 
 A new association/session is confirmed only when the source provides reliable session identity or timing evidence. For example, a session id change, association id change, or connected-duration reset may prove a new session if it also proves the session start time is within the requested window. BSSID, SSID, band, or radio changes define separate calculation streams, but they do not by themselves prove that the new cumulative counter started inside the requested window.
 
@@ -1045,13 +1660,18 @@ Example:
 
 Delta 10:00 -> 10:05 = 500
 
-If 10:10 is a confirmed new session that started inside the request window:
-  add 200
+If 10:10 is a confirmed new session that started inside the request window WITH authoritative proof of starting at counter zero (e.g. session_start event with baseline 0 at session origin):
+  add 200 (delta from zero baseline)
   total rx_bytes = 700
   usage_accuracy = exact, unless another stream is incomplete
 
+If 10:10 is a confirmed new session that started inside the request window WITHOUT authoritative proof of starting at zero:
+  treat 200 as the new segment baseline (delta = 0 for 10:10 sample alone)
+  total rx_bytes = 500
+  usage_accuracy = lower_bound (until a subsequent sample in Session B establishes a proven delta)
+
 If 10:10 is an ambiguous decrease:
-  add 0
+  add 0 (treat 200 as baseline)
   total rx_bytes = 500
   usage_accuracy = lower_bound
 
@@ -1079,27 +1699,29 @@ A client moving between BSSIDs should remain one client in the final response un
 
 ### Unit Conversion
 
-The MCP output expects strings such as:
+The API returns raw byte counters plus display-only strings such as:
 
 ```text
-851.9 Mb
-30.81 Mb
+106.49 MB
+3.85 MB
 ```
 
 Recommended conversion:
 
 ```cpp
-double rxMb = static_cast<double>(rxBytes) * 8.0 / 1000000.0;
-double txMb = static_cast<double>(txBytes) * 8.0 / 1000000.0;
+double rxMB = static_cast<double>(rxBytes) / 1000000.0;
+double txMB = static_cast<double>(txBytes) / 1000000.0;
 ```
 
-`Mb` means megabits. If the implementation divides bytes by `1024 * 1024`, label the result as `MiB` or `MB` instead.
+`MB` means decimal megabytes. If the implementation divides bytes by `1024 * 1024`, label the result as `MiB` instead.
 
 Formatting:
 
 ```cpp
-fmt::format("{:.2f} Mb", value);
+fmt::format("{:.2f} MB", value);
 ```
+
+This uses standard floating point formatting semantics (formatting two decimal places with the `" MB"` suffix) rather than tying calculations to a custom round-half-up implementation.
 
 ### Query Flow
 
@@ -1108,21 +1730,24 @@ Resolve boardId from routerId
     ↓
 Load TimePointDB records for resolvedBoardId and stored serialNumber == request routerId
     ↓
-Include records from startTime up to but not including endTime
-    ↓
-Also load the latest pre-window association sample for each calculated stream_key
+Query both boundary candidates for each calculated stream:
+  - In-window samples: timestamp >= startTime and timestamp < endTime
+  - Start boundary: latest sample at or before effective_start (timestamp <= effective_start)
+  - End boundary: earliest sample at or after effective_end (timestamp >= effective_end)
+(Outside-window samples serve strictly as boundary calculation aids for streams with in-window observations or proven session overlap; they do NOT make a client eligible for response items)
     ↓
 Parse ssid_data associations
     ↓
-Build stream_key values and sort samples by stream_key and timestamp
+Build stream_key values and sort samples by stream_key and timestamp ASC
     ↓
-Calculate reset-safe RX/TX deltas
+Calculate reset-safe RX/TX deltas using effective start and end boundary samples
     ↓
-Aggregate stream-level deltas by station MAC
+Aggregate stream-level deltas by station MAC (including only clients with in-window observations or proven session overlap), sort clients deterministically by raw total_bytes DESC then normalized mac ASC, and apply the 500-client limit (truncated = totalClients > 500)
     ↓
-Convert bytes to megabits
+Convert bytes to decimal megabytes
     ↓
-Return array
+Return wrapped response with requestedTimeWindow, resultTimeWindow, items,
+totalClients, and truncated
 ```
 
 ---
@@ -1163,24 +1788,70 @@ None
 ## Response
 
 ```json
-[
-  {
-    "mac": "e2:51:95:ed:0f:28",
-    "rssi_excellent_pct": 41.67,
-    "rssi_good_pct": 50.0,
-    "rssi_fair_pct": 1.67,
-    "rssi_poor_pct": 6.67,
-    "rssi_total_samples": 60
+{
+  "requestedTimeWindow": {
+    "startTime": "2026-07-26T12:00:00Z",
+    "endTime": "2026-07-27T12:00:00Z"
   },
-  {
-    "mac": "28:39:26:a1:7c:a5",
-    "rssi_excellent_pct": 92.73,
-    "rssi_good_pct": 7.27,
-    "rssi_fair_pct": 0.0,
-    "rssi_poor_pct": 0.0,
-    "rssi_total_samples": 110
-  }
-]
+  "resultTimeWindow": {
+    "firstSampleTime": "2026-07-26T12:01:00Z",
+    "lastSampleTime": "2026-07-27T11:58:00Z",
+    "totalSamples": 170
+  },
+  "items": [
+    {
+      "mac": "e2:51:95:ed:0f:28",
+      "rssi_excellent_pct": 41.67,
+      "rssi_good_pct": 50.0,
+      "rssi_fair_pct": 1.67,
+      "rssi_poor_pct": 6.67,
+      "rssi_total_samples": 60
+    },
+    {
+      "mac": "28:39:26:a1:7c:a5",
+      "rssi_excellent_pct": 92.73,
+      "rssi_good_pct": 7.27,
+      "rssi_fair_pct": 0.0,
+      "rssi_poor_pct": 0.0,
+      "rssi_total_samples": 110
+    }
+  ],
+  "totalClients": 2,
+  "truncated": false
+}
+```
+
+`resultTimeWindow` for RSSI is scoped to returned `items[]` after applying the
+500-client response limit:
+
+```text
+firstSampleTime =
+  earliest valid RSSI sample contributing to items[]
+
+lastSampleTime =
+  latest valid RSSI sample contributing to items[]
+
+totalSamples =
+  SUM(items[].rssi_total_samples)
+```
+
+For empty RSSI results:
+
+```json
+{
+  "requestedTimeWindow": {
+    "startTime": "2026-07-26T12:00:00Z",
+    "endTime": "2026-07-27T12:00:00Z"
+  },
+  "resultTimeWindow": {
+    "firstSampleTime": null,
+    "lastSampleTime": null,
+    "totalSamples": 0
+  },
+  "items": [],
+  "totalClients": 0,
+  "truncated": false
+}
 ```
 
 ## API Logic
@@ -1238,6 +1909,8 @@ poor_pct      = poor_count × 100 / total_samples
 ```
 
 Round percentages to two decimal places.
+
+The four percentage fields are constrained to `0 <= value <= 100`. Because each percentage is independently rounded to two decimal places, the four values may sum to slightly below or above exactly `100`.
 
 ### Current Storage Aggregation Logic
 
@@ -1304,9 +1977,50 @@ None
 
 ```json
 {
-  "gw_uuid": "60cf84f22290",
-  "fetch_status": "success",
-  "offline_count": 6
+  "meta": {
+    "requestedWindow": {
+      "startTime": "2026-07-26T12:00:00Z",
+      "endTime": "2026-07-27T12:00:00Z"
+    },
+    "observedWindow": {
+      "firstSampleAt": "2026-07-26T13:15:00Z",
+      "lastSampleAt": "2026-07-27T09:45:00Z"
+    },
+    "sourceWindow": {
+      "firstSampleAt": "2026-07-26T11:55:00Z",
+      "lastSampleAt": "2026-07-27T12:00:00Z"
+    },
+    "contributingWindow": {
+      "firstSampleAt": "2026-07-26T13:15:00Z",
+      "lastSampleAt": "2026-07-27T09:45:00Z"
+    },
+    "selection": "boundary_assisted",
+    "coverage": "full",
+    "accuracy": "exact",
+    "sampleCount": 6,
+    "offlineEventCount": 6,
+    "effectiveSamplingIntervalSeconds": 0,
+    "allowedGapSeconds": 0,
+    "boundarySamplesUsed": {
+      "beforeStart": true,
+      "atStart": false,
+      "atEnd": false,
+      "afterEnd": false
+    },
+    "availabilityCoverage": {
+      "coverageStart": "2026-07-26T11:55:00Z",
+      "stateKnownFrom": "2026-07-26T11:55:00Z",
+      "processedThrough": "2026-07-27T12:00:00Z",
+      "allowedIngestionDelaySeconds": 0,
+      "ingestionGapKnown": false,
+      "proofSource": "serial_partition_checkpoint"
+    }
+  },
+  "data": {
+    "gw_uuid": "60cf84f22290",
+    "fetch_status": "success",
+    "offline_count": 6
+  }
 }
 ```
 
@@ -1354,7 +2068,7 @@ metadata
 
 ### Required Storage Implementation
 
-Add a dedicated storage class for availability events:
+Add dedicated storage classes for availability events and restart-safe availability state:
 
 ```text
 src/storage/storage_device_availability_events.h
@@ -1372,6 +2086,7 @@ Fields:
   serialNumber    TEXT
   event_type      TEXT
   event_time      BIGINT
+  source_sequence BIGINT NULL
   reason          TEXT
   connection_ip   TEXT
   session_id      TEXT
@@ -1383,11 +2098,13 @@ Indexes:
   availability_serial_time_index:
     serialNumber ASC
     event_time ASC
+    source_sequence ASC NULLS FIRST
 
   availability_board_serial_time_index:
     board_id ASC
     serialNumber ASC
     event_time ASC
+    source_sequence ASC NULLS FIRST
 
 Unique constraints:
   availability_idempotency_key_unique:
@@ -1396,6 +2113,14 @@ Unique constraints:
 Optional indexes:
   availability_event_id_index:
     event_id ASC
+```
+
+SQL composite ordering semantics:
+
+```text
+When querying device_availability_events by (event_time, source_sequence):
+- Ascending queries use ORDER BY event_time ASC, source_sequence ASC NULLS FIRST so unsequenced events (source_sequence = NULL) at a timestamp sort before sequenced events at the same timestamp.
+- Descending queries use ORDER BY event_time DESC, source_sequence DESC NULLS LAST so the event with the highest sequence number at a timestamp sorts first, and unsequenced events sort last.
 ```
 
 `event_id` stores the normalized source event id when the payload provides one, using `payload.ping.uuid`, `payload.uuid`, or `payload.disconnection.uuid` only when that `uuid` is stable for the same logical source event.
@@ -1411,6 +2136,7 @@ serialNumber
 board_id
 current_state
 last_event_time
+last_source_sequence
 last_idempotency_key
 updated_at
 metadata
@@ -1424,6 +2150,7 @@ Fields:
   board_id             TEXT NULL
   current_state        TEXT
   last_event_time      BIGINT
+  last_source_sequence BIGINT NULL
   last_idempotency_key TEXT
   updated_at           BIGINT
   metadata             TEXT
@@ -1435,6 +2162,53 @@ Indexes:
 Constraints:
   current_state must be one of: online, offline, unknown
 ```
+
+`device_availability_events` stores only online/offline transition history. `device_availability_state` stores the authoritative current state and the latest accepted source availability ordering key.
+
+`last_event_time` and `last_source_sequence` form the persisted source ordering key after events have passed the required per-serial ordering mechanism. `last_event_time` must be populated from the normalized Kafka source timestamp (`event_time`), and `last_source_sequence` must be populated from a reliable source sequence, source offset within the producing system, or another deterministic 64-bit numeric value (`BIGINT`) when one exists. `source_sequence` and `last_source_sequence` are stored as `BIGINT NULL` so SQL and application-layer index and comparator operations preserve numeric order (`10 > 2`). The composite key is used for stale detection only after Analytics has established that no older transition for the same serialNumber can still be accepted. `DeviceInfo.lastContact` may remain local contact or processing metadata, but it must not be used to order source events because Kafka delivery can be delayed.
+
+Add persisted ingestion coverage tables for availability exactness:
+
+```text
+device_availability_ingestion_checkpoint
+----------------------------------------
+serialNumber
+coverage_start
+state_known_from
+processed_through_event_time
+partition
+offset
+ordering_strategy
+reorder_window_ms
+ingestion_gap_known
+updated_at
+metadata
+
+device_availability_ingestion_gaps
+----------------------------------
+serialNumber
+gap_start_event_time
+gap_end_event_time
+reason
+detected_at
+metadata
+```
+
+`processed_through_event_time` is a source-event-time watermark, not a Kafka processing-time or `DeviceInfo.lastContact` value. `state_known_from` stores the earliest source event timestamp from which gateway state is authoritatively established. When initial state is unproven (such as a first observed disconnection initializing state without prior state history), `state_known_from` is set to the timestamp of the first observed transition or explicit state proof (or an unproven gap is persisted in `device_availability_ingestion_gaps` for `[coverage_start, initial_observation_time)`). Kafka topic, partition, and offset are stored only as proof metadata.
+
+For availability coverage decisions over a requested interval `[startTime, endTime)`:
+
+```text
+coverageTargetEnd = endTime - allowedIngestionDelaySeconds
+```
+
+An exact result (`meta.coverage = "full"`, `meta.accuracy = "exact"`) is allowed only when the serialNumber checkpoint proves `coverage_start <= startTime`, `state_known_from <= startTime` (or no unproven initial gap), `processed_through_event_time >= endTime`, and no persisted gap overlaps `[startTime, endTime)`.
+
+Evaluating coverage against `coverageTargetEnd = endTime - allowedIngestionDelaySeconds` does not prove that there were no offline transitions in `[coverageTargetEnd, endTime)`. Therefore, if `processed_through_event_time < endTime` (even when `processed_through_event_time >= coverageTargetEnd`), the requested interval `[startTime, endTime)` is not fully covered up to `endTime` and must be reported as partial coverage (`meta.coverage = "partial"`, `meta.accuracy = "lower_bound"`) with the effective/observed window covered so far ending at `processed_through_event_time` (or `coverageTargetEnd`). Set `allowedIngestionDelaySeconds` to the configured maximum tolerated ingestion/source-message delay for availability queries, and return it in `meta.availabilityCoverage`.
+
+The checkpoint must be advanced durably with event processing. For a message that changes availability state or updates same-state metadata, the state update, optional transition insert, and checkpoint update must commit in one database transaction before the corresponding Kafka offset is committed. Rebalances and restarts must reload the checkpoint and any persisted reorder-buffer state needed by the selected ordering strategy. If the implementation cannot prove continuity after a restart, rebalance, topic retention truncation, skipped unparseable connection message, reorder-window overflow, or offset discontinuity, it must persist an ingestion gap and stop returning exact coverage for overlapping ranges.
+
+When one serialNumber has no recent messages, do not infer coverage from an empty event table. The API may return an exact zero only if that serialNumber has a durable checkpoint whose `processed_through_event_time` reaches `endTime`; otherwise the result is partial/lower-bound or unavailable according to the coverage rules. A partition-level or source-level watermark may be used instead of per-message checkpoint advancement only if it is durable, serialNumber-scoped for the queried gateway, and can prove that no earlier source event for that gateway remains unprocessed.
 
 Add a `DeviceAvailabilityEvent` REST/storage object with `to_json` and `from_json` support in:
 
@@ -1449,22 +2223,32 @@ Update `StorageService`:
 src/StorageService.h
   include storage/storage_device_availability_events.h
   include storage/storage_device_availability_state.h
+  include storage/storage_device_availability_ingestion_checkpoint.h
+  include storage/storage_device_availability_ingestion_gaps.h
   add DeviceAvailabilityEventsDB accessor
   add DeviceAvailabilityStateDB accessor
+  add DeviceAvailabilityIngestionCheckpointDB accessor
+  add DeviceAvailabilityIngestionGapsDB accessor
   add std::unique_ptr<DeviceAvailabilityEventsDB>
   add std::unique_ptr<DeviceAvailabilityStateDB>
+  add std::unique_ptr<DeviceAvailabilityIngestionCheckpointDB>
+  add std::unique_ptr<DeviceAvailabilityIngestionGapsDB>
 
 src/StorageService.cpp
   construct DeviceAvailabilityEventsDB
   construct DeviceAvailabilityStateDB
+  construct DeviceAvailabilityIngestionCheckpointDB
+  construct DeviceAvailabilityIngestionGapsDB
   call DeviceAvailabilityEventsDB->Create()
   call DeviceAvailabilityStateDB->Create()
+  call DeviceAvailabilityIngestionCheckpointDB->Create()
+  call DeviceAvailabilityIngestionGapsDB->Create()
   include availability retention cleanup if retention should match board timepoint cleanup
 ```
 
-Add a DB upgrade/migration path for the new table. Existing deployments will start with no historical availability events. Define a fixed `availabilityValidFrom` timestamp as the deployment/migration time when availability-event persistence starts. The API should return `offline_count: 0` only for successful empty queries whose requested range starts at or after `availabilityValidFrom`; do not infer old events from `lastDisconnection`.
+Add a DB upgrade/migration path for the new tables. Existing deployments will start with no historical availability events. Define a fixed `availabilityValidFrom` timestamp as the deployment/migration time when availability-event persistence starts. The API should return `offline_count: 0` as an exact result only for successful empty queries whose requested range starts at or after `availabilityValidFrom` and is covered by the per-serial ingestion checkpoint; do not infer old events from `lastDisconnection`.
 
-Add the files to `CMakeLists.txt`.
+Add all availability storage files to `CMakeLists.txt`, including `storage_device_availability_events.*`, `storage_device_availability_state.*`, `storage_device_availability_ingestion_checkpoint.*`, and `storage_device_availability_ingestion_gaps.*`. Register database migration/upgrade logic for all availability tables so fresh databases and upgraded deployments create the event table, state table, checkpoint table, gap table, indexes, uniqueness constraints, and state constraints consistently.
 
 ### Ingestion Hook
 
@@ -1502,23 +2286,28 @@ On ping/capabilities:
 Do not store online events for every ping.
 ```
 
-Bootstrap rule when no persisted state exists:
+Bootstrap rule when no `device_availability_state` row exists:
 
 ```text
 First observed disconnection:
-  insert one offline event
-  set current_state = offline
+  insert state row with current_state = offline
+  set last_event_time = event_time
+  set last_idempotency_key = idempotency_key
+  do not insert an offline transition event because the prior state is unknown
 
 First observed ping/capabilities:
-  set current_state = online
-  do not insert an online event
+  insert state row with current_state = online
+  set last_event_time = event_time
+  set last_idempotency_key = idempotency_key
+  do not insert an online transition event
 
 First observed unrecognized connection message:
-  set current_state = unknown
+  insert or update state row with current_state = unknown only when useful
+  set last_event_time only from a valid source timestamp
   do not insert a counted event
 ```
 
-In-memory transition checking is only an optimization. It is not sufficient for correctness because Kafka can redeliver messages and the service can restart after losing in-memory state. Transition detection must use `device_availability_state` or derive the latest known state from `device_availability_events` under the same transaction before writing. Duplicate connection messages must be rejected by storage-level idempotency before they can affect `offline_count`.
+In-memory transition checking is only an optimization. It is not sufficient for correctness because Kafka can redeliver messages and the service can restart after losing in-memory state. Transition detection must use `device_availability_state.current_state` and `device_availability_state.last_event_time` under the same transaction before writing `device_availability_events`. Duplicate connection messages must be rejected by source timestamp validation and storage-level idempotency before they can affect `offline_count`.
 
 Normalize connection messages before transition processing:
 
@@ -1591,6 +2380,20 @@ Else:
 
 Treat `uuid` as a source event id only if it is stable for the same logical connection message across Kafka redelivery and unique within the source namespace identified by `system.host` and `system.id`. If `uuid` is only a random per-delivery value, do not use it as `source_event_id`.
 
+Example for exact Kafka redelivery protection, after verifying that `payload.ping.uuid` remains stable for the same logical redelivered message:
+
+```text
+hash(
+  system.host +
+  system.id +
+  serialNumber +
+  message_type +
+  payload.ping.uuid
+)
+```
+
+Do not use `system.id` alone as the logical event id; it identifies the producing system, not one individual ping.
+
 Minimum fields for derived idempotency keys:
 
 ```text
@@ -1627,74 +2430,181 @@ Do not include Kafka topic, partition, or offset in the derived logical `idempot
 
 The same delivered logical connection event must always produce the same `idempotency_key`. If the implementation cannot build a stable or deterministic key for an event, it must not write that event as a counted availability transition; log it as an ingestion error instead.
 
+Ordering rule:
+
+```text
+Availability transition detection must process connection events in source-event
+order for each serialNumber.
+
+The preferred implementation is to produce Kafka connection messages in
+source-event order with serialNumber as the Kafka message key, so all events for
+one gateway are in one partition and retain gateway event order. If the source
+topic cannot provide that guarantee, Analytics must add a bounded event-time
+reorder window or an equivalent serialNumber-scoped ordering mechanism before
+applying the transition state machine.
+
+A newer same-state online event must not advance last_event_time in a way that
+causes an older offline transition for the same serialNumber to be discarded
+silently. If a deployment intentionally chooses best-effort counting instead of
+per-serial ordering, that lower-accuracy behavior must be documented separately
+and surfaced to callers; it must not be reported as exact availability counting.
+```
+
 Atomic transition and insert rule:
 
 ```text
-For each valid connection message:
-  begin transaction
-  load the persisted state row for serialNumber with write/transaction isolation
+For each valid connection message emitted by the per-serial ordering stage:
+  BEGIN
+
+  acquire a serialNumber-scoped transaction lock before reading state
+  load device_availability_state row for serialNumber with write isolation
   if no state row exists:
+    atomically create or lock the serialNumber state slot using one of:
+      INSERT ... ON CONFLICT ... DO UPDATE/NOTHING followed by SELECT ... FOR UPDATE
+      PostgreSQL advisory transaction lock
+      serializable transaction with retry
     treat previous state as unknown
-  determine the new state from the message
-  if state row exists and event_time is older than last_event_time:
+
+  -- Explicit scalar ordering comparison logic:
+  if event_time < last_event_time:
     treat the message as stale
     do not insert an availability event
     do not update device_availability_state
-    commit transaction
+    COMMIT
     stop processing this message
-  if state row exists and event_time equals last_event_time and no reliable tie-breaker proves this event is later:
-    treat the message as duplicate or non-advancing
-    do not insert a counted availability event
-    do not update device_availability_state
-    commit transaction
-    stop processing this message
-  if previous state is unknown:
-    if new state is offline:
-      insert one offline event with conflict-safe semantics
-      if the insert created a row:
-        update device_availability_state to offline and last_event_time
-      else:
+
+  if event_time == last_event_time:
+    if both source_sequence and last_source_sequence are present (non-null BIGINT):
+      if source_sequence < last_source_sequence:
+        treat the message as stale
+        do not insert an availability event
         do not update device_availability_state
-    else if new state is online:
-      update device_availability_state to online and last_event_time
-      do not insert an online event
+        COMMIT
+        stop processing this message
+
+      if source_sequence == last_source_sequence:
+        if idempotency_key equals last_idempotency_key:
+          treat the message as an exact duplicate
+        else:
+          persist an ingestion ambiguity gap for this serialNumber, event_time, and source_sequence
+          treat the message as ambiguous, not exact
+        do not insert an availability event
+        do not update device_availability_state
+        COMMIT
+        stop processing this message
     else:
-      update device_availability_state to unknown and last_event_time
-      do not insert a counted event
-  else if previous state differs from new state:
-    insert availability event with conflict-safe semantics:
-      INSERT ... ON CONFLICT(idempotency_key) DO NOTHING
-    if the insert created a row:
-      update device_availability_state to the new state and last_event_time
-    else:
-      treat it as a duplicate
+      -- Equal timestamp without comparable non-null BIGINT sequences
+      if idempotency_key equals last_idempotency_key:
+        treat the message as an exact duplicate
+      else:
+        persist an ingestion ambiguity gap for this serialNumber and event_time
+        treat the message as unordered / ambiguous, not exact
+      do not insert an availability event
       do not update device_availability_state
-  else if previous state equals new state:
-    update last contact metadata only when event_time is newer than last_event_time
-    do not insert a counted transition event
-  commit transaction
+      COMMIT
+      stop processing this message
+
+  -- event_time > last_event_time, or event_time == last_event_time with source_sequence > last_source_sequence:
+  determine incomingState from message_type:
+    ping or capabilities -> online
+    disconnection -> offline
+
+  if incomingState is online:
+    if current_state is offline:
+      INSERT online transition event with conflict-safe semantics
+      if the insert created a row:
+        update device_availability_state:
+          current_state = online
+          last_event_time = event_time
+          last_source_sequence = source_sequence
+          last_idempotency_key = idempotency_key
+          updated_at = processing time
+      else:
+        treat as duplicate and do not update state
+    else if current_state is online:
+      update device_availability_state metadata, last_event_time, last_source_sequence, last_idempotency_key, and updated_at
+      do not insert a transition event
+    else:
+      update device_availability_state to online, last_event_time, and last_source_sequence
+      do not insert an initial online transition event
+
+  if incomingState is offline:
+    if current_state is online:
+      INSERT offline transition event with conflict-safe semantics
+      if the insert created a row:
+        update device_availability_state:
+          current_state = offline
+          last_event_time = event_time
+          last_source_sequence = source_sequence
+          last_idempotency_key = idempotency_key
+          updated_at = processing time
+      else:
+        treat as duplicate and do not update state
+    else if current_state is offline:
+      update device_availability_state metadata, last_event_time, last_source_sequence, last_idempotency_key, and updated_at
+      do not insert a transition event
+    else:
+      update device_availability_state to offline, last_event_time, and last_source_sequence
+      do not insert an initial offline transition event because the prior state is unknown
+
+  COMMIT
 
 or the equivalent database-specific "insert if absent" operation.
 
 The storage method must return whether a row was inserted. Duplicate events that hit
 the unique idempotency constraint must not be treated as new offline transitions and
 must not move `device_availability_state` backward or forward.
+
+This transaction shape assumes the selected ordering strategy has already made
+the message eligible for state-machine processing. Do not apply this scalar
+`last_event_time` staleness check directly to raw Kafka arrival order unless the
+connection topic is keyed by serialNumber and source-event ordered.
 ```
 
-Staleness rule:
+Equivalent transaction shape:
 
 ```text
-An event is stale when its event_time is older than the persisted state's
-last_event_time for the same serialNumber. An event with the same event_time is
-non-advancing unless a deterministic source tie-breaker proves it happened later.
+BEGIN;
+
+Acquire a serialNumber-scoped transaction lock.
+Atomically create or lock the device_availability_state row for :serialNumber.
+Read:
+  current_state
+  last_event_time
+  last_source_sequence
+  last_idempotency_key
+
+-- Validate scalar timestamp and sequence ordering key and determine whether state changed.
+-- Insert into device_availability_events only if state changed.
+
+Update device_availability_state only when timestamp, sequence, and idempotency checks allow it:
+  current_state = :newState
+  last_event_time = :eventTime
+  last_source_sequence = :sourceSequence
+  last_idempotency_key = :idempotencyKey
+  updated_at = :processingTime
+  board_id = :boardId when known, otherwise keep existing or NULL according to metadata policy
+  metadata = source and processing metadata
+
+COMMIT;
+```
+
+Staleness rule after ordering:
+
+```text
+An event is stale when `event_time < last_event_time`, or when `event_time == last_event_time` and both `source_sequence` and `last_source_sequence` are present (non-null BIGINT) with `source_sequence < last_source_sequence`.
 
 Stale or non-advancing events must not insert counted availability events and must
 not update device_availability_state, even if their idempotency_key has not been
 seen before.
 
-For equal timestamps, use deterministic tie-breakers if the source provides them.
-If no reliable tie-breaker exists, process at most one state-changing event for that
-serialNumber and timestamp.
+Two different logical events with the same `event_time` must be ordered by a
+deterministic 64-bit numeric `source_sequence` (`BIGINT`). Exact Kafka redelivery
+should be identified by the idempotency key. If two different logical events share
+the same `event_time` and lack comparable non-null source sequences, or have identical
+source sequences, Analytics must persist an ingestion ambiguity gap for that source time
+and downgrade overlapping availability queries to partial/lower-bound coverage instead
+of silently discarding one transition as non-advancing or guessing order arbitrarily.
 ```
 
 ### Store Only State Transitions
@@ -1712,7 +2622,64 @@ Incorrect:
 every ping → store online event
 ```
 
-Every ping should not be treated as a new online transition.
+Every ping should not be treated as a new online transition. However, every source-newer ping that is accepted by the per-serial ordering stage must still update `device_availability_state.last_event_time` and metadata.
+
+Ping handling:
+
+```text
+current_state=online  + ping -> update last_event_time and metadata only
+current_state=offline + ping after a prior offline state -> insert online event, set current_state=online, update last_event_time
+no state row + ping -> create current_state=online, update last_event_time, do not insert an online event
+```
+
+Disconnection handling:
+
+```text
+current_state=online  + disconnection -> insert offline event, set current_state=offline, update last_event_time
+current_state=offline + disconnection -> update last_event_time and metadata only when the source message is newer; do not insert another offline event
+no state row + disconnection -> create current_state=offline, update last_event_time, do not insert an offline transition event
+```
+
+Example:
+
+```text
+12:00 first ping initializes current_state=online with no transition event
+12:05 disconnection source event
+12:10 ping source event
+```
+
+If Kafka delivers the `12:10` ping before the `12:05` disconnection and the
+topic does not guarantee serialNumber ordering, Analytics must not immediately
+advance `last_event_time` to `12:10` and then reject the delayed `12:05`
+disconnection. With a bounded reorder window, both messages are ordered by
+source time before transition processing:
+
+```text
+12:05 disconnection -> insert offline event, current_state=offline, last_event_time=12:05
+12:10 ping          -> insert online event, current_state=online,  last_event_time=12:10
+```
+
+The final current state is online, and the outage from `12:05` to `12:10` remains
+present in transition history. If the implementation lacks serial-keyed
+source-event ordering or a bounded reorder window, this case is only best-effort
+and must not be surfaced as exact availability counting.
+
+Kafka delay example:
+
+```text
+Ping source time:          12:00
+Ping processed:            12:05
+Disconnection source time: 12:03
+Disconnection processed:   12:06
+```
+
+The `12:03` disconnection is not stale because it is newer than `device_availability_state.last_event_time = 12:00`. It must not be rejected by comparing against processing-time `DeviceInfo.lastContact = 12:05`.
+
+Review conclusion:
+
+```text
+The implementation requires `device_availability_state` unless a future design explicitly names an existing persistent table with the same fields and locking guarantees. `last_event_time` must be updated for every source-newer ping, capabilities, or disconnection message accepted by the per-serial ordering stage, even when no availability transition event is inserted. `DeviceInfo.lastContact` remains contact/processing metadata and is not the source-event ordering field.
+```
 
 ### Calculation
 
@@ -1724,8 +2691,12 @@ offline_count =
 Availability migration boundary:
 
 ```text
-availabilityValidFrom = deployment timestamp when device_availability_events
-persistence became active
+availabilityValidFrom is a durable, deployment-wide timestamp loaded on service startup from:
+  1. Configuration file property `availability_valid_from` (in /etc/ucentral/owanalytics.json)
+  2. Environment variable `ANALYTICS_AVAILABILITY_VALID_FROM`
+  3. Persistent database migration metadata table (`system_properties` key `availability_valid_from`) populated during initial table creation.
+
+All service replicas and process restarts MUST load the identical `availabilityValidFrom` timestamp from these durable configuration/DB sources to guarantee multi-replica and restart consistency. Dynamic process-start timestamps (e.g. std::chrono::system_clock::now() at startup) are strictly prohibited.
 
 If startTime < availabilityValidFrom:
   reject the request
@@ -1735,6 +2706,10 @@ If startTime < availabilityValidFrom:
 If startTime >= availabilityValidFrom:
   query device_availability_events normally
 ```
+
+For `meta.coverage = "none"` and `meta.accuracy = "not_applicable"`, return
+`data.offline_count = null`. Do not return a numeric `0` when the API has no
+coverage proof for the requested interval.
 
 Rejecting pre-cutover ranges prevents a successful zero response from meaning either
 "no outages occurred" or "Analytics was not collecting availability events yet."
@@ -1771,11 +2746,74 @@ Use an HTTP error:
 
 ```json
 {
-  "gw_uuid": "60cf84f22290",
-  "fetch_status": "success",
-  "offline_count": 0
+  "meta": {
+    "requestedWindow": {
+      "startTime": "2026-07-26T12:00:00Z",
+      "endTime": "2026-07-27T12:00:00Z"
+    },
+    "observedWindow": {
+      "firstSampleAt": null,
+      "lastSampleAt": null
+    },
+    "sourceWindow": {
+      "firstSampleAt": "2026-07-26T11:55:00Z",
+      "lastSampleAt": "2026-07-26T11:55:00Z"
+    },
+    "contributingWindow": {
+      "firstSampleAt": null,
+      "lastSampleAt": null
+    },
+    "selection": "boundary_assisted",
+    "coverage": "full",
+    "accuracy": "exact",
+    "sampleCount": 0,
+    "offlineEventCount": 0,
+    "effectiveSamplingIntervalSeconds": 0,
+    "allowedGapSeconds": 0,
+    "boundarySamplesUsed": {
+      "beforeStart": true,
+      "atStart": false,
+      "atEnd": false,
+      "afterEnd": false
+    },
+    "availabilityCoverage": {
+      "coverageStart": "2026-07-20T00:00:00Z",
+      "stateKnownFrom": "2026-07-20T00:00:00Z",
+      "processedThrough": "2026-07-27T12:01:00Z",
+      "allowedIngestionDelaySeconds": 60,
+      "ingestionGapKnown": false,
+      "proofSource": "serial_partition_checkpoint"
+    }
+  },
+  "data": {
+    "gw_uuid": "60cf84f22290",
+    "fetch_status": "success",
+    "offline_count": 0
+  }
 }
 ```
+
+An exact zero is valid only when availability coverage proves the complete requested interval up to `endTime`: `coverageStart <= startTime`, `stateKnownFrom <= startTime`, `processedThrough >= endTime`, `ingestionGapKnown = false`, and `proofSource != "unavailable"`. When `processedThrough < endTime` (even if `processedThrough >= endTime - allowedIngestionDelaySeconds`), the requested interval is not fully covered up to `endTime` and a zero matching event count must be reported as partial/lower-bound (`meta.coverage = "partial"`), or as unavailable with `offline_count: null` when no coverage proof exists.
+
+For the availability endpoint, `sampleCount` is retained for response-shape
+consistency with the other summary APIs. When `meta.coverage` is `"full"` or `"partial"`, `sampleCount` is defined as:
+
+```text
+sampleCount = offlineEventCount = offline_count
+```
+
+`sampleCount` is the number of offline transition rows in `device_availability_events`
+contributing to `offline_count`. Online recovery transition rows (`event_type = 'online'`)
+are stored in transition history for state tracking and `observedWindow` / `sourceWindow`
+bounds, but they do not contribute to `sampleCount`, `offlineEventCount`, or `offline_count`.
+For `"full"` or `"partial"` coverage, `sampleCount` always equals `offlineEventCount`.
+
+When `meta.coverage = "none"` and `meta.accuracy = "not_applicable"`, `sampleCount`, `offlineEventCount`,
+and `offline_count` are all `null`.
+
+`boundarySamplesUsed.beforeStart` is `true` only when a pre-start boundary event
+was actually selected. Event counting does not require a pre-start boundary
+event when durable availability coverage proves the requested interval.
 
 ### Internal Error
 
@@ -1792,7 +2830,7 @@ Use an HTTP error:
 }
 ```
 
-Do not return `fetch_status: failed` with HTTP 200 for internal failures.
+HTTP 200 represents a successful retrieval. Do not return a success-shaped HTTP 200 response for internal failures; return the appropriate HTTP error instead.
 
 ---
 
@@ -1839,11 +2877,15 @@ Add objects:
 struct GatewayMemorySummary;
 struct GatewayWifiTemperatureSummary;
 struct ClientBandwidthConsumption;
+struct ClientBandwidthConsumptionResponse;
 struct ClientRssiQuality;
+struct ClientRssiQualityResponse;
 struct GatewayOfflineSummary;
 ```
 
 JSON field names should match the MCP CSV where the API is directly returning MCP fields. `usage-summary` additionally returns raw byte totals and usage accuracy fields so callers can distinguish exact usage from lower-bound estimates.
+
+Client MAC addresses (`mac`) must be normalized to canonical lowercase colon-separated format matching pattern `^[0-9a-f]{2}(:[0-9a-f]{2}){5}$` across all client metrics endpoints.
 
 ---
 
@@ -1873,6 +2915,9 @@ Wi-Fi client metrics handler:
 usage-summary
 rssi-summary
 ```
+
+Handler query parsing implementation note:
+REST handlers must inspect and parse the raw HTTP query string parameter collection directly rather than relying solely on generated framework parameter binding. Handlers must verify that `lookbackHours` and `timestampTill` appear exactly once in the raw query string, reject repeated parameters, reject fractional numeric values, and reject 32-bit integer overflow.
 
 Timepoint-backed handlers must call a shared serial-resolution helper before storage access:
 
@@ -1972,9 +3017,9 @@ bool GetGatewayAvailabilitySummary(...);
 |---|---|---|---|
 | `get_gateway_free_memory` | `GET /devices/{routerId}/memory-summary` | `timepoints.resource_data.memory_free` | Resolve routerId to venueId and boardId, then aggregate `timepoints` |
 | `get_gateway_wifi_temp` | `GET /devices/{routerId}/radio-temperature-summary` | `timepoints.radio_data[].wifi_temp` | Resolve routerId to venueId and boardId, then aggregate present Wi-Fi temperature samples from `timepoints` |
-| `get_device_bandwidth_consumption` | `GET /devices/{routerId}/wifi-clients/usage-summary` | `timepoints.ssid_data[].associations[]` | Resolve routerId to venueId and boardId, then reset-safe delta aggregation with pre-window baseline |
+| `get_device_bandwidth_consumption` | `GET /devices/{routerId}/wifi-clients/usage-summary` | `timepoints.ssid_data[].associations[]` | Resolve routerId to venueId and boardId, then calculate reset-safe cumulative-counter differentials with concise quality metadata by default; include segment provenance only when `includeCalculationDetails=true` |
 | `get_device_rssi_quality` | `GET /devices/{routerId}/wifi-clients/rssi-summary` | `timepoints.ssid_data[].associations[].rssi` | Resolve routerId to venueId and boardId, then classify RSSI samples |
-| `get_gateway_offline_count` | `GET /devices/{routerId}/availability-summary` | Existing gateway `connection` topic plus `device_availability_events` | Use routerId as durable serialNumber, persist restart-safe state transitions, then count offline events by serialNumber |
+| `get_gateway_offline_count` | `GET /devices/{routerId}/availability-summary` | Existing gateway `connection` topic plus `device_availability_events` and `device_availability_state` | Use routerId as durable serialNumber, use `device_availability_state.current_state` and `last_event_time` for restart-safe transition detection, then count offline events by serialNumber |
 
 ---
 
