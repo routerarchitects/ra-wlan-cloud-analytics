@@ -675,24 +675,33 @@ Do not represent missing memory fields as `0`. A missing `memory_free` value and
 AnalyticsObjects::DeviceResourceTimePoint resource;
 
 // Validate numeric type, integral value, non-negative range (>= 0), and 64-bit non-overflow before unsigned conversion.
-// Field-level isolation rule: An invalid or negative field (e.g. free < 0 or total < 0) invalidates only that specific field, leaving it unset (null), so unparseable or negative values do not throw unhandled exceptions or corrupt other valid fields in the sample.
-auto parseMemoryField = [](const Poco::JSON::Object::Ptr &obj, const std::string &key) -> std::optional<uint64_t> {
+// Sample-level rejection policy for negative telemetry: If ANY present memory field (free, total, cached, buffered) is negative (< 0), non-numeric, or invalid, mark the entire memory sample invalid and omit resource_data so the entire corrupted memory timepoint is excluded during aggregation.
+bool sampleValid = true;
+auto parseMemoryField = [&sampleValid](const Poco::JSON::Object::Ptr &obj, const std::string &key) -> std::optional<uint64_t> {
     if (!obj->has(key) || obj->isNull(key)) return std::nullopt;
     try {
-        if (!obj->isNumeric(key)) return std::nullopt;
+        if (!obj->isNumeric(key)) { sampleValid = false; return std::nullopt; }
         int64_t val = obj->getElement<int64_t>(key);
-        if (val < 0) return std::nullopt;
+        if (val < 0) { sampleValid = false; return std::nullopt; }
         return static_cast<uint64_t>(val);
     } catch (...) {
+        sampleValid = false;
         return std::nullopt;
     }
 };
 
-if (auto val = parseMemoryField(memory, "free"))     resource.memory_free = *val;
-if (auto val = parseMemoryField(memory, "total"))    resource.memory_total = *val;
-if (auto val = parseMemoryField(memory, "cached"))   resource.memory_cached = *val;
-if (auto val = parseMemoryField(memory, "buffered")) resource.memory_buffered = *val;
-DTP.resource_data = resource;
+auto freeVal = parseMemoryField(memory, "free");
+auto totalVal = parseMemoryField(memory, "total");
+auto cachedVal = parseMemoryField(memory, "cached");
+auto bufferedVal = parseMemoryField(memory, "buffered");
+
+if (sampleValid) {
+    if (freeVal)     resource.memory_free = *freeVal;
+    if (totalVal)    resource.memory_total = *totalVal;
+    if (cachedVal)   resource.memory_cached = *cachedVal;
+    if (bufferedVal) resource.memory_buffered = *bufferedVal;
+    DTP.resource_data = resource;
+}
 ```
 
 ### Aggregation Logic
@@ -1567,6 +1576,20 @@ When no session identifier is available:
   use station MAC as the result grouping key,
   but use BSSID/SSID/band/radio changes as stream boundaries when possible.
 
+Independent Directional Counter Rules (RX vs TX):
+1. RX and TX counters are calculated independently per stream.
+2. If RX is present and valid but TX is missing, non-numeric, negative (< 0), or uncalculable:
+   - RX bytes are calculated normally and included in data_consume_rx.
+   - TX bytes return 0 (or null in raw segment details) and formatted "0.00 MB".
+   - The stream accuracy is classified as lower_bound.
+3. If TX is present and valid but RX is missing/invalid:
+   - TX bytes are calculated normally and included in data_consume_tx.
+   - RX bytes return 0 and formatted "0.00 MB".
+   - The stream accuracy is classified as lower_bound.
+4. If a boundary sample has RX but not TX (or vice versa), the missing direction cannot form a calculable boundary delta; that direction is marked uncalculable (lower_bound).
+5. segment_count is incremented if at least one direction (RX or TX) produces a valid calculable segment delta.
+6. A client MAC is included in totalClients and items[] if it has proven in-window presence or session overlap, regardless of whether one counter direction was missing or uncalculable.
+
 If current < previous:
   if a new association/session is confirmed:
     if the new session start time is within [startTime, endTime):
@@ -1944,6 +1967,12 @@ None
     "selection": "boundary_assisted",
     "coverage": "full",
     "accuracy": "exact",
+    "coverageStart": "2026-07-26T11:55:00Z",
+    "stateKnownFrom": "2026-07-26T11:55:00Z",
+    "processedThrough": "2026-07-27T12:00:00Z",
+    "allowedIngestionDelaySeconds": 0,
+    "ingestionGapKnown": false,
+    "proofSource": "checkpoint",
     "sampleCount": 6,
     "offlineEventCount": 6,
     "effectiveSamplingIntervalSeconds": 0,
@@ -2637,8 +2666,12 @@ offline_count =
 Availability migration boundary:
 
 ```text
-availabilityValidFrom = deployment timestamp when device_availability_events
-persistence became active
+availabilityValidFrom is a durable, deployment-wide timestamp loaded on service startup from:
+  1. Configuration file property `availability_valid_from` (in /etc/ucentral/owanalytics.json)
+  2. Environment variable `ANALYTICS_AVAILABILITY_VALID_FROM`
+  3. Persistent database migration metadata table (`system_properties` key `availability_valid_from`) populated during initial table creation.
+
+All service replicas and process restarts MUST load the identical `availabilityValidFrom` timestamp from these durable configuration/DB sources to guarantee multi-replica and restart consistency. Dynamic process-start timestamps (e.g. std::chrono::system_clock::now() at startup) are strictly prohibited.
 
 If startTime < availabilityValidFrom:
   reject the request

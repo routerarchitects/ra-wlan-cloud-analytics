@@ -816,6 +816,31 @@ components:
           type: integer
           format: int64
 
+    DeviceResourceTimePoint:
+      type: object
+      description: Stored device resource telemetry including memory metrics.
+      properties:
+        memory_free:
+          type: integer
+          format: int64
+          nullable: true
+          description: Available free memory in bytes.
+        memory_total:
+          type: integer
+          format: int64
+          nullable: true
+          description: Total system memory in bytes.
+        memory_cached:
+          type: integer
+          format: int64
+          nullable: true
+          description: Cached memory in bytes.
+        memory_buffered:
+          type: integer
+          format: int64
+          nullable: true
+          description: Buffered memory in bytes.
+
     RadioTimePoint:
       type: object
       properties:
@@ -846,6 +871,11 @@ components:
         temperature:
           type: integer
           format: int64
+          description: Legacy alias for wifi_temp; Wi-Fi radio temperature in degrees Celsius.
+        wifi_temp:
+          type: integer
+          format: int64
+          description: Wi-Fi radio temperature in degrees Celsius.
         noise:
           type: integer
           format: int64
@@ -884,6 +914,8 @@ components:
             $ref: '#/components/schemas/RadioTimePoint'
         device_info:
           $ref: '#/components/schemas/DeviceInfo'
+        resource_data:
+          $ref: '#/components/schemas/DeviceResourceTimePoint'
 
     DeviceTimePointAnalysis:
       type: object
@@ -1643,7 +1675,7 @@ components:
 
     GatewayAvailabilitySampleWindow:
       type: object
-      description: Sample window boundary timestamps for availability metadata.
+      description: Sample window boundary timestamps for availability metadata. For sourceWindow, firstSampleAt maps to coverageStart (or stateKnownFrom) and lastSampleAt maps to processedThrough deterministically from checkpoint coverage.
       required:
         - firstSampleAt
         - lastSampleAt
@@ -1652,12 +1684,12 @@ components:
           type: string
           format: date-time
           nullable: true
-          description: ISO timestamp of earliest contributing sample in window.
+          description: ISO timestamp of earliest contributing sample or checkpoint coverage start.
         lastSampleAt:
           type: string
           format: date-time
           nullable: true
-          description: ISO timestamp of latest contributing sample in window.
+          description: ISO timestamp of latest contributing sample or checkpoint processedThrough watermark.
 
     GatewayAvailabilityBoundarySamplesUsed:
       type: object
@@ -1682,6 +1714,7 @@ components:
       description: Durable ingestion coverage proof for the requested gateway lookback window. Full coverage requires coverageStart <= startTime, stateKnownFrom <= startTime, processedThrough >= endTime, and ingestionGapKnown == false.
       required:
         - coverageStart
+        - stateKnownFrom
         - processedThrough
         - allowedIngestionDelaySeconds
         - ingestionGapKnown

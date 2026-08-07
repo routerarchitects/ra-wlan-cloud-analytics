@@ -802,6 +802,7 @@ Verify that durable per-serial ingestion coverage watermarks are stored in a ded
 ```text
 serialNumber
 coverage_start
+state_known_from
 processed_through_event_time
 partition
 offset
@@ -812,7 +813,7 @@ updated_at
 metadata
 ```
 
-* `coverage_start` and `processed_through_event_time` exist and are 64-bit integers (`BIGINT`).
+* `coverage_start`, `state_known_from`, and `processed_through_event_time` exist and are 64-bit integers (`BIGINT`).
 * `ingestion_gap_known` exists and is boolean.
 
 ---
@@ -933,55 +934,13 @@ last_idempotency_key = ping idempotency key
 updated_at >= processing time
 ```
 
-* The availability API returns:
-
-```json
-{
-  "meta": {
-    "requestedWindow": {
-      "startTime": "<startTime>",
-      "endTime": "<endTime>"
-    },
-    "observedWindow": {
-      "firstSampleAt": null,
-      "lastSampleAt": null
-    },
-    "sourceWindow": {
-      "firstSampleAt": "<firstSourceAt>",
-      "lastSampleAt": "<lastSourceAt>"
-    },
-    "contributingWindow": {
-      "firstSampleAt": null,
-      "lastSampleAt": null
-    },
-    "selection": "boundary_assisted",
-    "coverage": "full",
-    "accuracy": "exact",
-    "sampleCount": 0,
-    "offlineEventCount": 0,
-    "effectiveSamplingIntervalSeconds": 0,
-    "allowedGapSeconds": 0,
-    "boundarySamplesUsed": {
-      "beforeStart": false,
-      "atStart": false,
-      "atEnd": false,
-      "afterEnd": false
-    },
-    "availabilityCoverage": {
-      "coverageStart": "<= startTime",
-      "processedThrough": ">= endTime",
-      "allowedIngestionDelaySeconds": "<configured availability ingestion delay>",
-      "ingestionGapKnown": false,
-      "proofSource": "serial_partition_checkpoint"
-    }
-  },
-  "data": {
-    "gw_uuid": "60cf84f22290",
-    "fetch_status": "success",
-    "offline_count": 0
-  }
-}
-```
+* The checkpoint's `state_known_from` timestamp is set to the first ping source timestamp.
+* If requested window starts BEFORE the first ping (`startTime < state_known_from`):
+  * Prior state boundary is unknown.
+  * The response returns `meta.coverage = "partial"`, `meta.accuracy = "lower_bound"`, and `meta.availabilityCoverage.stateKnownFrom` equal to the first ping timestamp.
+* If requested window starts AT OR AFTER the first ping (`startTime >= state_known_from`):
+  * State is authoritatively known as online throughout the window.
+  * The response returns `meta.coverage = "full"`, `meta.accuracy = "exact"`, `data.offline_count = 0`, and `meta.availabilityCoverage.stateKnownFrom = first ping timestamp`.
 
 ---
 
@@ -2650,7 +2609,24 @@ Ethernet reconnected        → online event
 
 ---
 
+## TC-AVAIL-034: Multi-replica and process restart availabilityValidFrom consistency
 
+### Objective
+
+Verify that `availabilityValidFrom` is loaded from a durable configuration key or DB migration metadata table so that multiple service replicas and restarted instances make identical cutover decisions.
+
+### Steps
+
+1. Configure `availability_valid_from = 2026-07-01T00:00:00Z` in system configuration / DB properties.
+2. Start Replica A and Replica B.
+3. Issue a request with `startTime = 2026-06-30T23:00:00Z` (`startTime < availabilityValidFrom`) to both replicas.
+4. Restart Replica A and reissue the same request.
+
+### Expected result
+
+* Both Replica A and Replica B reject the request with HTTP `400 Bad Request` and `error: "availability_range_before_cutover"`.
+* After restart, Replica A continues to return identical HTTP 400 rejection for `startTime < availabilityValidFrom`.
+* Dynamic process startup timestamps (e.g. `std::chrono::system_clock::now()`) are prohibited.
 
 ---
 
@@ -2918,9 +2894,26 @@ min_memfree <= avg_memfree <= max_memfree
 }
 ```
 
-* Parsing and validation check numeric type, integral value, non-negative range (`>= 0`), and 64-bit non-overflow BEFORE unsigned conversion.
-* Field-level isolation: The negative `memory_free = -1` field is identified prior to unsigned casting and treated as invalid/unset (`null`), so it does not throw an exception or corrupt `memory_total = 512000` in the same sample.
-* The invalid `memory_free` field is excluded from `min_memfree`, `max_memfree`, and `avg_memfree`.
+* Sample-level rejection policy: When any present memory field (`free`, `total`, `cached`, `buffered`) is negative (`< 0`), non-numeric, or invalid, the ENTIRE memory sample is marked invalid and excluded from aggregation.
+* The 10:00 sample containing `memory_free = -1` (or negative `memory_total = -1`, negative `memory_cached = -1`, or negative `memory_buffered = -1`) is rejected as corrupted telemetry.
+* Corrupted memory samples do not affect `min_memfree`, `max_memfree`, or `avg_memfree`.
+
+---
+
+## TC-MEM-012A1: Negative memory_total or cached/buffered rejects entire sample
+
+### Test data
+
+```text
+10:00 memory_free = 200000  memory_total = -1
+10:10 memory_free = 300000  memory_total = 512000
+```
+
+### Expected result
+
+* Sample 10:00 has valid `memory_free` but negative `memory_total`.
+* The entire 10:00 memory sample is rejected at ingestion/validation stage; `memory_free = 200000` is NOT retained or included in aggregation.
+* Aggregation uses only valid sample 10:10 (`min_memfree = 300000`, `max_memfree = 300000`, `avg_memfree = 300000.0`).
 
 ---
 
@@ -3942,6 +3935,23 @@ serialNumber = routerId
 * Station MAC `aa:bb:cc:dd:ee:ff` is EXCLUDED from `items[]` and NOT counted in `totalClients`.
 * Outside-window fallback samples are used solely for calculating boundary differentials for clients with proven in-window presence or session overlap.
 * Response returns `items: []`, `totalClients: 0`, and `truncated: false`.
+
+---
+
+## TC-USAGE-028: Independent directional RX/TX counter calculation
+
+### Test data
+
+* Samples for client `11:22:33:44:55:66`:
+  * `10:00:00Z`: `rx_bytes = 1000`, `tx_bytes = -1` (invalid/missing TX)
+  * `10:10:00Z`: `rx_bytes = 3000`, `tx_bytes = 500`
+
+### Expected result
+
+* RX bytes are calculated independently: `3000 - 1000 = 2000` bytes (`data_consume_rx = 2.00 MB`).
+* TX bytes are uncalculable for 10:00:00Z sample; TX returns `"0.00 MB"` (or raw bytes `0` / `null` in segment details).
+* The stream usage accuracy is classified as `lower_bound`.
+* Client `11:22:33:44:55:66` is included in `items[]` and counted in `totalClients`.
 
 ---
 
