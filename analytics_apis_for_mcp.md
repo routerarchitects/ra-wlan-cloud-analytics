@@ -42,12 +42,29 @@ serialNumber = routerId
 
 Public `routerId` validation requires a path-safe string: 1 to 64 alphanumeric characters, hyphens, or underscores (matching `^[a-zA-Z0-9_-]+$`). Syntax validation intentionally rejects path dot-segments such as `.` and `..`, path separators (`/`, `\`), spaces, control characters, and URL-encoded path separators (`%2F`) before OWPROV ownership resolution. Any path-safe serial format (whether hexadecimal or non-hex serial string) passes syntax validation and is sent to OWPROV, letting OWPROV serve as the authoritative entity for verifying serial existence.
 
-The Analytics API should calculate the requested time range as:
+The Analytics API calculates the requested time range using checked 64-bit signed epoch arithmetic:
 
 ```text
 end_time = parse(timestamp_till)
 start_time = end_time - (lookback_hours * 3600)
 ```
+
+Validation & Processing Order:
+
+All REST handlers must enforce request validation in three distinct sequential phases:
+
+1. **Phase 1: Pure Request Parsing & Input Validation (No DB or I/O lookups)**
+   - Validate `routerId` syntax (1–64 characters matching `^[a-zA-Z0-9_-]+$`) -> HTTP `400 invalid_router_id` if malformed.
+   - Inspect raw query collection for exact-once presence of `timestampTill` and `lookbackHours` -> HTTP `400 invalid_timestamp` / `invalid_lookback_hours` if missing or repeated.
+   - Parse `timestampTill` shape & UTC semantics -> HTTP `400 invalid_timestamp` if malformed or invalid date/time.
+   - Parse `lookbackHours` strict positive integer -> HTTP `400 invalid_lookback_hours` if zero, negative, or non-numeric.
+   - Checked epoch calculation: Compute `start_time = end_time - (lookback_hours * 3600)` using signed 64-bit integers. Verify `start_time >= 0` (minimum supported Unix epoch `1970-01-01T00:00:00Z`) -> HTTP `400 invalid_timestamp` if underflowing before epoch.
+
+2. **Phase 2: Router Ownership & Serial Resolution**
+   - Resolve `routerId` to `boardId` via local cache / OWPROV -> HTTP `404 not_found` if router serial does not exist in OWPROV.
+
+3. **Phase 3: Domain Cutover & Range Validation**
+   - Verify `start_time` against service cutover thresholds (`availabilityValidFrom`, `temperatureMigrationCutoverTime`, `maxLookbackHours`) -> HTTP `400 availability_range_before_cutover` / `temperature_range_before_cutover` if before cutover.
 
 Example:
 
@@ -1580,13 +1597,15 @@ Independent Directional Counter Rules (RX vs TX):
 1. RX and TX counters are calculated independently per stream.
 2. If RX is present and valid but TX is missing, non-numeric, negative (< 0), or uncalculable:
    - RX bytes are calculated normally and included in data_consume_rx.
-   - TX bytes return 0 (or null in raw segment details) and formatted "0.00 MB".
+   - TX bytes return 0 as a required non-null integer in calculation_segments (and formatted "0.00 MB" in summary strings).
+   - Total segment bytes total_bytes = rx_bytes + 0 = rx_bytes.
    - The stream accuracy is classified as lower_bound.
 3. If TX is present and valid but RX is missing/invalid:
    - TX bytes are calculated normally and included in data_consume_tx.
-   - RX bytes return 0 and formatted "0.00 MB".
+   - RX bytes return 0 as a required non-null integer in calculation_segments (and formatted "0.00 MB" in summary strings).
+   - Total segment bytes total_bytes = 0 + tx_bytes = tx_bytes.
    - The stream accuracy is classified as lower_bound.
-4. If a boundary sample has RX but not TX (or vice versa), the missing direction cannot form a calculable boundary delta; that direction is marked uncalculable (lower_bound).
+4. If a boundary sample has RX but not TX (or vice versa), the missing direction cannot form a calculable boundary delta; that direction returns 0 bytes and is marked uncalculable (lower_bound).
 5. segment_count is incremented if at least one direction (RX or TX) produces a valid calculable segment delta.
 6. A client MAC is included in totalClients and items[] if it has proven in-window presence or session overlap, regardless of whether one counter direction was missing or uncalculable.
 
@@ -1958,7 +1977,7 @@ None
     },
     "sourceWindow": {
       "firstSampleAt": "2026-07-26T11:55:00Z",
-      "lastSampleAt": "2026-07-27T09:45:00Z"
+      "lastSampleAt": "2026-07-27T12:00:00Z"
     },
     "contributingWindow": {
       "firstSampleAt": "2026-07-26T13:15:00Z",
@@ -1967,12 +1986,6 @@ None
     "selection": "boundary_assisted",
     "coverage": "full",
     "accuracy": "exact",
-    "coverageStart": "2026-07-26T11:55:00Z",
-    "stateKnownFrom": "2026-07-26T11:55:00Z",
-    "processedThrough": "2026-07-27T12:00:00Z",
-    "allowedIngestionDelaySeconds": 0,
-    "ingestionGapKnown": false,
-    "proofSource": "checkpoint",
     "sampleCount": 6,
     "offlineEventCount": 6,
     "effectiveSamplingIntervalSeconds": 0,
@@ -1984,9 +1997,10 @@ None
       "afterEnd": false
     },
     "availabilityCoverage": {
-      "coverageStart": "2026-07-20T00:00:00Z",
-      "processedThrough": "2026-07-27T12:01:00Z",
-      "allowedIngestionDelaySeconds": 60,
+      "coverageStart": "2026-07-26T11:55:00Z",
+      "stateKnownFrom": "2026-07-26T11:55:00Z",
+      "processedThrough": "2026-07-27T12:00:00Z",
+      "allowedIngestionDelaySeconds": 0,
       "ingestionGapKnown": false,
       "proofSource": "serial_partition_checkpoint"
     }
@@ -2753,6 +2767,7 @@ Use an HTTP error:
     },
     "availabilityCoverage": {
       "coverageStart": "2026-07-20T00:00:00Z",
+      "stateKnownFrom": "2026-07-20T00:00:00Z",
       "processedThrough": "2026-07-27T12:01:00Z",
       "allowedIngestionDelaySeconds": 60,
       "ingestionGapKnown": false,

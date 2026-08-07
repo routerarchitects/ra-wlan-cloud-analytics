@@ -1856,6 +1856,45 @@ components:
           $ref: '#/components/schemas/GatewayAvailabilityMeta'
         data:
           $ref: '#/components/schemas/GatewayAvailabilityData'
+      oneOf:
+        - description: Full coverage exact state
+          properties:
+            meta:
+              properties:
+                coverage:
+                  const: full
+                accuracy:
+                  const: exact
+            data:
+              properties:
+                offline_count:
+                  type: integer
+                  minimum: 0
+        - description: Partial coverage lower_bound state
+          properties:
+            meta:
+              properties:
+                coverage:
+                  const: partial
+                accuracy:
+                  const: lower_bound
+            data:
+              properties:
+                offline_count:
+                  type: integer
+                  minimum: 0
+        - description: No coverage unavailable state
+          properties:
+            meta:
+              properties:
+                coverage:
+                  const: none
+                accuracy:
+                  const: not_applicable
+            data:
+              properties:
+                offline_count:
+                  type: null
 
     SystemCommandDetails:
       type: object

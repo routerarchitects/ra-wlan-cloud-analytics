@@ -551,25 +551,25 @@ GET /api/v1/devices/60cf84f22290/memory-summary
 
 * HTTP `400 Bad Request`.
 * Error is `invalid_lookback_hours`, not `invalid_timestamp`.
-* The value is rejected before integer overflow, wraparound, or truncation can affect range calculation.
+* Repeated `lookbackHours` query parameters are ambiguous and must not be accepted by picking the first or last value.
 
 ---
 
-## TC-COMMON-017F: Repeated lookback parameter
+## TC-COMMON-017G: Timestamp arithmetic underflow before Unix epoch
 
 ### Request
 
 ```http
-?timestampTill=2026-07-29T12:00:00Z
-&lookbackHours=24
-&lookbackHours=48
+?timestampTill=1970-01-01T00:00:00Z
+&lookbackHours=1
 ```
 
 ### Expected result
 
 * HTTP `400 Bad Request`.
-* Error is `invalid_lookback_hours`, not `invalid_timestamp`.
-* Repeated `lookbackHours` query parameters are ambiguous and must not be accepted by picking the first or last value.
+* Error is `invalid_timestamp`.
+* Message states `"Calculated startTime precedes supported Unix epoch minimum"`.
+* Unsigned integer underflow / wraparound to large positive timestamps (e.g. `18446744073709548616`) is strictly prohibited.
 
 ---
 
@@ -1062,6 +1062,7 @@ event_time = disconnection message timestamp
     },
     "availabilityCoverage": {
       "coverageStart": "<= startTime",
+      "stateKnownFrom": "<= startTime",
       "processedThrough": ">= endTime",
       "allowedIngestionDelaySeconds": "<configured availability ingestion delay>",
       "ingestionGapKnown": false,
@@ -3943,15 +3944,74 @@ serialNumber = routerId
 ### Test data
 
 * Samples for client `11:22:33:44:55:66`:
-  * `10:00:00Z`: `rx_bytes = 1000`, `tx_bytes = -1` (invalid/missing TX)
-  * `10:10:00Z`: `rx_bytes = 3000`, `tx_bytes = 500`
+  * `10:00:00Z`: `rx_bytes = 1000000`, `tx_bytes = -1` (invalid/missing TX)
+  * `10:10:00Z`: `rx_bytes = 3000000`, `tx_bytes = 500000`
 
 ### Expected result
 
-* RX bytes are calculated independently: `3000 - 1000 = 2000` bytes (`data_consume_rx = 2.00 MB`).
-* TX bytes are uncalculable for 10:00:00Z sample; TX returns `"0.00 MB"` (or raw bytes `0` / `null` in segment details).
+* RX bytes are calculated independently: `3000000 - 1000000 = 2000000` bytes (`data_consume_rx = "2.00 MB"`).
+* TX bytes are uncalculable for 10:00:00Z sample; TX returns `0` bytes (required non-null integer in `calculation_segments`) and formatted `"0.00 MB"` in summary strings.
+* Segment `total_bytes` = `2000000 + 0 = 2000000`.
 * The stream usage accuracy is classified as `lower_bound`.
 * Client `11:22:33:44:55:66` is included in `items[]` and counted in `totalClients`.
+
+---
+
+## TC-USAGE-029: Calculation details flag and segment non-null integer invariants
+
+### Test data
+
+Query with `includeCalculationDetails=true` vs `includeCalculationDetails=false` (or omitted).
+
+### Expected result
+
+* When `includeCalculationDetails=false` or omitted: `items[]` contain `mac`, `data_consume_rx`, `data_consume_tx`, `total_data_usage`, and `usage_accuracy`; `calculation_segments` array is omitted.
+* When `includeCalculationDetails=true`: `items[]` additionally expose `calculation_segments[]`. Each segment object has non-null required integer fields `rx_bytes`, `tx_bytes`, and `total_bytes`.
+* The byte invariant `rx_bytes + tx_bytes == total_bytes` holds for every segment.
+
+---
+
+## TC-USAGE-030: Fallback boundary sampling 2x interval tolerance threshold
+
+### Test data
+
+* Expected collection interval = 300 seconds (5 minutes). Tolerance threshold = 2 * 300 = 600 seconds (10 minutes).
+* Client A has pre-start fallback sample at 09:51:00Z (9 minutes before 10:00:00Z start, within tolerance threshold).
+* Client B has pre-start fallback sample at 09:48:00Z (12 minutes before 10:00:00Z start, outside tolerance threshold).
+
+### Expected result
+
+* Client A uses the 09:51:00Z sample as boundary baseline (accuracy `exact` or `bounded_interval`).
+* Client B cannot use the 09:48:00Z sample because it exceeds 2x collection interval tolerance; Client B starts delta calculation from the first in-window sample at 10:05:00Z (accuracy `lower_bound`).
+
+---
+
+## TC-USAGE-031: Result time window calculation
+
+### Test data
+
+Observations for requested window `[10:00:00Z, 11:00:00Z)` occur at `10:05:00Z` and `10:55:00Z`.
+
+### Expected result
+
+* `resultTimeWindow.startTime` = `"2026-07-27T10:05:00Z"` (earliest contributing sample in window).
+* `resultTimeWindow.endTime` = `"2026-07-27T10:55:00Z"` (latest contributing sample in window).
+* `requestedTimeWindow` remains `"2026-07-27T10:00:00Z"` to `"2026-07-27T11:00:00Z"`.
+
+---
+
+## TC-USAGE-032: Client truncation threshold and deterministic ordering
+
+### Test data
+
+501 active clients exist in the requested window.
+
+### Expected result
+
+* `totalClients` = 501.
+* `items[]` array length = 500.
+* `truncated` = `true`.
+* Returned 500 items are deterministically sorted by `total_data_usage` DESC, then station `mac` ASC (canonical lowercase) as tie-breaker.
 
 ---
 
