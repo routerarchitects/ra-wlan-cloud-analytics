@@ -3147,11 +3147,20 @@ wifi_temp = 0
 
 ---
 
-## TC-TEMP-010: Post-cutover present `wifi_temp`
+## TC-TEMP-010: Post-cutover valid numeric `wifi_temp`
+
+### Preconditions
+
+A post-cutover sample contains a numeric `wifi_temp` value.
 
 ### Expected result
 
-* Numeric `wifi_temp` is included.
+* A post-cutover numeric `wifi_temp` is included only when all of the following hold:
+  * `-40 <= wifi_temp <= 125`
+  * `wifi_temp != 0`
+  * `wifi_temp != 255`
+* Explicit boundary values `-40` and `125` are valid inclusive measurements and are included in aggregation.
+* Sentinels and out-of-range values (`0`, `255`, `< -40`, and `> 125`) are excluded.
 
 ---
 

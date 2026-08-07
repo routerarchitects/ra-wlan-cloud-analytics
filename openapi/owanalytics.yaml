@@ -2220,7 +2220,7 @@ paths:
         - $ref: '#/components/parameters/LookbackHours'
       responses:
         200:
-          description: Return Wi-Fi radio temperature summary for the effective aggregation window.
+          description: Return Wi-Fi radio temperature summary for the requested aggregation window.
           content:
             application/json:
               schema:
