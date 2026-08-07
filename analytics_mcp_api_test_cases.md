@@ -24,11 +24,11 @@ get_gateway_offline_count
 
 The specification and test suite are modularized into three distinct architectural components:
 1. **Public API Contract Specification**: OpenAPI 3.0 schemas (`openapi/owanalytics.yaml` v2.7.0) defining external REST endpoints, query parameters, HTTP status codes, and response envelopes.
-2. **Persistence & Pipeline Architecture Design**: Backend storage structures (`device_availability_events`, `device_availability_state`), Kafka event consumption/ordering semantics, and cutover/migration behavior.
+2. **Persistence & Pipeline Architecture Design**: Backend storage structures (`device_availability_events`, `device_availability_state`, `device_availability_ingestion_checkpoint`, `device_availability_ingestion_gaps`), Kafka event consumption/ordering semantics, and cutover/migration behavior.
 3. **Test Specification & Verification Matrix**: Independent verification matrix (this document) defining assertion criteria for API contracts, integration workflows, white-box database rules, and failure modes.
 
-> [!NOTE]
-> Approving or executing this test specification validates implementation compliance with defined assertion logic. It does not replace or bypass separate architectural design approval for backend production schema additions or Kafka pipeline designs.
+> [!IMPORTANT]
+> This PR reframes and defines the complete target contract and test specification suite. The specified production architecture changes—including four new availability persistence tables (`device_availability_events`, `device_availability_state`, `device_availability_ingestion_checkpoint`, `device_availability_ingestion_gaps`), Kafka event ordering/checkpointing semantics, cutover migration rules, and OpenAPI v2.7.0 endpoint schemas—constitute a production architecture specification. Approving or merging this test specification PR does NOT bypass separate explicit architecture design sign-off for backend schema additions and production Kafka pipeline changes prior to production deployment.
 
 The test cases cover:
 * API contract tests for request shapes, HTTP status codes, response schemas, parameter validation, filtering, and half-open time-range window semantics `[startTime, endTime)`.
@@ -174,10 +174,10 @@ GET /api/v1/devices/deadbeef1234/memory-summary
 
 ### Steps
 
-Call an API with a syntactically invalid router ID:
+Call an API with a syntactically invalid router ID (e.g. containing invalid dot-segment punctuation `.`):
 
 ```http
-GET /api/v1/devices/unknown-router/memory-summary
+GET /api/v1/devices/unknown.router/memory-summary
     ?timestampTill=2026-07-29T12:00:00Z
     &lookbackHours=24
 ```
@@ -371,6 +371,24 @@ GET /api/v1/devices/60cf84f22290/memory-summary
 * Error is `invalid_timestamp`.
 * The value is rejected even though it matches the timestamp shape.
 * No database aggregation is performed.
+
+---
+
+## TC-COMMON-012A: Repeated timestampTill parameter
+
+### Request
+
+```http
+?timestampTill=2026-07-29T12:00:00Z
+&timestampTill=2026-07-29T13:00:00Z
+&lookbackHours=24
+```
+
+### Expected result
+
+* HTTP `400 Bad Request`.
+* Error is `invalid_timestamp`.
+* Repeated `timestampTill` query parameters are ambiguous and must not be accepted by framework parameter binders silently selecting the first or last value. Handlers must inspect the raw query collection to enforce exactly one `timestampTill` parameter.
 
 ---
 
@@ -3669,15 +3687,17 @@ TX
 Samples arrive in this order:
 
 ```text
-10:20
-10:10
-10:30
+10:20 (RX = 3000, TX = 1500)
+10:10 (RX = 2000, TX = 1000)
+10:30 (RX = 5000, TX = 2500)
 ```
 
 ### Expected result
 
-* Samples are ordered by timestamp before processing, or stale records are discarded according to the stream rule.
-* Negative or duplicated usage is not produced.
+* All valid samples presented out of temporal order must be deterministically sorted by timestamp ASC (`10:10 -> 10:20 -> 10:30`) before differential calculation.
+* Valid out-of-order historical telemetry must NOT be discarded or treated as stale.
+* Deltas are calculated sequentially across the sorted stream: `(3000-2000) + (5000-3000) = 3000` RX bytes.
+* Under-counting or dropping valid out-of-order samples is prohibited. Negative or duplicated usage is not produced.
 
 ---
 
@@ -3732,8 +3752,9 @@ e2:51:95:ed:0f:28
 
 ### Expected result
 
-* MAC addresses are normalized.
-* Both records belong to one client result.
+* MAC addresses are normalized to canonical lowercase (`e2:51:95:ed:0f:28`).
+* Both records belong to one client result item with `mac: "e2:51:95:ed:0f:28"`.
+* Response `mac` field matches `^[0-9a-f]{2}(:[0-9a-f]{2}){5}$`.
 
 ---
 

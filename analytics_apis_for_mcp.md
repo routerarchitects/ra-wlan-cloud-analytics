@@ -10,8 +10,11 @@ This document defines the request format, response format, and implementation lo
 
 The specification is structured across three distinct component layers:
 1. **Public API Contract Specifications**: External OpenAPI schemas (`openapi/owanalytics.yaml`) defining HTTP requests, parameter validation, and response envelopes.
-2. **Persistence & Pipeline Architecture Design**: Internal storage structures (`device_availability_events`, `device_availability_state`), Kafka event consumption/ordering, and cutover semantics.
+2. **Persistence & Pipeline Architecture Design**: Internal storage structures (`device_availability_events`, `device_availability_state`, `device_availability_ingestion_checkpoint`, `device_availability_ingestion_gaps`), Kafka event consumption/ordering, and cutover semantics.
 3. **Test Specifications Matrix**: Independent verification matrix documented in `analytics_mcp_api_test_cases.md`.
+
+> [!IMPORTANT]
+> The specified production architecture changes—including four new availability persistence structures (`device_availability_events`, `device_availability_state`, `device_availability_ingestion_checkpoint`, `device_availability_ingestion_gaps`), Kafka event ordering/checkpointing rules, cutover migration rules, and OpenAPI v2.7.0 endpoint schemas—constitute a production architecture specification. Approving or merging this test specification PR does NOT bypass separate explicit architecture design sign-off for backend schema additions and production Kafka pipeline changes prior to production deployment.
 
 The API contracts match the MCP tool names and response fields from the provided CSV.
 
@@ -1418,7 +1421,7 @@ segment objects. When `includeCalculationDetails=true`, the detailed
 any segment contributing to a station MAC is lower_bound, that station's usage
 is lower_bound.
 
-Client MAC values in API responses must be normalized colon-separated MAC addresses matching `^[A-Fa-f0-9]{2}(:[A-Fa-f0-9]{2}){5}$`.
+Client MAC values in API responses must be normalized canonical lowercase colon-separated MAC addresses matching `^[0-9a-f]{2}(:[0-9a-f]{2}){5}$`.
 
 Usage accuracy contract:
 
@@ -1548,7 +1551,7 @@ Different stream keys are calculated independently. BSSID, SSID, band, and radio
 identify counter streams; they must not be used to invent temporal order between
 different counter values at the same timestamp.
 
-Discard out-of-order or ambiguous samples for the same calculated stream.
+Deterministically sort all stream samples by timestamp ASC before calculating deltas. Valid out-of-order historical telemetry must be sorted and included in differential calculation; valid samples must not be discarded or treated as stale merely because they arrived out of temporal sequence. Discarding is strictly reserved for exact duplicate samples or ambiguous conflicting counter samples at the same timestamp without sequence proof.
 
 When an association/session identifier is available:
   calculate deltas only within the same session.
