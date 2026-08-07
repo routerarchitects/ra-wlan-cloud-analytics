@@ -587,7 +587,7 @@ GET /api/v1/devices/60cf84f22290/memory-summary
 ### Request
 
 ```http
-GET /api/v1/devices/unknown.router/wifi-clients/bandwidth-consumption?timestampTill=invalid-date&lookbackHours=-5
+GET /api/v1/devices/unknown.router/wifi-clients/usage-summary?timestampTill=invalid-date&lookbackHours=-5
 ```
 
 Headers: missing `Authorization` header.
