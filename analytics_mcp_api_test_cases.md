@@ -551,7 +551,7 @@ GET /api/v1/devices/60cf84f22290/memory-summary
 
 * HTTP `400 Bad Request`.
 * Error is `invalid_lookback_hours`, not `invalid_timestamp`.
-* Repeated `lookbackHours` query parameters are ambiguous and must not be accepted by picking the first or last value.
+* The value is rejected before integer overflow, wraparound, or truncation can affect range calculation.
 
 ---
 

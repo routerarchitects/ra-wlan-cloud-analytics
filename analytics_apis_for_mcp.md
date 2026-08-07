@@ -1466,10 +1466,10 @@ Usage accuracy contract:
 
 ```text
 Returned usage is exact only when every contributing calculation segment has
-authoritative effective-boundary evidence:
+authoritative boundary evidence matching effective boundaries exactly:
   effective_start = max(requested_start, proven_session_start), and
   effective_end = min(requested_end, proven_session_end), and
-  authoritative counter evidence exists at effective_start and effective_end,
+  actual_start_time == effective_start and actual_end_time == effective_end,
   and every counter reset, rollover, or session transition is unambiguously proven
   and accounted for using independent segment differentials or verified rollover arithmetic.
 

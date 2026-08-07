@@ -1496,16 +1496,16 @@ components:
             - bounded_interval
             - lower_bound
           description: >
-            exact when each contributing calculation segment has authoritative effective-boundary evidence
-            (actual_start <= effective_start and actual_end >= effective_end) and every counter reset,
-            rollover, or session transition is unambiguously proven and accounted for. bounded_interval
-            when exact effective-boundary samples are unavailable and fallback samples within two times
-            the configured telemetry sampling interval are used. lower_bound when no usable boundary pair
-            exists, when either fallback boundary exceeds tolerance, when an unconfirmed or ambiguous counter
-            reset/session change is detected, or when unbridgeable gaps prevent a complete differential
-            calculation. When a client was observed but no usage differential segment can be calculated,
-            return zero byte totals, usage_accuracy lower_bound, incomplete true, segment_count 0, and
-            boundary_fallback_used false.
+            exact when actual_start_time == effective_start_time and actual_end_time == effective_end_time
+            for every contributing calculation segment, with all counter resets, rollovers, or session
+            transitions unambiguously proven and accounted for. bounded_interval when exact effective-boundary
+            samples are unavailable and fallback samples within two times the configured telemetry sampling
+            interval are used (actual_start_time < effective_start_time or actual_end_time > effective_end_time).
+            lower_bound when no usable boundary pair exists, when either fallback boundary exceeds tolerance,
+            when an unconfirmed or ambiguous counter reset/session change is detected, or when unbridgeable
+            gaps prevent a complete differential calculation. When a client was observed but no usage
+            differential segment can be calculated, return zero byte totals, usage_accuracy lower_bound,
+            incomplete true, segment_count 0, and boundary_fallback_used false.
         incomplete:
           type: boolean
           description: True exactly when usage_accuracy is lower_bound; otherwise false.
