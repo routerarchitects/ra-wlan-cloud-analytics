@@ -2450,9 +2450,10 @@ counts observed online-to-offline transitions.
 
 * No `offline` transition event row is inserted.
 * A `device_availability_state` row is created with `current_state = offline` and `last_event_time` equal to the disconnection source timestamp.
-* An availability-summary response for a window containing the first disconnection does not report an exact zero, because the prior state boundary is unknown.
+* The checkpoint's `state_known_from` timestamp is set to this first observed event timestamp (or an unproven gap is recorded for `[coverage_start, initial_event_time)`).
+* An availability-summary response for a window containing the first disconnection does not report an exact zero, because `state_known_from > startTime` proves the prior state boundary is unknown.
 * The response uses `meta.coverage = "partial"` and `meta.accuracy = "lower_bound"` when durable coverage begins at the first observation, or `meta.coverage = "none"` and `meta.accuracy = "not_applicable"` when no coverage proof exists.
-* A full-coverage exact-zero response is allowed only for a requested window that begins after this state initialization boundary and is fully covered by the per-serial ingestion checkpoint.
+* A full-coverage exact-zero response is allowed only for a requested window that begins at or after `state_known_from` (`state_known_from <= startTime`) and is fully covered by the per-serial ingestion checkpoint (`processed_through_event_time >= endTime`).
 
 ---
 
@@ -2917,8 +2918,9 @@ min_memfree <= avg_memfree <= max_memfree
 }
 ```
 
-* The negative `memory_free` sample is treated as corrupted telemetry and excluded.
-* It cannot make `min_memfree` negative or affect the average.
+* Parsing and validation check numeric type, integral value, non-negative range (`>= 0`), and 64-bit non-overflow BEFORE unsigned conversion.
+* Field-level isolation: The negative `memory_free = -1` field is identified prior to unsigned casting and treated as invalid/unset (`null`), so it does not throw an exception or corrupt `memory_total = 512000` in the same sample.
+* The invalid `memory_free` field is excluded from `min_memfree`, `max_memfree`, and `avg_memfree`.
 
 ---
 
@@ -4348,7 +4350,7 @@ lookbackHours
 
 * Every API calculates the same requested `startTime` and `endTime` from `timestampTill` and `lookbackHours`.
 * Memory, usage, and RSSI apply the requested half-open aggregation window: `startTime <= sample_time < endTime`.
-* Temperature applies an effective aggregation window where `effective_start_time = max(startTime, temperature_migration_cutover_time)`, so pre-cutover temperature records are ignored even if they fall inside the requested window.
+* Temperature requires `startTime >= temperatureMigrationCutoverTime`; if requested `startTime < temperatureMigrationCutoverTime`, the temperature request is rejected with HTTP `400 Bad Request` (`error: "temperature_range_before_cutover"`) matching TC-TEMP-017 rather than clipping the requested range.
 * Availability applies the requested event window only when `startTime >= availabilityValidFrom`; otherwise the availability request is rejected according to the API contract.
 
 ---

@@ -673,18 +673,25 @@ Do not represent missing memory fields as `0`. A missing `memory_free` value and
 
 ```cpp
 AnalyticsObjects::DeviceResourceTimePoint resource;
-if (memory.has("free")) {
-    resource.memory_free = memory["free"].as<uint64_t>();
-}
-if (memory.has("total")) {
-    resource.memory_total = memory["total"].as<uint64_t>();
-}
-if (memory.has("cached")) {
-    resource.memory_cached = memory["cached"].as<uint64_t>();
-}
-if (memory.has("buffered")) {
-    resource.memory_buffered = memory["buffered"].as<uint64_t>();
-}
+
+// Validate numeric type, integral value, non-negative range (>= 0), and 64-bit non-overflow before unsigned conversion.
+// Field-level isolation rule: An invalid or negative field (e.g. free < 0 or total < 0) invalidates only that specific field, leaving it unset (null), so unparseable or negative values do not throw unhandled exceptions or corrupt other valid fields in the sample.
+auto parseMemoryField = [](const Poco::JSON::Object::Ptr &obj, const std::string &key) -> std::optional<uint64_t> {
+    if (!obj->has(key) || obj->isNull(key)) return std::nullopt;
+    try {
+        if (!obj->isNumeric(key)) return std::nullopt;
+        int64_t val = obj->getElement<int64_t>(key);
+        if (val < 0) return std::nullopt;
+        return static_cast<uint64_t>(val);
+    } catch (...) {
+        return std::nullopt;
+    }
+};
+
+if (auto val = parseMemoryField(memory, "free"))     resource.memory_free = *val;
+if (auto val = parseMemoryField(memory, "total"))    resource.memory_total = *val;
+if (auto val = parseMemoryField(memory, "cached"))   resource.memory_cached = *val;
+if (auto val = parseMemoryField(memory, "buffered")) resource.memory_buffered = *val;
 DTP.resource_data = resource;
 ```
 
@@ -1600,13 +1607,18 @@ Example:
 
 Delta 10:00 -> 10:05 = 500
 
-If 10:10 is a confirmed new session that started inside the request window:
-  add 200
+If 10:10 is a confirmed new session that started inside the request window WITH authoritative proof of starting at counter zero (e.g. session_start event with baseline 0 at session origin):
+  add 200 (delta from zero baseline)
   total rx_bytes = 700
   usage_accuracy = exact, unless another stream is incomplete
 
+If 10:10 is a confirmed new session that started inside the request window WITHOUT authoritative proof of starting at zero:
+  treat 200 as the new segment baseline (delta = 0 for 10:10 sample alone)
+  total rx_bytes = 500
+  usage_accuracy = lower_bound (until a subsequent sample in Session B establishes a proven delta)
+
 If 10:10 is an ambiguous decrease:
-  add 0
+  add 0 (treat 200 as baseline)
   total rx_bytes = 500
   usage_accuracy = lower_bound
 
@@ -1665,17 +1677,19 @@ Resolve boardId from routerId
     ↓
 Load TimePointDB records for resolvedBoardId and stored serialNumber == request routerId
     ↓
-Include records from startTime up to but not including endTime
-    ↓
-Also load the latest pre-window association sample for each calculated stream_key
+Query both boundary candidates for each calculated stream:
+  - In-window samples: timestamp >= startTime and timestamp < endTime
+  - Start boundary: latest sample at or before effective_start (timestamp <= effective_start)
+  - End boundary: earliest sample at or after effective_end (timestamp >= effective_end)
+(Outside-window samples serve strictly as boundary calculation aids for streams with in-window observations or proven session overlap; they do NOT make a client eligible for response items)
     ↓
 Parse ssid_data associations
     ↓
-Build stream_key values and sort samples by stream_key and timestamp
+Build stream_key values and sort samples by stream_key and timestamp ASC
     ↓
-Calculate reset-safe RX/TX deltas
+Calculate reset-safe RX/TX deltas using effective start and end boundary samples
     ↓
-Aggregate stream-level deltas by station MAC
+Aggregate stream-level deltas by station MAC (including only clients with in-window observations or proven session overlap)
     ↓
 Convert bytes to decimal megabytes
     ↓
@@ -2106,6 +2120,7 @@ device_availability_ingestion_checkpoint
 ----------------------------------------
 serialNumber
 coverage_start
+state_known_from
 processed_through_event_time
 partition
 offset
@@ -2125,7 +2140,7 @@ detected_at
 metadata
 ```
 
-`processed_through_event_time` is a source-event-time watermark, not a Kafka processing-time or `DeviceInfo.lastContact` value. Kafka topic, partition, and offset are stored only as proof metadata.
+`processed_through_event_time` is a source-event-time watermark, not a Kafka processing-time or `DeviceInfo.lastContact` value. `state_known_from` stores the earliest source event timestamp from which gateway state is authoritatively established. When initial state is unproven (such as a first observed disconnection initializing state without prior state history), `state_known_from` is set to the timestamp of the first observed transition or explicit state proof (or an unproven gap is persisted in `device_availability_ingestion_gaps` for `[coverage_start, initial_observation_time)`). Kafka topic, partition, and offset are stored only as proof metadata.
 
 For availability coverage decisions over a requested interval `[startTime, endTime)`:
 
@@ -2133,7 +2148,7 @@ For availability coverage decisions over a requested interval `[startTime, endTi
 coverageTargetEnd = endTime - allowedIngestionDelaySeconds
 ```
 
-An exact result (`meta.coverage = "full"`, `meta.accuracy = "exact"`) is allowed only when the serialNumber checkpoint proves `coverage_start <= startTime`, `processed_through_event_time >= endTime`, and no persisted gap overlaps `[startTime, endTime)`.
+An exact result (`meta.coverage = "full"`, `meta.accuracy = "exact"`) is allowed only when the serialNumber checkpoint proves `coverage_start <= startTime`, `state_known_from <= startTime` (or no unproven initial gap), `processed_through_event_time >= endTime`, and no persisted gap overlaps `[startTime, endTime)`.
 
 Evaluating coverage against `coverageTargetEnd = endTime - allowedIngestionDelaySeconds` does not prove that there were no offline transitions in `[coverageTargetEnd, endTime)`. Therefore, if `processed_through_event_time < endTime` (even when `processed_through_event_time >= coverageTargetEnd`), the requested interval `[startTime, endTime)` is not fully covered up to `endTime` and must be reported as partial coverage (`meta.coverage = "partial"`, `meta.accuracy = "lower_bound"`) with the effective/observed window covered so far ending at `processed_through_event_time` (or `coverageTargetEnd`). Set `allowedIngestionDelaySeconds` to the configured maximum tolerated ingestion/source-message delay for availability queries, and return it in `meta.availabilityCoverage`.
 

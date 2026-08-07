@@ -1679,7 +1679,7 @@ components:
 
     GatewayAvailabilityIngestionCoverage:
       type: object
-      description: Durable ingestion coverage proof for the requested gateway lookback window.
+      description: Durable ingestion coverage proof for the requested gateway lookback window. Full coverage requires coverageStart <= startTime, stateKnownFrom <= startTime, processedThrough >= endTime, and ingestionGapKnown == false.
       required:
         - coverageStart
         - processedThrough
@@ -1692,6 +1692,11 @@ components:
           format: date-time
           nullable: true
           description: ISO timestamp of earliest durable availability coverage; null when coverage is none.
+        stateKnownFrom:
+          type: string
+          format: date-time
+          nullable: true
+          description: ISO timestamp from which gateway availability state is authoritatively established; null when state is unproven or coverage is none.
         processedThrough:
           type: string
           format: date-time
