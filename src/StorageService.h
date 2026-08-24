@@ -9,6 +9,7 @@
 #pragma once
 
 #include "framework/StorageClass.h"
+#include "storage/storage_availability.h"
 #include "storage/storage_boards.h"
 #include "storage/storage_timepoints.h"
 #include "storage/storage_wificlients.h"
@@ -28,12 +29,18 @@ namespace OpenWifi {
 		auto &BoardsDB() { return *BoardsDB_; };
 		auto &TimePointsDB() { return *TimePointsDB_; };
 		auto &WifiClientHistoryDB() { return *WifiClientHistoryDB_; };
+		auto &AvailabilityEventsDB() { return *AvailabilityEventsDB_; };
+		auto &AvailabilityStateDB() { return *AvailabilityStateDB_; };
+		auto &SystemPropertiesDB() { return *SystemPropertiesDB_; };
 		void onTimer(Poco::Timer &timer);
 
 	  private:
 		std::unique_ptr<OpenWifi::BoardsDB> BoardsDB_;
 		std::unique_ptr<OpenWifi::TimePointDB> TimePointsDB_;
 		std::unique_ptr<OpenWifi::WifiClientHistoryDB> WifiClientHistoryDB_;
+		std::unique_ptr<OpenWifi::DeviceAvailabilityEventsDB> AvailabilityEventsDB_;
+		std::unique_ptr<OpenWifi::DeviceAvailabilityStateDB> AvailabilityStateDB_;
+		std::unique_ptr<OpenWifi::SystemPropertiesDB> SystemPropertiesDB_;
 		Poco::Thread Updater_;
 		std::atomic_bool Running_ = false;
 		Poco::Timer Timer_;

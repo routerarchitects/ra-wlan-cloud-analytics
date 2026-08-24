@@ -24,10 +24,19 @@ namespace OpenWifi {
 		TimePointsDB_ = std::make_unique<OpenWifi::TimePointDB>(dbType_, *Pool_, Logger());
 		WifiClientHistoryDB_ =
 			std::make_unique<OpenWifi::WifiClientHistoryDB>(dbType_, *Pool_, Logger());
+		AvailabilityEventsDB_ =
+			std::make_unique<OpenWifi::DeviceAvailabilityEventsDB>(dbType_, *Pool_, Logger());
+		AvailabilityStateDB_ =
+			std::make_unique<OpenWifi::DeviceAvailabilityStateDB>(dbType_, *Pool_, Logger());
+		SystemPropertiesDB_ =
+			std::make_unique<OpenWifi::SystemPropertiesDB>(dbType_, *Pool_, Logger());
 
 		TimePointsDB_->Create();
 		BoardsDB_->Create();
 		WifiClientHistoryDB_->Create();
+		AvailabilityEventsDB_->Create();
+		AvailabilityStateDB_->Create();
+		SystemPropertiesDB_->Create();
 
 		PeriodicCleanup_ = MicroServiceConfigGetInt("storage.cleanup.interval", 6 * 60 * 60);
 		if (PeriodicCleanup_ < 1 * 60 * 60)

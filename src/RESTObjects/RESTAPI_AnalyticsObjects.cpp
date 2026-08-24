@@ -341,6 +341,9 @@ bool Fingerprint::from_json(const Poco::JSON::Object::Ptr &Obj) {
 		field_to_json(Obj, "tx_power", tx_power);
 		field_to_json(Obj, "channel", channel);
 		field_to_json(Obj, "temperature", temperature);
+		if (wifi_temp.has_value()) {
+			field_to_json(Obj, "wifi_temp", wifi_temp.value());
+		}
 		field_to_json(Obj, "noise", noise);
 		field_to_json(Obj, "active_pct", active_pct);
 		field_to_json(Obj, "busy_pct", busy_pct);
@@ -359,6 +362,9 @@ bool Fingerprint::from_json(const Poco::JSON::Object::Ptr &Obj) {
 			field_from_json(Obj, "tx_power", tx_power);
 			field_from_json(Obj, "channel", channel);
 			field_from_json(Obj, "temperature", temperature);
+			if (Obj->has("wifi_temp") && !Obj->isNull("wifi_temp")) {
+				wifi_temp = (int64_t)Obj->get("wifi_temp");
+			}
 			field_from_json(Obj, "noise", noise);
 			field_from_json(Obj, "active_pct", active_pct);
 			field_from_json(Obj, "busy_pct", busy_pct);
@@ -424,6 +430,33 @@ bool Fingerprint::from_json(const Poco::JSON::Object::Ptr &Obj) {
 		return false;
 	}
 
+	void DeviceResourceTimePoint::to_json(Poco::JSON::Object &Obj) const {
+		if (memory_free.has_value()) field_to_json(Obj, "memory_free", memory_free.value());
+		if (memory_total.has_value()) field_to_json(Obj, "memory_total", memory_total.value());
+		if (memory_cached.has_value()) field_to_json(Obj, "memory_cached", memory_cached.value());
+		if (memory_buffered.has_value()) field_to_json(Obj, "memory_buffered", memory_buffered.value());
+	}
+
+	bool DeviceResourceTimePoint::from_json(const Poco::JSON::Object::Ptr &Obj) {
+		try {
+			if (Obj->has("memory_free") && !Obj->isNull("memory_free")) {
+				memory_free = (uint64_t)Obj->get("memory_free");
+			}
+			if (Obj->has("memory_total") && !Obj->isNull("memory_total")) {
+				memory_total = (uint64_t)Obj->get("memory_total");
+			}
+			if (Obj->has("memory_cached") && !Obj->isNull("memory_cached")) {
+				memory_cached = (uint64_t)Obj->get("memory_cached");
+			}
+			if (Obj->has("memory_buffered") && !Obj->isNull("memory_buffered")) {
+				memory_buffered = (uint64_t)Obj->get("memory_buffered");
+			}
+			return true;
+		} catch (...) {
+		}
+		return false;
+	}
+
 	void DeviceTimePoint::to_json(Poco::JSON::Object &Obj) const {
 		field_to_json(Obj, "id", id);
 		field_to_json(Obj, "boardId", boardId);
@@ -433,6 +466,7 @@ bool Fingerprint::from_json(const Poco::JSON::Object::Ptr &Obj) {
 		field_to_json(Obj, "radio_data", radio_data);
 		field_to_json(Obj, "device_info", device_info);
 		field_to_json(Obj, "serialNumber", serialNumber);
+		field_to_json(Obj, "resource_data", resource_data);
 	}
 
 	bool DeviceTimePoint::from_json(const Poco::JSON::Object::Ptr &Obj) {
@@ -445,6 +479,7 @@ bool Fingerprint::from_json(const Poco::JSON::Object::Ptr &Obj) {
 			field_from_json(Obj, "radio_data", radio_data);
 			field_from_json(Obj, "device_info", device_info);
 			field_from_json(Obj, "serialNumber", serialNumber);
+			field_from_json(Obj, "resource_data", resource_data);
 			return true;
 		} catch (...) {
 		}
@@ -628,5 +663,148 @@ bool Fingerprint::from_json(const Poco::JSON::Object::Ptr &Obj) {
 		} catch (...) {
 		}
 		return false;
+	}
+
+	void MCPRequestedWindow::to_json(Poco::JSON::Object &Obj) const {
+		field_to_json(Obj, "startTime", startTime);
+		field_to_json(Obj, "endTime", endTime);
+	}
+
+	void MCPObservedWindow::to_json(Poco::JSON::Object &Obj) const {
+		if (startTime.has_value()) {
+			field_to_json(Obj, "startTime", startTime.value());
+		} else {
+			Obj.set("startTime", Poco::Dynamic::Var());
+		}
+		if (endTime.has_value()) {
+			field_to_json(Obj, "endTime", endTime.value());
+		} else {
+			Obj.set("endTime", Poco::Dynamic::Var());
+		}
+	}
+
+	void MCPMetaWindow::to_json(Poco::JSON::Object &Obj) const {
+		Poco::JSON::Object reqObj, obsObj;
+		requestedWindow.to_json(reqObj);
+		observedWindow.to_json(obsObj);
+		Obj.set("requestedWindow", reqObj);
+		Obj.set("observedWindow", obsObj);
+	}
+
+	void MCPGatewayMemorySummary::Data::to_json(Poco::JSON::Object &Obj) const {
+		if (avg_memfree.has_value()) Obj.set("avg_memfree", avg_memfree.value());
+		else Obj.set("avg_memfree", Poco::Dynamic::Var());
+		if (max_memfree.has_value()) Obj.set("max_memfree", max_memfree.value());
+		else Obj.set("max_memfree", Poco::Dynamic::Var());
+		if (min_memfree.has_value()) Obj.set("min_memfree", min_memfree.value());
+		else Obj.set("min_memfree", Poco::Dynamic::Var());
+		if (latest_memfree.has_value()) Obj.set("latest_memfree", latest_memfree.value());
+		else Obj.set("latest_memfree", Poco::Dynamic::Var());
+	}
+
+	void MCPGatewayMemorySummary::to_json(Poco::JSON::Object &Obj) const {
+		Poco::JSON::Object dataObj, metaObj;
+		data.to_json(dataObj);
+		meta.to_json(metaObj);
+		Obj.set("data", dataObj);
+		Obj.set("meta", metaObj);
+	}
+
+	void MCPRadioTempSummary::Data::to_json(Poco::JSON::Object &Obj) const {
+		if (avg_wifi_temp_2_4G.has_value()) Obj.set("avg_wifi_temp_2.4G", avg_wifi_temp_2_4G.value());
+		else Obj.set("avg_wifi_temp_2.4G", Poco::Dynamic::Var());
+		if (max_wifi_temp_2_4G.has_value()) Obj.set("max_wifi_temp_2.4G", max_wifi_temp_2_4G.value());
+		else Obj.set("max_wifi_temp_2.4G", Poco::Dynamic::Var());
+		if (min_wifi_temp_2_4G.has_value()) Obj.set("min_wifi_temp_2.4G", min_wifi_temp_2_4G.value());
+		else Obj.set("min_wifi_temp_2.4G", Poco::Dynamic::Var());
+		if (latest_wifi_temp_2_4G.has_value()) Obj.set("latest_wifi_temp_2.4G", latest_wifi_temp_2_4G.value());
+		else Obj.set("latest_wifi_temp_2.4G", Poco::Dynamic::Var());
+
+		if (avg_wifi_temp_5G.has_value()) Obj.set("avg_wifi_temp_5G", avg_wifi_temp_5G.value());
+		else Obj.set("avg_wifi_temp_5G", Poco::Dynamic::Var());
+		if (max_wifi_temp_5G.has_value()) Obj.set("max_wifi_temp_5G", max_wifi_temp_5G.value());
+		else Obj.set("max_wifi_temp_5G", Poco::Dynamic::Var());
+		if (min_wifi_temp_5G.has_value()) Obj.set("min_wifi_temp_5G", min_wifi_temp_5G.value());
+		else Obj.set("min_wifi_temp_5G", Poco::Dynamic::Var());
+		if (latest_wifi_temp_5G.has_value()) Obj.set("latest_wifi_temp_5G", latest_wifi_temp_5G.value());
+		else Obj.set("latest_wifi_temp_5G", Poco::Dynamic::Var());
+	}
+
+	void MCPRadioTempSummary::to_json(Poco::JSON::Object &Obj) const {
+		Poco::JSON::Object dataObj, metaObj;
+		data.to_json(dataObj);
+		meta.to_json(metaObj);
+		Obj.set("data", dataObj);
+		Obj.set("meta", metaObj);
+	}
+
+	void MCPClientUsageItem::to_json(Poco::JSON::Object &Obj) const {
+		field_to_json(Obj, "mac", mac);
+		field_to_json(Obj, "rx_bytes", rx_bytes);
+		field_to_json(Obj, "tx_bytes", tx_bytes);
+		field_to_json(Obj, "total_bytes", total_bytes);
+		field_to_json(Obj, "data_consume_rx", data_consume_rx);
+		field_to_json(Obj, "data_consume_tx", data_consume_tx);
+		field_to_json(Obj, "total_data_usage", total_data_usage);
+	}
+
+	void MCPClientUsageSummary::Data::to_json(Poco::JSON::Object &Obj) const {
+		field_to_json(Obj, "items", items);
+		field_to_json(Obj, "totalClients", totalClients);
+		field_to_json(Obj, "truncated", truncated);
+	}
+
+	void MCPClientUsageSummary::to_json(Poco::JSON::Object &Obj) const {
+		Poco::JSON::Object dataObj, metaObj;
+		data.to_json(dataObj);
+		meta.to_json(metaObj);
+		Obj.set("data", dataObj);
+		Obj.set("meta", metaObj);
+	}
+
+	void MCPClientRssiItem::to_json(Poco::JSON::Object &Obj) const {
+		field_to_json(Obj, "mac", mac);
+		field_to_json(Obj, "rssi_excellent_pct", rssi_excellent_pct);
+		field_to_json(Obj, "rssi_good_pct", rssi_good_pct);
+		field_to_json(Obj, "rssi_fair_pct", rssi_fair_pct);
+		field_to_json(Obj, "rssi_poor_pct", rssi_poor_pct);
+		field_to_json(Obj, "rssi_total_samples", rssi_total_samples);
+	}
+
+	void MCPClientRssiSummary::Data::to_json(Poco::JSON::Object &Obj) const {
+		field_to_json(Obj, "items", items);
+		field_to_json(Obj, "totalClients", totalClients);
+		field_to_json(Obj, "truncated", truncated);
+	}
+
+	void MCPClientRssiSummary::to_json(Poco::JSON::Object &Obj) const {
+		Poco::JSON::Object dataObj, metaObj;
+		data.to_json(dataObj);
+		meta.to_json(metaObj);
+		Obj.set("data", dataObj);
+		Obj.set("meta", metaObj);
+	}
+
+	void MCPAvailabilitySummary::Meta::to_json(Poco::JSON::Object &Obj) const {
+		Poco::JSON::Object reqObj, obsObj;
+		requestedWindow.to_json(reqObj);
+		observedWindow.to_json(obsObj);
+		Obj.set("requestedWindow", reqObj);
+		Obj.set("observedWindow", obsObj);
+		field_to_json(Obj, "offlineEventCount", offlineEventCount);
+	}
+
+	void MCPAvailabilitySummary::Data::to_json(Poco::JSON::Object &Obj) const {
+		field_to_json(Obj, "fetch_status", fetch_status);
+		field_to_json(Obj, "gw_uuid", gw_uuid);
+		field_to_json(Obj, "offline_count", offline_count);
+	}
+
+	void MCPAvailabilitySummary::to_json(Poco::JSON::Object &Obj) const {
+		Poco::JSON::Object metaObj, dataObj;
+		meta.to_json(metaObj);
+		data.to_json(dataObj);
+		Obj.set("meta", metaObj);
+		Obj.set("data", dataObj);
 	}
 } // namespace OpenWifi::AnalyticsObjects

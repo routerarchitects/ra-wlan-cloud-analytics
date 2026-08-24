@@ -716,6 +716,7 @@ namespace OpenWifi {
 		SecurityObjects::UserInfoAndPolicy UserInfo_;
 		QueryBlock QB_;
 		const std::string &Requester() const { return REST_Requester_; }
+		uint64_t TransactionId() const { return TransactionId_; }
 
 	  protected:
 		BindingMap Bindings_;

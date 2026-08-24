@@ -148,6 +148,11 @@ add_executable(owanalytics
         src/RESTAPI/RESTAPI_board_timepoint_handler.cpp src/RESTAPI/RESTAPI_board_timepoint_handler.h
         src/storage/storage_timepoints.cpp src/storage/storage_timepoints.h
         src/storage/storage_wificlients.cpp src/storage/storage_wificlients.h
+        src/storage/storage_availability.cpp src/storage/storage_availability.h
+        src/RouterIdResolver.cpp src/RouterIdResolver.h
+        src/AvailabilityProcessor.cpp src/AvailabilityProcessor.h
+        src/RESTAPI/RESTAPI_mcp_helpers.cpp src/RESTAPI/RESTAPI_mcp_helpers.h
+        src/RESTAPI/RESTAPI_mcp_handlers.cpp src/RESTAPI/RESTAPI_mcp_handlers.h
         src/RESTAPI/RESTAPI_wificlienthistory_handler.cpp src/RESTAPI/RESTAPI_wificlienthistory_handler.h)
 
 target_link_libraries(owanalytics PUBLIC
@@ -156,6 +161,5 @@ target_link_libraries(owanalytics PUBLIC
                         ${ZLIB_LIBRARIES}
                         fmt::fmt
                         resolv
-                        CppKafka::cppkafka
+                         CppKafka::cppkafka
 )
-

@@ -7,6 +7,7 @@
 #include "RESTAPI/RESTAPI_board_list_handler.h"
 #include "RESTAPI/RESTAPI_board_timepoint_handler.h"
 #include "RESTAPI/RESTAPI_wificlienthistory_handler.h"
+#include "RESTAPI/RESTAPI_mcp_handlers.h"
 
 #include "framework/RESTAPI_SystemCommand.h"
 #include "framework/RESTAPI_WebSocketServer.h"
@@ -20,6 +21,11 @@ namespace OpenWifi {
 		return RESTAPI_Router<RESTAPI_system_command, RESTAPI_system_configuration, RESTAPI_board_devices_handler,
 							  RESTAPI_board_timepoint_handler, RESTAPI_board_handler,
 							  RESTAPI_board_list_handler, RESTAPI_wificlienthistory_handler,
+							  RESTAPI_device_memory_summary_handler,
+							  RESTAPI_device_radio_temp_summary_handler,
+							  RESTAPI_device_wifi_client_usage_summary_handler,
+							  RESTAPI_device_wifi_client_rssi_summary_handler,
+							  RESTAPI_device_availability_summary_handler,
 							  RESTAPI_webSocketServer>(Path, Bindings, L, S, TransactionId);
 	}
 
@@ -28,7 +34,12 @@ namespace OpenWifi {
 					  Poco::Logger &L, RESTAPI_GenericServerAccounting &S, uint64_t TransactionId) {
 		return RESTAPI_Router_I<RESTAPI_system_command, RESTAPI_system_configuration, RESTAPI_board_devices_handler,
 								RESTAPI_board_timepoint_handler, RESTAPI_board_handler,
-								RESTAPI_board_list_handler, RESTAPI_wificlienthistory_handler>(
+								RESTAPI_board_list_handler, RESTAPI_wificlienthistory_handler,
+								RESTAPI_device_memory_summary_handler,
+								RESTAPI_device_radio_temp_summary_handler,
+								RESTAPI_device_wifi_client_usage_summary_handler,
+								RESTAPI_device_wifi_client_rssi_summary_handler,
+								RESTAPI_device_availability_summary_handler>(
 			Path, Bindings, L, S, TransactionId);
 	}
 

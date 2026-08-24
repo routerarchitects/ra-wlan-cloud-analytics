@@ -26,7 +26,8 @@ namespace OpenWifi {
 										  ORM::Field{"ssid_data", ORM::FieldType::FT_TEXT},
 										  ORM::Field{"radio_data", ORM::FieldType::FT_TEXT},
 										  ORM::Field{"device_info", ORM::FieldType::FT_TEXT},
-										  ORM::Field{"serialNumber", ORM::FieldType::FT_TEXT}};
+										  ORM::Field{"serialNumber", ORM::FieldType::FT_TEXT},
+										  ORM::Field{"resource_data", ORM::FieldType::FT_TEXT}};
 
 	static ORM::IndexVec TimePointDB_Indexes{
 		{std::string("timepoint_board_index"),
@@ -41,6 +42,9 @@ namespace OpenWifi {
 
 	bool TimePointDB::Upgrade([[maybe_unused]] uint32_t from, uint32_t &to) {
 		std::vector<std::string> Statements{};
+		if (from < 2) {
+			Statements.push_back("ALTER TABLE timepoints ADD COLUMN resource_data TEXT;");
+		}
 		RunScript(Statements);
 		to = 2;
 		return true;
@@ -181,8 +185,23 @@ namespace OpenWifi {
 		for (const auto &dev : DIL.devices) {
 			serials.insert(dev.serialNumber);
 		}
-
 		return serials;
+	}
+
+	bool TimePointDB::SelectRecordsBySerial(const std::string &boardId, const std::string &serialNumber, uint64_t FromDate,
+											uint64_t LastDate, uint64_t MaxRecords,
+											std::vector<AnalyticsObjects::DeviceTimePoint> &Recs) {
+		std::string WhereClause = fmt::format(" boardId='{}' and serialNumber='{}' ", ORM::Escape(boardId), ORM::Escape(serialNumber));
+		if (FromDate && LastDate) {
+			WhereClause += fmt::format(" and (timestamp >= {}) and (timestamp < {}) ", FromDate, LastDate);
+		} else if (FromDate) {
+			WhereClause += fmt::format(" and (timestamp >= {}) ", FromDate);
+		} else if (LastDate) {
+			WhereClause += fmt::format(" and (timestamp < {}) ", LastDate);
+		}
+		uint64_t limit = (MaxRecords == 0) ? 0 : MaxRecords;
+		GetRecords(0, limit, Recs, WhereClause, " order by timestamp ASC ");
+		return true;
 	}
 
 } // namespace OpenWifi
@@ -204,6 +223,9 @@ void ORM::DB<OpenWifi::TimePointDBRecordType, OpenWifi::AnalyticsObjects::Device
 	Out.device_info =
 		OpenWifi::RESTAPI_utils::to_object<OpenWifi::AnalyticsObjects::DeviceInfo>(In.get<6>());
 	Out.serialNumber = In.get<7>();
+	Out.resource_data =
+		OpenWifi::RESTAPI_utils::to_object<OpenWifi::AnalyticsObjects::DeviceResourceTimePoint>(
+			In.get<8>());
 }
 
 template <>
@@ -217,4 +239,5 @@ void ORM::DB<OpenWifi::TimePointDBRecordType, OpenWifi::AnalyticsObjects::Device
 	Out.set<5>(OpenWifi::RESTAPI_utils::to_string(In.radio_data));
 	Out.set<6>(OpenWifi::RESTAPI_utils::to_string(In.device_info));
 	Out.set<7>(In.serialNumber);
+	Out.set<8>(OpenWifi::RESTAPI_utils::to_string(In.resource_data));
 }

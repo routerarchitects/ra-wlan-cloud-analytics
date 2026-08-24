@@ -69,6 +69,7 @@ namespace ORM {
 	struct Index {
 		std::string Name;
 		IndexEntryVec Entries;
+		bool Unique = false;
 	};
 	typedef std::vector<Index> IndexVec;
 
@@ -244,7 +245,7 @@ namespace ORM {
 					for (const auto &j : Indexes) {
 						std::string IndexLine;
 
-						IndexLine = std::string("CREATE INDEX IF NOT EXISTS ") + j.Name +
+						IndexLine = std::string(j.Unique ? "CREATE UNIQUE INDEX IF NOT EXISTS " : "CREATE INDEX IF NOT EXISTS ") + j.Name +
 									std::string(" ON ") + TableName_ + " (";
 						bool first_entry = true;
 						for (const auto &k : j.Entries) {
@@ -267,7 +268,7 @@ namespace ORM {
 						if (!firstIndex)
 							IndexLine += ", ";
 						firstIndex = false;
-						IndexLine += " INDEX " + j.Name + " ( ";
+						IndexLine += std::string(j.Unique ? " UNIQUE INDEX " : " INDEX ") + j.Name + " ( ";
 						bool first_entry = true;
 						for (const auto &k : j.Entries) {
 							auto IndexFieldName = Poco::toLower(k.FieldName);

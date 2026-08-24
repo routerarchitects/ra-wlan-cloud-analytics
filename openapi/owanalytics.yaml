@@ -1248,38 +1248,49 @@ components:
         Gateway free memory summary in bytes. Memory statistics are arithmetic aggregations of
         stored memory_free samples whose timestamps fall within the requested half-open window.
         They are not time-weighted. When samples exist, all values are nonnegative and satisfy
-        min_memfree <= avg_memfree <= max_memfree. When no valid memory samples exist, all three
-        fields are null.
+        min_memfree <= avg_memfree <= max_memfree. When no valid memory samples exist, all fields are null.
       required:
-        - requestedWindow
-        - observedWindow
-        - min_memfree
-        - max_memfree
-        - avg_memfree
+        - data
+        - meta
       properties:
-        requestedWindow:
-          $ref: '#/components/schemas/RequestedWindow'
-        observedWindow:
-          $ref: '#/components/schemas/ObservedWindow'
-        min_memfree:
-          type: integer
-          minimum: 0
-          maximum: 18446744073709551615
-          nullable: true
-          description: Minimum reported free memory in bytes for the requested aggregation window.
-        max_memfree:
-          type: integer
-          minimum: 0
-          maximum: 18446744073709551615
-          nullable: true
-          description: Maximum reported free memory in bytes for the requested aggregation window.
-        avg_memfree:
-          type: number
-          format: double
-          minimum: 0
-          maximum: 18446744073709551615
-          nullable: true
-          description: Arithmetic average of reported free-memory samples in bytes for the requested aggregation window.
+        data:
+          type: object
+          required:
+            - min_memfree
+            - max_memfree
+            - avg_memfree
+            - latest_memfree
+          properties:
+            min_memfree:
+              type: integer
+              minimum: 0
+              nullable: true
+              description: Minimum reported free memory in bytes for the requested aggregation window.
+            max_memfree:
+              type: integer
+              minimum: 0
+              nullable: true
+              description: Maximum reported free memory in bytes for the requested aggregation window.
+            avg_memfree:
+              type: integer
+              minimum: 0
+              nullable: true
+              description: Rounded integer average of reported free-memory samples in bytes for the requested aggregation window.
+            latest_memfree:
+              type: integer
+              minimum: 0
+              nullable: true
+              description: Free memory in bytes from the latest valid sample by timestamp in the requested aggregation window.
+        meta:
+          type: object
+          required:
+            - requestedWindow
+            - observedWindow
+          properties:
+            requestedWindow:
+              $ref: '#/components/schemas/RequestedWindow'
+            observedWindow:
+              $ref: '#/components/schemas/ObservedWindow'
 
     GatewayWifiTemperatureSummary:
       type: object
@@ -1288,72 +1299,75 @@ components:
         the dotted `2.4G` suffix to match the MCP API wire contract; clients should treat
         these as literal JSON keys, not property paths. Temperature statistics are arithmetic
         aggregations of valid radio temperature samples whose timestamps fall within the
-        requested half-open window. They are not time-weighted. For gateways with multiple
-        radios in the same band, all valid samples for that band are combined directly rather
-        than averaging each radio first. Null applies independently per band: a band returns
-        null min, max, and average values when that band has no valid temperature samples,
-        even if another band has samples. A valid radio temperature sample is a present,
-        finite Celsius value where -40 <= temperature <= 125. A reported 0°C value is valid
-        unless the persisted/resolved telemetry contract has wifiTempZeroIsUnavailable = true;
-        when no contract is available, the default is false. Missing, null, non-numeric, NaN,
-        infinite, conditionally unavailable 0°C values, 255, and out-of-range values are
-        excluded from aggregation.
+        requested half-open window. Null applies independently per band when that band has no valid
+        temperature samples. A valid radio temperature sample is a present Celsius value where
+        -40 <= temperature <= 125 and temperature != 255.
       required:
-        - requestedWindow
-        - observedWindow
-        - min_wifi_temp_2.4G
-        - max_wifi_temp_2.4G
-        - avg_wifi_temp_2.4G
-        - min_wifi_temp_5G
-        - max_wifi_temp_5G
-        - avg_wifi_temp_5G
+        - data
+        - meta
       properties:
-        requestedWindow:
-          $ref: '#/components/schemas/RequestedWindow'
-        observedWindow:
-          $ref: '#/components/schemas/ObservedWindow'
-        min_wifi_temp_2.4G:
-          type: number
-          format: double
-          minimum: -40
-          maximum: 125
-          nullable: true
-          description: Minimum reported 2.4 GHz Wi-Fi radio temperature in degrees Celsius for the effective aggregation window. Literal MCP JSON key; dotted suffix is required for compatibility.
-        max_wifi_temp_2.4G:
-          type: number
-          format: double
-          minimum: -40
-          maximum: 125
-          nullable: true
-          description: Maximum reported 2.4 GHz Wi-Fi radio temperature in degrees Celsius for the effective aggregation window. Literal MCP JSON key; dotted suffix is required for compatibility.
-        avg_wifi_temp_2.4G:
-          type: number
-          format: double
-          minimum: -40
-          maximum: 125
-          nullable: true
-          description: Arithmetic average of reported 2.4 GHz Wi-Fi radio temperature samples in degrees Celsius for the effective aggregation window. Literal MCP JSON key; dotted suffix is required for compatibility.
-        min_wifi_temp_5G:
-          type: number
-          format: double
-          minimum: -40
-          maximum: 125
-          nullable: true
-          description: Minimum reported 5 GHz Wi-Fi radio temperature in degrees Celsius for the effective aggregation window.
-        max_wifi_temp_5G:
-          type: number
-          format: double
-          minimum: -40
-          maximum: 125
-          nullable: true
-          description: Maximum reported 5 GHz Wi-Fi radio temperature in degrees Celsius for the effective aggregation window.
-        avg_wifi_temp_5G:
-          type: number
-          format: double
-          minimum: -40
-          maximum: 125
-          nullable: true
-          description: Arithmetic average of reported 5 GHz Wi-Fi radio temperature samples in degrees Celsius for the effective aggregation window.
+        data:
+          type: object
+          required:
+            - min_wifi_temp_2.4G
+            - max_wifi_temp_2.4G
+            - avg_wifi_temp_2.4G
+            - latest_wifi_temp_2.4G
+            - min_wifi_temp_5G
+            - max_wifi_temp_5G
+            - avg_wifi_temp_5G
+            - latest_wifi_temp_5G
+          properties:
+            min_wifi_temp_2.4G:
+              type: number
+              format: double
+              nullable: true
+              description: Minimum reported 2.4 GHz Wi-Fi radio temperature in degrees Celsius.
+            max_wifi_temp_2.4G:
+              type: number
+              format: double
+              nullable: true
+              description: Maximum reported 2.4 GHz Wi-Fi radio temperature in degrees Celsius.
+            avg_wifi_temp_2.4G:
+              type: number
+              format: double
+              nullable: true
+              description: Arithmetic average of reported 2.4 GHz Wi-Fi radio temperature samples rounded to 2 decimal places.
+            latest_wifi_temp_2.4G:
+              type: number
+              format: double
+              nullable: true
+              description: Latest reported 2.4 GHz Wi-Fi radio temperature sample by timestamp.
+            min_wifi_temp_5G:
+              type: number
+              format: double
+              nullable: true
+              description: Minimum reported 5 GHz Wi-Fi radio temperature in degrees Celsius.
+            max_wifi_temp_5G:
+              type: number
+              format: double
+              nullable: true
+              description: Maximum reported 5 GHz Wi-Fi radio temperature in degrees Celsius.
+            avg_wifi_temp_5G:
+              type: number
+              format: double
+              nullable: true
+              description: Arithmetic average of reported 5 GHz Wi-Fi radio temperature samples rounded to 2 decimal places.
+            latest_wifi_temp_5G:
+              type: number
+              format: double
+              nullable: true
+              description: Latest reported 5 GHz Wi-Fi radio temperature sample by timestamp.
+        meta:
+          type: object
+          required:
+            - requestedWindow
+            - observedWindow
+          properties:
+            requestedWindow:
+              $ref: '#/components/schemas/RequestedWindow'
+            observedWindow:
+              $ref: '#/components/schemas/ObservedWindow'
 
     ClientBandwidthConsumption:
       type: object
@@ -1361,10 +1375,7 @@ components:
         Per-client usage totals. Raw byte counters are authoritative; total_bytes is always
         rx_bytes + tx_bytes. Formatted string fields are display-only decimal megabytes using
         bytes / 1,000,000, formatted with standard floating point two decimal places
-        and the literal " MB" suffix. Wi-Fi usage is a cumulative-counter
-        differential summary calculated from valid persisted samples available to Analytics. The
-        implementation may use internal streams, sessions, boundary samples, reset detection, and
-        segments to calculate safe deltas, but those mechanics are not part of the public response.
+        and the literal " MB" suffix.
       required:
         - mac
         - rx_bytes
@@ -1379,72 +1390,65 @@ components:
         rx_bytes:
           type: integer
           minimum: 0
-          maximum: 18446744073709551615
         tx_bytes:
           type: integer
           minimum: 0
-          maximum: 18446744073709551615
         total_bytes:
           type: integer
           minimum: 0
-          maximum: 18446744073709551615
         data_consume_rx:
           type: string
-          description: Display-only decimal megabytes derived from rx_bytes / 1,000,000. Format using standard floating point two decimal places and the literal " MB" suffix. Use raw byte fields for calculations.
           example: 106.49 MB
         data_consume_tx:
           type: string
-          description: Display-only decimal megabytes derived from tx_bytes / 1,000,000. Format using standard floating point two decimal places and the literal " MB" suffix. Use raw byte fields for calculations.
           example: 3.85 MB
         total_data_usage:
           type: string
-          description: Display-only decimal megabytes derived from total_bytes / 1,000,000. Format using standard floating point two decimal places and the literal " MB" suffix. Use raw byte fields for calculations.
           example: 110.34 MB
+
     ClientBandwidthConsumptionResponse:
       type: object
       description: >
         Wrapped Wi-Fi usage differential summary calculated from persisted samples currently
-        available to Analytics. requestedWindow is the requested interval. observedWindow is the
-        earliest/latest persisted sample timestamp used by any returned client calculation, or
-        null/null when no valid sample contributes.
+        available to Analytics.
       required:
-        - requestedWindow
-        - observedWindow
-        - items
-        - totalClients
-        - truncated
+        - data
+        - meta
       properties:
-        requestedWindow:
-          $ref: '#/components/schemas/RequestedWindow'
-        observedWindow:
-          $ref: '#/components/schemas/ObservedWindow'
-        items:
-          type: array
-          maxItems: 500
-          description: >
-            Clients ordered by total_bytes descending. Clients with equal
-            total_bytes are ordered by normalized MAC address ascending.
-            Only the first 500 clients are returned.
-          items:
-            $ref: '#/components/schemas/ClientBandwidthConsumption'
-        totalClients:
-          type: integer
-          minimum: 0
-          description: Total number of distinct client MAC addresses having at least one in-window observation or proven session overlap during the requested interval [startTime, endTime), calculated before applying the 500-client limit. Outside-window samples may be used internally as boundary calculation aids for eligible clients.
-        truncated:
-          type: boolean
-          description: True when totalClients is greater than the number of returned items.
+        data:
+          type: object
+          required:
+            - items
+            - totalClients
+            - truncated
+          properties:
+            items:
+              type: array
+              maxItems: 500
+              items:
+                $ref: '#/components/schemas/ClientBandwidthConsumption'
+            totalClients:
+              type: integer
+              minimum: 0
+            truncated:
+              type: boolean
+        meta:
+          type: object
+          required:
+            - requestedWindow
+            - observedWindow
+          properties:
+            requestedWindow:
+              $ref: '#/components/schemas/RequestedWindow'
+            observedWindow:
+              $ref: '#/components/schemas/ObservedWindow'
 
     ClientRssiQuality:
       type: object
       description: >
-        Per-client RSSI quality percentages calculated from valid RSSI samples only. RSSI
+        Per-client RSSI quality percentages calculated from valid RSSI samples only (-127 <= RSSI < 0). RSSI
         categories use dBm thresholds: excellent is RSSI >= -55, good is -67 <= RSSI < -55,
-        fair is -75 <= RSSI < -67, and poor is RSSI < -75. RSSI values of 0, positive RSSI
-        values, values below -127, and missing RSSI values are excluded. Clients with no
-        valid RSSI samples are omitted. Percentages use valid samples as the denominator and
-        are independently rounded to two decimal places, so they may sum to slightly above
-        or below 100 because of rounding.
+        fair is -75 <= RSSI < -67, and poor is RSSI < -75.
       required:
         - mac
         - rssi_excellent_pct
@@ -1483,41 +1487,43 @@ components:
           type: integer
           format: int64
           minimum: 1
-          description: Number of valid RSSI samples used as the denominator for the percentage fields.
+          description: Number of valid RSSI samples used as denominator for percentages.
 
     ClientRssiQualityResponse:
       type: object
       description: >
-        Wrapped RSSI quality summary. requestedWindow is the requested interval. observedWindow is
-        derived from the earliest/latest valid persisted RSSI samples contributing to returned
-        items after applying the 500-client response limit. When no clients are returned, items is
-        empty, totalClients is 0, truncated is false, and observedWindow is null/null.
+        Wrapped RSSI quality summary.
       required:
-        - requestedWindow
-        - observedWindow
-        - items
-        - totalClients
-        - truncated
+        - data
+        - meta
       properties:
-        requestedWindow:
-          $ref: '#/components/schemas/RequestedWindow'
-        observedWindow:
-          $ref: '#/components/schemas/ObservedWindow'
-        items:
-          type: array
-          maxItems: 500
-          description: >
-            Clients ordered by normalized MAC address ascending.
-            Only the first 500 clients are returned.
-          items:
-            $ref: '#/components/schemas/ClientRssiQuality'
-        totalClients:
-          type: integer
-          minimum: 0
-          description: Total number of distinct client MAC addresses having at least one valid RSSI sample in the requested interval, calculated before applying the 500-client limit.
-        truncated:
-          type: boolean
-          description: True when totalClients is greater than the number of returned items.
+        data:
+          type: object
+          required:
+            - items
+            - totalClients
+            - truncated
+          properties:
+            items:
+              type: array
+              maxItems: 500
+              items:
+                $ref: '#/components/schemas/ClientRssiQuality'
+            totalClients:
+              type: integer
+              minimum: 0
+            truncated:
+              type: boolean
+        meta:
+          type: object
+          required:
+            - requestedWindow
+            - observedWindow
+          properties:
+            requestedWindow:
+              $ref: '#/components/schemas/RequestedWindow'
+            observedWindow:
+              $ref: '#/components/schemas/ObservedWindow'
 
     GatewayAvailabilityMeta:
       type: object
@@ -1951,26 +1957,32 @@ paths:
               examples:
                 withSamples:
                   value:
-                    requestedWindow:
-                      startTime: "2026-07-26T12:00:00Z"
-                      endTime: "2026-07-27T12:00:00Z"
-                    observedWindow:
-                      startTime: "2026-07-26T12:03:00Z"
-                      endTime: "2026-07-27T11:57:00Z"
-                    min_memfree: 211374
-                    max_memfree: 215050
-                    avg_memfree: 212074.36
+                    data:
+                      avg_memfree: 27083337
+                      max_memfree: 36204544
+                      min_memfree: 21196800
+                      latest_memfree: 25731072
+                    meta:
+                      requestedWindow:
+                        startTime: "2026-07-26T12:00:00Z"
+                        endTime: "2026-07-27T12:00:00Z"
+                      observedWindow:
+                        startTime: "2026-07-26T12:03:00Z"
+                        endTime: "2026-07-27T11:57:00Z"
                 noSamples:
                   value:
-                    requestedWindow:
-                      startTime: "2026-07-26T12:00:00Z"
-                      endTime: "2026-07-27T12:00:00Z"
-                    observedWindow:
-                      startTime: null
-                      endTime: null
-                    min_memfree: null
-                    max_memfree: null
-                    avg_memfree: null
+                    data:
+                      avg_memfree: null
+                      max_memfree: null
+                      min_memfree: null
+                      latest_memfree: null
+                    meta:
+                      requestedWindow:
+                        startTime: "2026-07-26T12:00:00Z"
+                        endTime: "2026-07-27T12:00:00Z"
+                      observedWindow:
+                        startTime: null
+                        endTime: null
         400:
           $ref: '#/components/responses/CommonAnalyticsBadRequest'
         401:
@@ -2008,18 +2020,22 @@ paths:
               examples:
                 withSamples:
                   value:
-                    requestedWindow:
-                      startTime: "2026-07-26T12:00:00Z"
-                      endTime: "2026-07-27T12:00:00Z"
-                    observedWindow:
-                      startTime: "2026-07-26T12:04:00Z"
-                      endTime: "2026-07-27T11:55:00Z"
-                    min_wifi_temp_2.4G: 62
-                    max_wifi_temp_2.4G: 70
-                    avg_wifi_temp_2.4G: 66.64
-                    min_wifi_temp_5G: 56
-                    max_wifi_temp_5G: 65
-                    avg_wifi_temp_5G: 60.38
+                    data:
+                      avg_wifi_temp_2.4G: 54.77
+                      avg_wifi_temp_5G: 54.77
+                      max_wifi_temp_2.4G: 55
+                      max_wifi_temp_5G: 55
+                      min_wifi_temp_2.4G: 53
+                      min_wifi_temp_5G: 53
+                      latest_wifi_temp_2.4G: 55
+                      latest_wifi_temp_5G: 54
+                    meta:
+                      requestedWindow:
+                        startTime: "2026-07-26T12:00:00Z"
+                        endTime: "2026-07-27T12:00:00Z"
+                      observedWindow:
+                        startTime: "2026-07-26T12:04:00Z"
+                        endTime: "2026-07-27T11:55:00Z"
         400:
           $ref: '#/components/responses/TemperatureAnalyticsBadRequest'
         401:
@@ -2059,22 +2075,24 @@ paths:
               examples:
                 withClients:
                   value:
-                    requestedWindow:
-                      startTime: "2026-07-26T12:00:00Z"
-                      endTime: "2026-07-27T12:00:00Z"
-                    observedWindow:
-                      startTime: "2026-07-26T11:55:00Z"
-                      endTime: "2026-07-27T12:05:00Z"
-                    items:
-                      - mac: "e2:51:95:ed:0f:28"
-                        rx_bytes: 106487500
-                        tx_bytes: 3851250
-                        total_bytes: 110338750
-                        data_consume_rx: "106.49 MB"
-                        data_consume_tx: "3.85 MB"
-                        total_data_usage: "110.34 MB"
-                    totalClients: 1
-                    truncated: false
+                    data:
+                      items:
+                        - mac: "8e:6b:b3:60:57:68"
+                          rx_bytes: 1819418
+                          tx_bytes: 35208143
+                          total_bytes: 37027561
+                          data_consume_rx: "1.82 MB"
+                          data_consume_tx: "35.21 MB"
+                          total_data_usage: "37.03 MB"
+                      totalClients: 1
+                      truncated: false
+                    meta:
+                      requestedWindow:
+                        startTime: "2026-07-26T12:00:00Z"
+                        endTime: "2026-07-27T12:00:00Z"
+                      observedWindow:
+                        startTime: "2026-07-26T11:55:00Z"
+                        endTime: "2026-07-27T12:05:00Z"
         400:
           $ref: '#/components/responses/CommonAnalyticsBadRequest'
         401:
@@ -2112,32 +2130,36 @@ paths:
               examples:
                 withClients:
                   value:
-                    requestedWindow:
-                      startTime: "2026-07-26T12:00:00Z"
-                      endTime: "2026-07-27T12:00:00Z"
-                    observedWindow:
-                      startTime: "2026-07-26T12:01:00Z"
-                      endTime: "2026-07-27T11:58:00Z"
-                    items:
-                      - mac: "e2:51:95:ed:0f:28"
-                        rssi_excellent_pct: 41.67
-                        rssi_good_pct: 50.0
-                        rssi_fair_pct: 1.67
-                        rssi_poor_pct: 6.67
-                        rssi_total_samples: 60
-                    totalClients: 1
-                    truncated: false
+                    data:
+                      items:
+                        - mac: "88:46:04:b6:81:56"
+                          rssi_excellent_pct: 100
+                          rssi_good_pct: 0
+                          rssi_fair_pct: 0
+                          rssi_poor_pct: 0
+                          rssi_total_samples: 26
+                      totalClients: 1
+                      truncated: false
+                    meta:
+                      requestedWindow:
+                        startTime: "2026-07-26T12:00:00Z"
+                        endTime: "2026-07-27T12:00:00Z"
+                      observedWindow:
+                        startTime: "2026-07-26T12:01:00Z"
+                        endTime: "2026-07-27T11:58:00Z"
                 noResults:
                   value:
-                    requestedWindow:
-                      startTime: "2026-07-26T12:00:00Z"
-                      endTime: "2026-07-27T12:00:00Z"
-                    observedWindow:
-                      startTime: null
-                      endTime: null
-                    items: []
-                    totalClients: 0
-                    truncated: false
+                    data:
+                      items: []
+                      totalClients: 0
+                      truncated: false
+                    meta:
+                      requestedWindow:
+                        startTime: "2026-07-26T12:00:00Z"
+                        endTime: "2026-07-27T12:00:00Z"
+                      observedWindow:
+                        startTime: null
+                        endTime: null
         400:
           $ref: '#/components/responses/CommonAnalyticsBadRequest'
         401:
@@ -2499,6 +2521,156 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         404:
           $ref: '#/components/responses/NotFound'
+
+  /devices/{routerId}/memory-summary:
+    get:
+      tags:
+        - MCP Analytics
+      summary: Retrieve gateway memory free summary
+      operationId: getGatewayFreeMemory
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RouterIdPath'
+        - $ref: '#/components/parameters/TimestampTill'
+        - $ref: '#/components/parameters/LookbackHours'
+      responses:
+        200:
+          description: Memory summary response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayMemorySummary'
+        400:
+          $ref: '#/components/responses/CommonAnalyticsBadRequest'
+        401:
+          $ref: '#/components/responses/AnalyticsUnauthorized'
+        404:
+          $ref: '#/components/responses/AnalyticsNotFound'
+        409:
+          $ref: '#/components/responses/AnalyticsConflict'
+        502:
+          $ref: '#/components/responses/AnalyticsBadGateway'
+
+  /devices/{routerId}/radio-temperature-summary:
+    get:
+      tags:
+        - MCP Analytics
+      summary: Retrieve gateway radio temperature summary
+      operationId: getGatewayWifiTemp
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RouterIdPath'
+        - $ref: '#/components/parameters/TimestampTill'
+        - $ref: '#/components/parameters/LookbackHours'
+      responses:
+        200:
+          description: Radio temperature summary response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayWifiTemperatureSummary'
+        400:
+          $ref: '#/components/responses/TemperatureAnalyticsBadRequest'
+        401:
+          $ref: '#/components/responses/AnalyticsUnauthorized'
+        404:
+          $ref: '#/components/responses/AnalyticsNotFound'
+        409:
+          $ref: '#/components/responses/AnalyticsConflict'
+        502:
+          $ref: '#/components/responses/AnalyticsBadGateway'
+
+  /devices/{routerId}/wifi-clients/usage-summary:
+    get:
+      tags:
+        - MCP Analytics
+      summary: Retrieve Wi-Fi client bandwidth usage summary
+      operationId: getDeviceBandwidthConsumption
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RouterIdPath'
+        - $ref: '#/components/parameters/TimestampTill'
+        - $ref: '#/components/parameters/LookbackHours'
+      responses:
+        200:
+          description: Wi-Fi client usage summary response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientBandwidthConsumptionResponse'
+        400:
+          $ref: '#/components/responses/CommonAnalyticsBadRequest'
+        401:
+          $ref: '#/components/responses/AnalyticsUnauthorized'
+        404:
+          $ref: '#/components/responses/AnalyticsNotFound'
+        409:
+          $ref: '#/components/responses/AnalyticsConflict'
+        502:
+          $ref: '#/components/responses/AnalyticsBadGateway'
+
+  /devices/{routerId}/wifi-clients/rssi-summary:
+    get:
+      tags:
+        - MCP Analytics
+      summary: Retrieve Wi-Fi client RSSI quality summary
+      operationId: getDeviceRssiQuality
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RouterIdPath'
+        - $ref: '#/components/parameters/TimestampTill'
+        - $ref: '#/components/parameters/LookbackHours'
+      responses:
+        200:
+          description: Wi-Fi client RSSI summary response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClientRssiQualityResponse'
+        400:
+          $ref: '#/components/responses/CommonAnalyticsBadRequest'
+        401:
+          $ref: '#/components/responses/AnalyticsUnauthorized'
+        404:
+          $ref: '#/components/responses/AnalyticsNotFound'
+        409:
+          $ref: '#/components/responses/AnalyticsConflict'
+        502:
+          $ref: '#/components/responses/AnalyticsBadGateway'
+
+  /devices/{routerId}/availability-summary:
+    get:
+      tags:
+        - MCP Analytics
+      summary: Retrieve gateway availability summary
+      operationId: getGatewayOfflineCount
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RouterIdPath'
+        - $ref: '#/components/parameters/TimestampTill'
+        - $ref: '#/components/parameters/LookbackHours'
+      responses:
+        200:
+          description: Availability summary response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GatewayAvailabilitySummaryResponse'
+        400:
+          $ref: '#/components/responses/AvailabilityAnalyticsBadRequest'
+        401:
+          $ref: '#/components/responses/AnalyticsUnauthorized'
+        404:
+          $ref: '#/components/responses/AnalyticsNotFound'
+        409:
+          $ref: '#/components/responses/AnalyticsConflict'
+        502:
+          $ref: '#/components/responses/AnalyticsBadGateway'
 
   #########################################################################################
   ##

@@ -14,6 +14,7 @@
 #include "Poco/Util/Option.h"
 #include "framework/OpenWifiTypes.h"
 
+#include "AvailabilityProcessor.h"
 #include "DeviceStatusReceiver.h"
 #include "HealthReceiver.h"
 #include "StateReceiver.h"
@@ -32,6 +33,7 @@ namespace OpenWifi {
 								   SubSystemVec{OpenWifi::StorageService(), StateReceiver(),
 												DeviceStatusReceiver(), HealthReceiver(),
 												VenueCoordinator(), WifiClientCache(),
+												AvailabilityProcessorService(),
 												UI_WebSocketClientServer()});
 		}
 		return instance_;

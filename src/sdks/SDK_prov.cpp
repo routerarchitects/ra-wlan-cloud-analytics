@@ -81,20 +81,33 @@ namespace OpenWifi::SDK::Prov {
 	namespace Device {
 		bool Get(RESTAPIHandler *client, const std::string &Mac,
 				 ProvObjects::InventoryTag &Device) {
+			return GetWithStatus(client, Mac, Device) == Poco::Net::HTTPServerResponse::HTTP_OK;
+		}
+
+		Poco::Net::HTTPResponse::HTTPStatus GetWithStatus(RESTAPIHandler *client, const std::string &Mac,
+														   ProvObjects::InventoryTag &Device,
+														   const std::string &token) {
 			std::string EndPoint = "/api/v1/inventory/" + Mac;
 
 			auto API = OpenAPIRequestGet(uSERVICE_PROVISIONING, EndPoint, {}, 60000);
 			auto CallResponse = Poco::makeShared<Poco::JSON::Object>();
 
-			auto ResponseStatus = API.Do(CallResponse, client->UserInfo_.webtoken.access_token_);
+			std::string AuthToken = token;
+			if (AuthToken.empty() && client != nullptr) {
+				AuthToken = client->UserInfo_.webtoken.access_token_;
+			}
+
+			auto ResponseStatus = API.Do(CallResponse, AuthToken);
 			if (ResponseStatus == Poco::Net::HTTPServerResponse::HTTP_OK) {
 				try {
-					return Device.from_json(CallResponse);
+					if (Device.from_json(CallResponse)) {
+						return Poco::Net::HTTPServerResponse::HTTP_OK;
+					}
 				} catch (...) {
-					return false;
+					return Poco::Net::HTTPServerResponse::HTTP_INTERNAL_SERVER_ERROR;
 				}
 			}
-			return false;
+			return ResponseStatus;
 		}
 	} // namespace Device
 

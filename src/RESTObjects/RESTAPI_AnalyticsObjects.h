@@ -186,8 +186,19 @@ namespace OpenWifi {
 			uint64_t active_ms = 0, busy_ms = 0, receive_ms = 0, transmit_ms = 0, tx_power = 0,
 					 channel = 0;
 			int64_t temperature = 0, noise = 0;
+			std::optional<int64_t> wifi_temp;
 
 			double active_pct = 0.0, busy_pct = 0.0, receive_pct = 0.0, transmit_pct = 0.0;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+			bool from_json(const Poco::JSON::Object::Ptr &Obj);
+		};
+
+		struct DeviceResourceTimePoint {
+			std::optional<uint64_t> memory_free;
+			std::optional<uint64_t> memory_total;
+			std::optional<uint64_t> memory_cached;
+			std::optional<uint64_t> memory_buffered;
 
 			void to_json(Poco::JSON::Object &Obj) const;
 			bool from_json(const Poco::JSON::Object::Ptr &Obj);
@@ -202,6 +213,7 @@ namespace OpenWifi {
 			std::vector<RadioTimePoint> radio_data;
 			AnalyticsObjects::DeviceInfo device_info;
 			std::string serialNumber;
+			DeviceResourceTimePoint resource_data;
 
 			void to_json(Poco::JSON::Object &Obj) const;
 			bool from_json(const Poco::JSON::Object::Ptr &Obj);
@@ -344,6 +356,133 @@ namespace OpenWifi {
 
 			void to_json(Poco::JSON::Object &Obj) const;
 			bool from_json(const Poco::JSON::Object::Ptr &Obj);
+		};
+
+		struct MCPRequestedWindow {
+			std::string startTime;
+			std::string endTime;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+		};
+
+		struct MCPObservedWindow {
+			std::optional<std::string> startTime;
+			std::optional<std::string> endTime;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+		};
+
+		struct MCPMetaWindow {
+			MCPRequestedWindow requestedWindow;
+			MCPObservedWindow observedWindow;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+		};
+
+		struct MCPGatewayMemorySummary {
+			struct Data {
+				std::optional<uint64_t> min_memfree;
+				std::optional<uint64_t> max_memfree;
+				std::optional<uint64_t> avg_memfree;
+				std::optional<uint64_t> latest_memfree;
+
+				void to_json(Poco::JSON::Object &Obj) const;
+			} data;
+
+			MCPMetaWindow meta;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+		};
+
+		struct MCPRadioTempSummary {
+			struct Data {
+				std::optional<double> min_wifi_temp_2_4G;
+				std::optional<double> max_wifi_temp_2_4G;
+				std::optional<double> avg_wifi_temp_2_4G;
+				std::optional<double> latest_wifi_temp_2_4G;
+
+				std::optional<double> min_wifi_temp_5G;
+				std::optional<double> max_wifi_temp_5G;
+				std::optional<double> avg_wifi_temp_5G;
+				std::optional<double> latest_wifi_temp_5G;
+
+				void to_json(Poco::JSON::Object &Obj) const;
+			} data;
+
+			MCPMetaWindow meta;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+		};
+
+		struct MCPClientUsageItem {
+			std::string mac;
+			uint64_t rx_bytes = 0;
+			uint64_t tx_bytes = 0;
+			uint64_t total_bytes = 0;
+			std::string data_consume_rx;
+			std::string data_consume_tx;
+			std::string total_data_usage;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+		};
+
+		struct MCPClientUsageSummary {
+			struct Data {
+				std::vector<MCPClientUsageItem> items;
+				uint64_t totalClients = 0;
+				bool truncated = false;
+
+				void to_json(Poco::JSON::Object &Obj) const;
+			} data;
+
+			MCPMetaWindow meta;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+		};
+
+		struct MCPClientRssiItem {
+			std::string mac;
+			double rssi_excellent_pct = 0.0;
+			double rssi_good_pct = 0.0;
+			double rssi_fair_pct = 0.0;
+			double rssi_poor_pct = 0.0;
+			uint64_t rssi_total_samples = 0;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+		};
+
+		struct MCPClientRssiSummary {
+			struct Data {
+				std::vector<MCPClientRssiItem> items;
+				uint64_t totalClients = 0;
+				bool truncated = false;
+
+				void to_json(Poco::JSON::Object &Obj) const;
+			} data;
+
+			MCPMetaWindow meta;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+		};
+
+		struct MCPAvailabilitySummary {
+			struct Meta {
+				MCPRequestedWindow requestedWindow;
+				MCPObservedWindow observedWindow;
+				uint64_t offlineEventCount = 0;
+
+				void to_json(Poco::JSON::Object &Obj) const;
+			} meta;
+
+			struct Data {
+				std::string fetch_status = "success";
+				std::string gw_uuid;
+				uint64_t offline_count = 0;
+
+				void to_json(Poco::JSON::Object &Obj) const;
+			} data;
+
+			void to_json(Poco::JSON::Object &Obj) const;
 		};
 
 	} // namespace AnalyticsObjects
