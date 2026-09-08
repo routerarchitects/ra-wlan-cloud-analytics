@@ -43,6 +43,7 @@ find_package(ZLIB       REQUIRED)
 find_package(Poco       REQUIRED COMPONENTS Crypto JWT Net Util NetSSL Data DataSQLite)
 find_package(nlohmann_json  REQUIRED)
 find_package(fmt        REQUIRED)
+include(CTest)
 
 if(SMALL_BUILD)
     find_package(Poco REQUIRED COMPONENTS Crypto JWT Net Util NetSSL Data DataSQLite)
@@ -124,6 +125,10 @@ add_executable(owanalytics
         src/RESTObjects/RESTAPI_OWLSobjects.cpp src/RESTObjects/RESTAPI_OWLSobjects.h
         src/RESTObjects/RESTAPI_ProvObjects.cpp src/RESTObjects/RESTAPI_ProvObjects.h
         src/RESTObjects/RESTAPI_AnalyticsObjects.cpp src/RESTObjects/RESTAPI_AnalyticsObjects.h
+        src/RESTObjects/RESTAPI_MCPAnalyticsObjects.cpp
+        src/RESTAPI/RESTAPI_mcp_helpers.cpp src/RESTAPI/RESTAPI_mcp_helpers.h
+        src/RESTAPI/RESTAPI_device_memory_summary_handler.cpp src/RESTAPI/RESTAPI_device_memory_summary_handler.h
+        src/RouterIdResolver.cpp src/RouterIdResolver.h
         src/RESTObjects/RESTAPI_SubObjects.cpp src/RESTObjects/RESTAPI_SubObjects.h
         src/RESTAPI/RESTAPI_routers.cpp
         src/Daemon.cpp src/Daemon.h
@@ -159,3 +164,13 @@ target_link_libraries(owanalytics PUBLIC
                         CppKafka::cppkafka
 )
 
+if(BUILD_TESTING)
+    add_executable(test_mcp_memory_summary
+            tests/test_mcp_memory_summary.cpp
+            src/RESTObjects/RESTAPI_MCPAnalyticsObjects.cpp)
+    target_include_directories(test_mcp_memory_summary PRIVATE src)
+    target_link_libraries(test_mcp_memory_summary PUBLIC
+            ${Poco_LIBRARIES}
+            fmt::fmt)
+    add_test(NAME test_mcp_memory_summary COMMAND test_mcp_memory_summary)
+endif()

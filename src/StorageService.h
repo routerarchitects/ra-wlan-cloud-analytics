@@ -13,6 +13,8 @@
 #include "storage/storage_timepoints.h"
 #include "storage/storage_wificlients.h"
 
+#include <mutex>
+
 namespace OpenWifi {
 	class Storage : public StorageClass, Poco::Runnable {
 	  public:
@@ -28,12 +30,14 @@ namespace OpenWifi {
 		auto &BoardsDB() { return *BoardsDB_; };
 		auto &TimePointsDB() { return *TimePointsDB_; };
 		auto &WifiClientHistoryDB() { return *WifiClientHistoryDB_; };
+		auto &BoardCreateMutex() { return BoardCreateMutex_; };
 		void onTimer(Poco::Timer &timer);
 
 	  private:
 		std::unique_ptr<OpenWifi::BoardsDB> BoardsDB_;
 		std::unique_ptr<OpenWifi::TimePointDB> TimePointsDB_;
 		std::unique_ptr<OpenWifi::WifiClientHistoryDB> WifiClientHistoryDB_;
+		std::mutex BoardCreateMutex_;
 		Poco::Thread Updater_;
 		std::atomic_bool Running_ = false;
 		Poco::Timer Timer_;

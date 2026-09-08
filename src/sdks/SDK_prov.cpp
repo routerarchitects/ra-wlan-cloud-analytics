@@ -79,22 +79,37 @@ namespace OpenWifi::SDK::Prov {
 	} // namespace Venue
 
 	namespace Device {
-		bool Get(RESTAPIHandler *client, const std::string &Mac,
-				 ProvObjects::InventoryTag &Device) {
+		namespace {
+			FetchResult ParseInventoryResponse(Poco::Net::HTTPResponse::HTTPStatus Status,
+											   const Poco::JSON::Object::Ptr &Response,
+											   ProvObjects::InventoryTag &Device) {
+				try {
+					return ClassifyFetchOutcome(Status, Device.from_json(Response));
+				} catch (...) {
+				}
+				return ClassifyFetchOutcome(Status, false);
+			}
+		}
+
+		FetchResult GetWithStatus(RESTAPIHandler *client, const std::string &Mac,
+								   ProvObjects::InventoryTag &Device,
+								   Poco::Net::HTTPResponse::HTTPStatus &Status) {
 			std::string EndPoint = "/api/v1/inventory/" + Mac;
 
 			auto API = OpenAPIRequestGet(uSERVICE_PROVISIONING, EndPoint, {}, 60000);
 			auto CallResponse = Poco::makeShared<Poco::JSON::Object>();
 
 			auto ResponseStatus = API.Do(CallResponse, client->UserInfo_.webtoken.access_token_);
-			if (ResponseStatus == Poco::Net::HTTPServerResponse::HTTP_OK) {
-				try {
-					return Device.from_json(CallResponse);
-				} catch (...) {
-					return false;
-				}
-			}
-			return false;
+			Status = static_cast<Poco::Net::HTTPResponse::HTTPStatus>(ResponseStatus);
+			if (ResponseStatus == Poco::Net::HTTPServerResponse::HTTP_OK)
+				return ParseInventoryResponse(Status, CallResponse, Device);
+			return FetchResult::HttpFailure;
+		}
+
+		bool Get(RESTAPIHandler *client, const std::string &Mac,
+				 ProvObjects::InventoryTag &Device) {
+			Poco::Net::HTTPResponse::HTTPStatus Status;
+			return GetWithStatus(client, Mac, Device, Status) == FetchResult::Success;
 		}
 	} // namespace Device
 

@@ -7,10 +7,32 @@
 
 #include "framework/ALBserver.h"
 
+#include "Poco/Environment.h"
+#include "Poco/String.h"
+
+#include <algorithm>
+
 namespace OpenWifi {
 	const std::string &MicroServiceDataDirectory() { return MicroService::instance().DataDir(); }
 
 	Types::MicroServiceMetaVec MicroServiceGetServices(const std::string &Type) {
+		if (Poco::Environment::get("CI_FAKE_EXTERNAL_SERVICES", "") == "1") {
+			std::string EnvName = "FAKE_EXTERNAL_SERVICE_" + Poco::toUpper(Type);
+			std::replace(EnvName.begin(), EnvName.end(), '-', '_');
+
+			auto OverrideUrl = Poco::Environment::get(EnvName, "");
+			if (!OverrideUrl.empty()) {
+				Types::MicroServiceMeta Meta;
+				Meta.Type = Type;
+				Meta.PrivateEndPoint = OverrideUrl;
+				Meta.PublicEndPoint = OverrideUrl;
+				Meta.AccessKey = "ci-fake-key";
+				Meta.Version = "ci-fake";
+
+				return {Meta};
+			}
+		}
+
 		return MicroService::instance().GetServices(Type);
 	}
 

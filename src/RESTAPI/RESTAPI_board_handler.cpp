@@ -6,6 +6,12 @@
 #include "VenueCoordinator.h"
 
 namespace OpenWifi {
+	namespace {
+		bool HasExactlyOneVenue(const AnalyticsObjects::BoardInfo &Board) {
+			return Board.venueList.size() == 1 && !Board.venueList[0].id.empty();
+		}
+	} // namespace
+
 	void RESTAPI_board_handler::DoGet() {
 		auto id = GetBinding("id", "");
 		if (id.empty()) {
@@ -49,18 +55,32 @@ namespace OpenWifi {
 		if (!NewObject.from_json(RawObject)) {
 			return BadRequest(RESTAPI::Errors::InvalidJSONDocument);
 		}
+		if (!HasExactlyOneVenue(NewObject)) {
+			return BadRequest(RESTAPI::Errors::VenueMustExist);
+		}
 
 		ProvObjects::CreateObjectInfo(RawObject, UserInfo_.userinfo, NewObject.info);
 
-		if (StorageService()->BoardsDB().CreateRecord(NewObject)) {
-			VenueCoordinator()->AddBoard(NewObject.info.id);
-			AnalyticsObjects::BoardInfo NewBoard;
-			StorageService()->BoardsDB().GetRecord("id", NewObject.info.id, NewBoard);
-			Poco::JSON::Object Answer;
-			NewBoard.to_json(Answer);
-			return ReturnObject(Answer);
+		{
+			std::lock_guard<std::mutex> Guard(StorageService()->BoardCreateMutex());
+
+			std::vector<AnalyticsObjects::BoardInfo> ExistingBoards;
+			if (!StorageService()->BoardsDB().FindBoardsByVenue(NewObject.venueList[0].id, ExistingBoards))
+				return InternalError(RESTAPI::Errors::RecordNotCreated);
+			if (!ExistingBoards.empty())
+				return BadRequest(RESTAPI::Errors::RecordNotCreated,
+								  "Venue is already assigned to another board");
+
+			if (!StorageService()->BoardsDB().CreateRecord(NewObject))
+				return InternalError(RESTAPI::Errors::RecordNotCreated);
 		}
-		return InternalError(RESTAPI::Errors::RecordNotCreated);
+
+		VenueCoordinator()->AddBoard(NewObject.info.id);
+		AnalyticsObjects::BoardInfo NewBoard;
+		StorageService()->BoardsDB().GetRecord("id", NewObject.info.id, NewBoard);
+		Poco::JSON::Object Answer;
+		NewBoard.to_json(Answer);
+		return ReturnObject(Answer);
 	}
 
 	void RESTAPI_board_handler::DoPut() {
@@ -83,8 +103,15 @@ namespace OpenWifi {
 		ProvObjects::UpdateObjectInfo(RawObject, UserInfo_.userinfo, Existing.info);
 
 		if (RawObject->has("venueList")) {
-			if (NewObject.venueList.empty()) {
+			if (!HasExactlyOneVenue(NewObject)) {
 				return BadRequest(RESTAPI::Errors::VenueMustExist);
+			}
+			if (!HasExactlyOneVenue(Existing)) {
+				return BadRequest(RESTAPI::Errors::VenueMustExist);
+			}
+			if (NewObject.venueList[0].id != Existing.venueList[0].id) {
+				return BadRequest(RESTAPI::Errors::RecordNotUpdated,
+								  "Venue reassignment is not supported");
 			}
 			Existing.venueList = NewObject.venueList;
 		}

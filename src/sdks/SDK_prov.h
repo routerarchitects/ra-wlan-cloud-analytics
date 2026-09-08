@@ -18,8 +18,23 @@ namespace OpenWifi::SDK::Prov {
 	} // namespace Venue
 
 	namespace Device {
-		bool Get(RESTAPIHandler *client, const std::string &Mac,
-				 ProvObjects::InventoryTagList &Device);
+		enum class FetchResult {
+			Success,
+			HttpFailure,
+			InvalidResponse
+		};
+
+		inline FetchResult ClassifyFetchOutcome(Poco::Net::HTTPResponse::HTTPStatus Status,
+												bool Parsed) {
+			if (Status == Poco::Net::HTTPResponse::HTTP_OK)
+				return Parsed ? FetchResult::Success : FetchResult::InvalidResponse;
+			return FetchResult::HttpFailure;
+		}
+
+		bool Get(RESTAPIHandler *client, const std::string &Mac, ProvObjects::InventoryTag &Device);
+		FetchResult GetWithStatus(RESTAPIHandler *client, const std::string &Mac,
+								   ProvObjects::InventoryTag &Device,
+								   Poco::Net::HTTPResponse::HTTPStatus &Status);
 		bool SetConfiguration(RESTAPIHandler *client, const std::string &Mac,
 							  const std::string &ConfigUUID);
 	} // namespace Device

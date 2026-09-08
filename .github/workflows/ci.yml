@@ -10,93 +10,436 @@ on:
       - 'release/*'
     tags:
       - 'v*'
+
   pull_request:
     branches:
       - main
+      - 'release/*'
 
 defaults:
   run:
     shell: bash
 
 jobs:
+
+  # ---------------------------------------------------------------------------
+  # Build and publish OWAnalytics Docker image
+  # ---------------------------------------------------------------------------
   docker:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
+
     env:
       DOCKER_REGISTRY_URL: tip-tip-wlan-cloud-ucentral.jfrog.io
       DOCKER_REGISTRY_USERNAME: ucentral
+
     steps:
-    - name: Checkout actions repo
-      uses: actions/checkout@v3
-      with:
-        repository: Telecominfraproject/.github
-        path: github
+      - name: Checkout actions repo
+        uses: actions/checkout@v3
+        with:
+          repository: Telecominfraproject/.github
+          path: github
 
-    - name: Build and push Docker image
-      uses: ./github/composite-actions/docker-image-build
-      with:
-        image_name: owanalytics
-        registry: tip-tip-wlan-cloud-ucentral.jfrog.io
-        registry_user: ucentral
-        registry_password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+      - name: Build and push Docker image
+        uses: ./github/composite-actions/docker-image-build
+        with:
+          image_name: owanalytics
+          registry: tip-tip-wlan-cloud-ucentral.jfrog.io
+          registry_user: ucentral
+          registry_password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
 
-    - name: Notify on failure via Slack
-      if: failure() && github.ref == 'refs/heads/main'
-      uses: rtCamp/action-slack-notify@v2
-      env:
-        SLACK_USERNAME: GitHub Actions failure notifier
-        SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
-        SLACK_COLOR: "${{ job.status }}"
-        SLACK_ICON: https://raw.githubusercontent.com/quintessence/slack-icons/master/images/github-logo-slack-icon.png
-        SLACK_TITLE: Docker build failed for OWAnalytics service
+      - name: Notify on failure via Slack
+        if: failure() && github.ref == 'refs/heads/main'
+        uses: rtCamp/action-slack-notify@v2
+        env:
+          SLACK_USERNAME: GitHub Actions failure notifier
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+          SLACK_COLOR: "${{ job.status }}"
+          SLACK_ICON: https://raw.githubusercontent.com/quintessence/slack-icons/master/images/github-logo-slack-icon.png
+          SLACK_TITLE: Docker build failed for OWAnalytics service
 
+
+  # ---------------------------------------------------------------------------
+  # MCP Memory Summary Integration Tests
+  # ---------------------------------------------------------------------------
+  memory-summary-tests:
+    runs-on: ubuntu-latest
+
+    env:
+      OWANALYTICS_TEST_IMAGE: owanalytics-ci:test
+      OWANALYTICS_TEST_BUILD_IMAGE: owanalytics-build-ci:test
+
+    services:
+      postgres:
+        image: postgres:13
+
+        env:
+          POSTGRES_DB: owanalytics
+          POSTGRES_USER: owanalytics
+          POSTGRES_PASSWORD: owanalytics
+
+        ports:
+          - 5432:5432
+
+        options: >-
+          --health-cmd "pg_isready -U owanalytics -d owanalytics"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+
+      # -----------------------------------------------------------------------
+      # Build C++ build/test image
+      #
+      # IMPORTANT:
+      # Build the real Dockerfile directly.
+      # Do not dynamically rewrite apt commands from CI.
+      # -----------------------------------------------------------------------
+      - name: Build Analytics C++ test image
+        run: |
+          docker build \
+            --pull \
+            --build-arg DEBIAN_VERSION=12-slim \
+            --target owanalytics-build \
+            --tag "$OWANALYTICS_TEST_BUILD_IMAGE" \
+            .
+
+
+      # Enable this once all C++ test targets in the image are expected to run.
+      #
+      # - name: Run C++ unit tests
+      #   run: |
+      #     docker run --rm "$OWANALYTICS_TEST_BUILD_IMAGE" \
+      #       ctest \
+      #       --test-dir /owanalytics/cmake-build \
+      #       --output-on-failure
+
+
+      # -----------------------------------------------------------------------
+      # Build runtime image used by the API integration tests
+      # -----------------------------------------------------------------------
+      - name: Build Analytics runtime image
+        run: |
+          docker build \
+            --pull \
+            --build-arg DEBIAN_VERSION=12-slim \
+            --tag "$OWANALYTICS_TEST_IMAGE" \
+            .
+
+
+      # -----------------------------------------------------------------------
+      # Python dependencies
+      # -----------------------------------------------------------------------
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install pytest dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            pytest \
+            psycopg2-binary
+
+
+      # -----------------------------------------------------------------------
+      # Fake external services
+      # -----------------------------------------------------------------------
+      - name: Start Fake OWSEC
+        run: |
+          nohup python3 test_scripts/fakes/fake_owsec_service.py \
+            --host 127.0.0.1 \
+            --port 18080 \
+            </dev/null \
+            > /tmp/fake-owsec.log 2>&1 &
+
+          echo $! > /tmp/fake-owsec.pid
+
+          for i in $(seq 1 20); do
+            if ! kill -0 "$(cat /tmp/fake-owsec.pid)" 2>/dev/null; then
+              echo "Fake OWSEC exited unexpectedly"
+              cat /tmp/fake-owsec.log || true
+              exit 1
+            fi
+
+            if curl -fsS \
+              "http://127.0.0.1:18080/api/v1/validateToken?token=root-token" \
+              >/dev/null; then
+
+              echo "Fake OWSEC is ready"
+              exit 0
+            fi
+
+            echo "Waiting for Fake OWSEC..."
+            sleep 1
+          done
+
+          echo "Fake OWSEC failed to start"
+          cat /tmp/fake-owsec.log || true
+          exit 1
+
+      - name: Start Fake OWPROV
+        env:
+          OWANALYTICS_TEST_VENUE_ID: venue-test-01
+        run: |
+          nohup python3 test_scripts/fakes/fake_owprov_service.py \
+            --host 127.0.0.1 \
+            --port 18081 \
+            </dev/null \
+            > /tmp/fake-owprov.log 2>&1 &
+
+          echo $! > /tmp/fake-owprov.pid
+
+          for i in $(seq 1 20); do
+            if ! kill -0 "$(cat /tmp/fake-owprov.pid)" 2>/dev/null; then
+              echo "Fake OWPROV exited unexpectedly"
+              cat /tmp/fake-owprov.log || true
+              exit 1
+            fi
+
+            if curl -fsS \
+              -H "Authorization: Bearer root-token" \
+              "http://127.0.0.1:18081/api/v1/inventory/60cf84f22290" \
+              >/dev/null; then
+
+              echo "Fake OWPROV is ready"
+              exit 0
+            fi
+
+            echo "Waiting for Fake OWPROV..."
+            sleep 1
+          done
+
+          echo "Fake OWPROV failed to start"
+          cat /tmp/fake-owprov.log || true
+          exit 1
+
+      # -----------------------------------------------------------------------
+      # Certificates required by OWAnalytics
+      # -----------------------------------------------------------------------
+      - name: Generate test certificates
+        run: |
+          rm -rf /tmp/owanalytics-certs
+          mkdir -p /tmp/owanalytics-certs
+
+          openssl genrsa \
+            -aes256 \
+            -passout pass:mypassword \
+            -out /tmp/owanalytics-certs/restapi-key.pem \
+            2048
+
+          openssl req \
+            -new \
+            -x509 \
+            -key /tmp/owanalytics-certs/restapi-key.pem \
+            -passin pass:mypassword \
+            -out /tmp/owanalytics-certs/restapi-cert.pem \
+            -days 1 \
+            -subj "/CN=localhost" \
+            -addext "subjectAltName=DNS:localhost,IP:127.0.0.1"
+
+          cp \
+            /tmp/owanalytics-certs/restapi-cert.pem \
+            /tmp/owanalytics-certs/restapi-ca.pem
+
+          chmod 644 /tmp/owanalytics-certs/*.pem
+
+          ls -l /tmp/owanalytics-certs
+
+
+      # -----------------------------------------------------------------------
+      # Start OWAnalytics
+      #
+      # PostgreSQL and fake services are exposed on the runner. Host networking
+      # lets OWAnalytics reach them on 127.0.0.1, matching the OWProv CI model.
+      # -----------------------------------------------------------------------
+      - name: Start Analytics service
+        run: |
+          docker run -d \
+            --name owanalytics-ci \
+            --net=host \
+            -v /tmp/owanalytics-certs:/owanalytics-data/certs:ro \
+            -e TEMPLATE_CONFIG=true \
+            -e RUN_CHOWN=false \
+            -e SECURITY_RESTAPI_DISABLE=false \
+            -e KAFKA_ENABLE=false \
+            -e CI_FAKE_EXTERNAL_SERVICES=1 \
+            -e FAKE_EXTERNAL_SERVICE_OWSEC=http://127.0.0.1:18080 \
+            -e FAKE_EXTERNAL_SERVICE_OWPROV=http://127.0.0.1:18081 \
+            -e STORAGE_TYPE=postgresql \
+            -e STORAGE_TYPE_POSTGRESQL_HOST=127.0.0.1 \
+            -e STORAGE_TYPE_POSTGRESQL_PORT=5432 \
+            -e STORAGE_TYPE_POSTGRESQL_DATABASE=owanalytics \
+            -e STORAGE_TYPE_POSTGRESQL_USERNAME=owanalytics \
+            -e STORAGE_TYPE_POSTGRESQL_PASSWORD=owanalytics \
+            "$OWANALYTICS_TEST_IMAGE"
+
+          for i in $(seq 1 60); do
+
+            if curl -fsS \
+              http://127.0.0.1:16109/ \
+              >/dev/null; then
+
+              echo "OWAnalytics is ready"
+              exit 0
+            fi
+
+            if ! docker inspect \
+              -f '{{.State.Running}}' \
+              owanalytics-ci 2>/dev/null | grep -q true; then
+
+              echo "OWAnalytics container exited unexpectedly"
+              docker logs owanalytics-ci || true
+              exit 1
+            fi
+
+            echo "Waiting for OWAnalytics..."
+            sleep 2
+          done
+
+          echo "OWAnalytics failed to become ready"
+          docker logs owanalytics-ci || true
+          exit 1
+
+
+      # -----------------------------------------------------------------------
+      # Memory Summary integration tests
+      # -----------------------------------------------------------------------
+      - name: Run Python integration tests with fake OWSEC and OWPROV
+        env:
+          OWANALYTICS_TEST_URL: https://127.0.0.1:16009
+          OWANALYTICS_TEST_VALID_TOKEN: root-token
+
+          OWANALYTICS_TEST_DB_DSN: >-
+            host=127.0.0.1
+            port=5432
+            dbname=owanalytics
+            user=owanalytics
+            password=owanalytics
+
+        run: |
+          test -f tests/integration/test_memory_summary_api.py
+
+          pytest \
+            tests/integration \
+            -v
+
+
+      # -----------------------------------------------------------------------
+      # Diagnostics
+      # -----------------------------------------------------------------------
+      - name: Print integration diagnostics
+        if: failure()
+        run: |
+          echo "================ Docker containers ================"
+          docker ps -a
+
+          echo "================ Fake OWSEC logs =================="
+          cat /tmp/fake-owsec.log || true
+
+          echo "================ Fake OWPROV logs ================="
+          cat /tmp/fake-owprov.log || true
+
+          echo "================ OWAnalytics logs ================="
+          docker logs owanalytics-ci || true
+
+
+      # -----------------------------------------------------------------------
+      # Cleanup
+      # -----------------------------------------------------------------------
+      - name: Cleanup integration services
+        if: always()
+        run: |
+          docker rm -f owanalytics-ci || true
+          if test -f /tmp/fake-owsec.pid; then
+            kill "$(cat /tmp/fake-owsec.pid)" || true
+          fi
+          if test -f /tmp/fake-owprov.pid; then
+            kill "$(cat /tmp/fake-owprov.pid)" || true
+          fi
+
+
+  # ---------------------------------------------------------------------------
+  # Trigger OpenWiFi docker-compose testing
+  #
+  # Run only after BOTH:
+  #   1. image build succeeds
+  #   2. Analytics integration tests succeed
+  # ---------------------------------------------------------------------------
   trigger-testing:
     if: startsWith(github.ref, 'refs/pull/')
     runs-on: ubuntu-latest
-    needs: docker
-    steps:
-    - name: Get base branch name and set as output
-      id: get_base_branch
-      run: |
-        echo "branch=$(echo ${GITHUB_BASE_REF##*/})" >> $GITHUB_OUTPUT
-        echo "owgw_branch=$(echo ${GITHUB_BASE_REF##*/} | sed 's/main/master/g')" >> $GITHUB_OUTPUT
 
-    - name: Checkout actions repo
-      uses: actions/checkout@v3
-      with:
-        repository: Telecominfraproject/.github
-        path: github
-
-    - name: Trigger testing of OpenWifi Docker Compose deployment and wait for result
-      uses: ./github/composite-actions/trigger-workflow-and-wait
-      env:
-        BASE_BRANCH: ${{ steps.get_base_branch.outputs.branch }}
-        OWGW_BASE_BRANCH: ${{ steps.get_base_branch.outputs.owgw_branch }}
-      with:
-        owner: Telecominfraproject
-        repo: wlan-testing
-        workflow: ow_docker-compose.yml
-        token: ${{ secrets.WLAN_TESTING_PAT }}
-        ref: master
-        inputs: '{"deployment_version": "${{ env.BASE_BRANCH }}", "owgw_version": "${{ env.OWGW_BASE_BRANCH }}", "owsec_version": "${{ env.BASE_BRANCH }}", "owfms_version": "${{ env.BASE_BRANCH }}", "owprov_version": "${{ env.BASE_BRANCH }}", "owanalytics_version": "${{ github.sha }}", "owsub_version": "${{ env.BASE_BRANCH }}", "microservice": "all"}'
-
-  trigger-deploy-to-dev:
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
     needs:
       - docker
-    steps:
-    - name: Checkout actions repo
-      uses: actions/checkout@v3
-      with:
-        repository: Telecominfraproject/.github
-        path: github
+      - memory-summary-tests
 
-    - name: Trigger deployment of the latest version to dev instance and wait for result
-      uses: ./github/composite-actions/trigger-workflow-and-wait
-      with:
-        owner: Telecominfraproject
-        repo: wlan-testing
-        workflow: ucentralgw-dev-deployment.yaml
-        token: ${{ secrets.WLAN_TESTING_PAT }}
-        ref: master
-        inputs: '{"force_latest": "true"}'
+    steps:
+      - name: Get base branch name and set as output
+        id: get_base_branch
+        run: |
+          echo "branch=${GITHUB_BASE_REF##*/}" >> "$GITHUB_OUTPUT"
+          echo "owgw_branch=$(echo "${GITHUB_BASE_REF##*/}" | sed 's/main/master/g')" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout actions repo
+        uses: actions/checkout@v3
+        with:
+          repository: Telecominfraproject/.github
+          path: github
+
+      - name: Trigger testing of OpenWifi Docker Compose deployment and wait for result
+        uses: ./github/composite-actions/trigger-workflow-and-wait
+        env:
+          BASE_BRANCH: ${{ steps.get_base_branch.outputs.branch }}
+          OWGW_BASE_BRANCH: ${{ steps.get_base_branch.outputs.owgw_branch }}
+        with:
+          owner: Telecominfraproject
+          repo: wlan-testing
+          workflow: ow_docker-compose.yml
+          token: ${{ secrets.WLAN_TESTING_PAT }}
+          ref: master
+          inputs: >-
+            {
+              "deployment_version": "${{ env.BASE_BRANCH }}",
+              "owgw_version": "${{ env.OWGW_BASE_BRANCH }}",
+              "owsec_version": "${{ env.BASE_BRANCH }}",
+              "owfms_version": "${{ env.BASE_BRANCH }}",
+              "owprov_version": "${{ env.BASE_BRANCH }}",
+              "owanalytics_version": "${{ github.sha }}",
+              "owsub_version": "${{ env.BASE_BRANCH }}",
+              "microservice": "all"
+            }
+
+
+  # ---------------------------------------------------------------------------
+  # Deploy to development after main is successfully tested
+  # ---------------------------------------------------------------------------
+  trigger-deploy-to-dev:
+    runs-on: ubuntu-latest
+
+    if: github.ref == 'refs/heads/main'
+
+    needs:
+      - docker
+      - memory-summary-tests
+
+    steps:
+      - name: Checkout actions repo
+        uses: actions/checkout@v3
+        with:
+          repository: Telecominfraproject/.github
+          path: github
+
+      - name: Trigger deployment of the latest version to dev instance and wait for result
+        uses: ./github/composite-actions/trigger-workflow-and-wait
+        with:
+          owner: Telecominfraproject
+          repo: wlan-testing
+          workflow: ucentralgw-dev-deployment.yaml
+          token: ${{ secrets.WLAN_TESTING_PAT }}
+          ref: master
+          inputs: '{"force_latest": "true"}'

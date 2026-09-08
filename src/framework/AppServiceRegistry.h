@@ -32,6 +32,8 @@ namespace OpenWifi {
 					std::ifstream IF(FileName);
                     Poco::JSON::Parser  P;
 					Registry_ = P.parse(IF).extract<Poco::JSON::Object::Ptr>();
+				} else {
+					Registry_ = Poco::makeShared<Poco::JSON::Object>();
 				}
 			} catch (...) {
 				Registry_ = Poco::makeShared<Poco::JSON::Object>();

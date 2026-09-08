@@ -62,10 +62,10 @@ namespace OpenWifi {
 											 Poco::Logger &L)
 		: DB(T, "wificlienthistory", Boards_Fields, BoardsDB_Indexes, P, L, "wfh") {}
 
-	bool WifiClientHistoryDB::Upgrade([[maybe_unused]] uint32_t from, uint32_t &to) {
+	bool WifiClientHistoryDB::Upgrade(uint32_t from, uint32_t &to) {
 		std::vector<std::string> Statements{};
 		RunScript(Statements);
-		to = 2;
+		to = from;
 		return true;
 	}
 

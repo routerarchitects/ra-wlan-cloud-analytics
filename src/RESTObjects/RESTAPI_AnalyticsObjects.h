@@ -6,6 +6,7 @@
 
 #include "RESTAPI_ProvObjects.h"
 #include "framework/utils.h"
+#include <optional>
 #include <vector>
 
 namespace OpenWifi {
@@ -193,13 +194,25 @@ namespace OpenWifi {
 			bool from_json(const Poco::JSON::Object::Ptr &Obj);
 		};
 
+		struct DeviceResourceTimePoint {
+			std::optional<uint64_t> memory_free;
+			std::optional<uint64_t> memory_total;
+			std::optional<uint64_t> memory_cached;
+			std::optional<uint64_t> memory_buffered;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+			bool from_json(const Poco::JSON::Object::Ptr &Obj);
+		};
+
 		struct DeviceTimePoint {
 			std::string id;
 			std::string boardId;
+			std::string venueId;
 			uint64_t timestamp = 0;
 			APTimePoint ap_data;
 			std::vector<SSIDTimePoint> ssid_data;
 			std::vector<RadioTimePoint> radio_data;
+			DeviceResourceTimePoint resource_data;
 			AnalyticsObjects::DeviceInfo device_info;
 			std::string serialNumber;
 
@@ -344,6 +357,43 @@ namespace OpenWifi {
 
 			void to_json(Poco::JSON::Object &Obj) const;
 			bool from_json(const Poco::JSON::Object::Ptr &Obj);
+		};
+
+		struct MCPRequestedWindow {
+			std::string startTime;
+			std::string endTime;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+		};
+
+		struct MCPObservedWindow {
+			std::optional<std::string> startTime;
+			std::optional<std::string> endTime;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+		};
+
+		struct MCPMemorySummaryData {
+			std::optional<uint64_t> min_memfree;
+			std::optional<uint64_t> max_memfree;
+			std::optional<uint64_t> avg_memfree;
+			std::optional<uint64_t> latest_memfree;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+		};
+
+		struct MCPMemorySummaryMeta {
+			MCPRequestedWindow requestedWindow;
+			MCPObservedWindow observedWindow;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+		};
+
+		struct MCPGatewayMemorySummary {
+			MCPMemorySummaryData data;
+			MCPMemorySummaryMeta meta;
+
+			void to_json(Poco::JSON::Object &Obj) const;
 		};
 
 	} // namespace AnalyticsObjects

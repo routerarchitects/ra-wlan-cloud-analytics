@@ -36,3 +36,6 @@ test_scripts/curl/result.json
 .vscode/c_cpp_properties.json
 test_scripts/curl/result.json
 *.swp
+cmake-build/*
+build_dir/*
+.venv/
