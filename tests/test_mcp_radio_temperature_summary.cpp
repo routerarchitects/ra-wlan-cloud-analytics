@@ -53,9 +53,11 @@ namespace {
 		assert(Summary.min_wifi_temp_2_4G == 62);
 		assert(Summary.max_wifi_temp_2_4G == 70);
 		assert(NearlyEqual(*Summary.avg_wifi_temp_2_4G, 200.0 / 3.0));
+		assert(Summary.latest_wifi_temp_2_4G == 70);
 		assert(Summary.min_wifi_temp_5G == 56);
 		assert(Summary.max_wifi_temp_5G == 65);
 		assert(NearlyEqual(*Summary.avg_wifi_temp_5G, 181.0 / 3.0));
+		assert(Summary.latest_wifi_temp_5G == 65);
 	}
 
 	void TestFiltersInvalidSamples() {
@@ -71,9 +73,11 @@ namespace {
 		assert(!Summary.min_wifi_temp_2_4G);
 		assert(!Summary.max_wifi_temp_2_4G);
 		assert(!Summary.avg_wifi_temp_2_4G);
+		assert(!Summary.latest_wifi_temp_2_4G);
 		assert(Summary.min_wifi_temp_5G == 0);
 		assert(Summary.max_wifi_temp_5G == 10);
 		assert(Summary.avg_wifi_temp_5G == 5);
+		assert(Summary.latest_wifi_temp_5G == 10);
 		assert(Summary.observedWindow.startTime == "1970-01-01T00:20:00Z");
 		assert(Summary.observedWindow.endTime == "1970-01-01T00:21:40Z");
 	}
@@ -85,9 +89,11 @@ namespace {
 		assert(!Summary.min_wifi_temp_2_4G);
 		assert(!Summary.max_wifi_temp_2_4G);
 		assert(!Summary.avg_wifi_temp_2_4G);
+		assert(!Summary.latest_wifi_temp_2_4G);
 		assert(!Summary.min_wifi_temp_5G);
 		assert(!Summary.max_wifi_temp_5G);
 		assert(!Summary.avg_wifi_temp_5G);
+		assert(!Summary.latest_wifi_temp_5G);
 		assert(!Summary.observedWindow.startTime);
 		assert(!Summary.observedWindow.endTime);
 	}
@@ -104,9 +110,11 @@ namespace {
 		assert(Obj.has("min_wifi_temp_2.4G"));
 		assert(Obj.has("max_wifi_temp_2.4G"));
 		assert(Obj.has("avg_wifi_temp_2.4G"));
+		assert(Obj.has("latest_wifi_temp_2.4G"));
 		assert(Obj.has("min_wifi_temp_5G"));
 		assert(Obj.has("max_wifi_temp_5G"));
 		assert(Obj.has("avg_wifi_temp_5G"));
+		assert(Obj.has("latest_wifi_temp_5G"));
 		assert(!Obj.has("data"));
 		assert(!Obj.has("meta"));
 	}
@@ -138,18 +146,22 @@ namespace {
 		assert(Summary2G.min_wifi_temp_2_4G == 62);
 		assert(Summary2G.max_wifi_temp_2_4G == 62);
 		assert(Summary2G.avg_wifi_temp_2_4G == 62);
+		assert(Summary2G.latest_wifi_temp_2_4G == 62);
 		assert(!Summary2G.min_wifi_temp_5G);
 		assert(!Summary2G.max_wifi_temp_5G);
 		assert(!Summary2G.avg_wifi_temp_5G);
+		assert(!Summary2G.latest_wifi_temp_5G);
 
 		auto Summary5G = MCP::CalculateRadioTemperatureSummary(
 			{Point(1100, {Radio(5, 55)})}, TestWindow(), 1000);
 		assert(!Summary5G.min_wifi_temp_2_4G);
 		assert(!Summary5G.max_wifi_temp_2_4G);
 		assert(!Summary5G.avg_wifi_temp_2_4G);
+		assert(!Summary5G.latest_wifi_temp_2_4G);
 		assert(Summary5G.min_wifi_temp_5G == 55);
 		assert(Summary5G.max_wifi_temp_5G == 55);
 		assert(Summary5G.avg_wifi_temp_5G == 55);
+		assert(Summary5G.latest_wifi_temp_5G == 55);
 	}
 
 	void TestHalfOpenWindowAndCutoverBoundary() {
@@ -163,6 +175,7 @@ namespace {
 		assert(Summary.min_wifi_temp_2_4G == 40);
 		assert(Summary.max_wifi_temp_2_4G == 50);
 		assert(Summary.avg_wifi_temp_2_4G == 45);
+		assert(Summary.latest_wifi_temp_2_4G == 50);
 		assert(Summary.observedWindow.startTime == "1970-01-01T00:16:40Z");
 		assert(Summary.observedWindow.endTime == "1970-01-01T00:25:00Z");
 	}
@@ -176,9 +189,11 @@ namespace {
 		assert(Summary.min_wifi_temp_2_4G == 0);
 		assert(Summary.max_wifi_temp_2_4G == 0);
 		assert(Summary.avg_wifi_temp_2_4G == 0);
+		assert(Summary.latest_wifi_temp_2_4G == 0);
 		assert(!Summary.min_wifi_temp_5G);
 		assert(!Summary.max_wifi_temp_5G);
 		assert(!Summary.avg_wifi_temp_5G);
+		assert(!Summary.latest_wifi_temp_5G);
 	}
 
 } // namespace

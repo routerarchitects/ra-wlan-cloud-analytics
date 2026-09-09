@@ -3032,9 +3032,11 @@ Expected response:
   "min_wifi_temp_2.4G": 62,
   "max_wifi_temp_2.4G": 70,
   "avg_wifi_temp_2.4G": 66.64,
+  "latest_wifi_temp_2.4G": 68,
   "min_wifi_temp_5G": 56,
   "max_wifi_temp_5G": 65,
-  "avg_wifi_temp_5G": 60.38
+  "avg_wifi_temp_5G": 60.38,
+  "latest_wifi_temp_5G": 60
 }
 ```
 
@@ -3064,9 +3066,11 @@ Expected response:
   "min_wifi_temp_2.4G": 60,
   "max_wifi_temp_2.4G": 70,
   "avg_wifi_temp_2.4G": 65.0,
+  "latest_wifi_temp_2.4G": 70,
   "min_wifi_temp_5G": 50,
   "max_wifi_temp_5G": 60,
-  "avg_wifi_temp_5G": 55.0
+  "avg_wifi_temp_5G": 55.0,
+  "latest_wifi_temp_5G": 60
 }
 ```
 
@@ -3089,9 +3093,11 @@ Expected response:
   "min_wifi_temp_2.4G": 60,
   "max_wifi_temp_2.4G": 70,
   "avg_wifi_temp_2.4G": 65.0,
+  "latest_wifi_temp_2.4G": 70,
   "min_wifi_temp_5G": null,
   "max_wifi_temp_5G": null,
-  "avg_wifi_temp_5G": null
+  "avg_wifi_temp_5G": null,
+  "latest_wifi_temp_5G": null
 }
 ```
 
@@ -3123,9 +3129,11 @@ Expected response:
   "min_wifi_temp_2.4G": null,
   "max_wifi_temp_2.4G": null,
   "avg_wifi_temp_2.4G": null,
+  "latest_wifi_temp_2.4G": null,
   "min_wifi_temp_5G": null,
   "max_wifi_temp_5G": null,
-  "avg_wifi_temp_5G": null
+  "avg_wifi_temp_5G": null,
+  "latest_wifi_temp_5G": null
 }
 ```
 
@@ -4683,9 +4691,11 @@ observedWindow
 min_wifi_temp_2.4G
 max_wifi_temp_2.4G
 avg_wifi_temp_2.4G
+latest_wifi_temp_2.4G
 min_wifi_temp_5G
 max_wifi_temp_5G
 avg_wifi_temp_5G
+latest_wifi_temp_5G
 ```
 
 All temperature fields are reported in degrees Celsius.

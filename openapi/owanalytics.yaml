@@ -1293,7 +1293,7 @@ components:
         requested half-open window. They are not time-weighted. For gateways with multiple
         radios in the same band, all valid samples for that band are combined directly rather
         than averaging each radio first. Null applies independently per band: a band returns
-        null min, max, and average values when that band has no valid temperature samples,
+        null min, max, average, and latest values when that band has no valid temperature samples,
         even if another band has samples. A valid radio temperature sample is a present,
         finite Celsius value where -40 <= temperature <= 125. A reported 0°C value is valid
         unless the persisted/resolved telemetry contract has wifiTempZeroIsUnavailable = true;
@@ -1306,9 +1306,11 @@ components:
         - min_wifi_temp_2.4G
         - max_wifi_temp_2.4G
         - avg_wifi_temp_2.4G
+        - latest_wifi_temp_2.4G
         - min_wifi_temp_5G
         - max_wifi_temp_5G
         - avg_wifi_temp_5G
+        - latest_wifi_temp_5G
       properties:
         requestedWindow:
           $ref: '#/components/schemas/RequestedWindow'
@@ -1335,6 +1337,13 @@ components:
           maximum: 125
           nullable: true
           description: Arithmetic average of reported 2.4 GHz Wi-Fi radio temperature samples in degrees Celsius for the effective aggregation window. Literal MCP JSON key; dotted suffix is required for compatibility.
+        latest_wifi_temp_2.4G:
+          type: number
+          format: double
+          minimum: -40
+          maximum: 125
+          nullable: true
+          description: Latest valid 2.4 GHz Wi-Fi radio temperature sample in degrees Celsius for the effective aggregation window. Literal MCP JSON key; dotted suffix is required for compatibility.
         min_wifi_temp_5G:
           type: number
           format: double
@@ -1356,6 +1365,13 @@ components:
           maximum: 125
           nullable: true
           description: Arithmetic average of reported 5 GHz Wi-Fi radio temperature samples in degrees Celsius for the effective aggregation window.
+        latest_wifi_temp_5G:
+          type: number
+          format: double
+          minimum: -40
+          maximum: 125
+          nullable: true
+          description: Latest valid 5 GHz Wi-Fi radio temperature sample in degrees Celsius for the effective aggregation window.
 
     ClientBandwidthConsumption:
       type: object
@@ -2019,9 +2035,11 @@ paths:
                     min_wifi_temp_2.4G: 62
                     max_wifi_temp_2.4G: 70
                     avg_wifi_temp_2.4G: 66.64
+                    latest_wifi_temp_2.4G: 68
                     min_wifi_temp_5G: 56
                     max_wifi_temp_5G: 65
                     avg_wifi_temp_5G: 60.38
+                    latest_wifi_temp_5G: 60
         400:
           $ref: '#/components/responses/TemperatureAnalyticsBadRequest'
         401:

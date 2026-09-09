@@ -405,9 +405,11 @@ namespace OpenWifi {
 			std::optional<double> min_wifi_temp_2_4G;
 			std::optional<double> max_wifi_temp_2_4G;
 			std::optional<double> avg_wifi_temp_2_4G;
+			std::optional<double> latest_wifi_temp_2_4G;
 			std::optional<double> min_wifi_temp_5G;
 			std::optional<double> max_wifi_temp_5G;
 			std::optional<double> avg_wifi_temp_5G;
+			std::optional<double> latest_wifi_temp_5G;
 
 			void to_json(Poco::JSON::Object &Obj) const;
 		};
