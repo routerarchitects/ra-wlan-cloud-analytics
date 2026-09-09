@@ -439,15 +439,21 @@ namespace OpenWifi {
 			struct BandStats {
 				std::optional<double> min;
 				std::optional<double> max;
+				std::optional<double> latest;
+				uint64_t latestTimestamp = 0;
 				long double sum = 0;
 				uint64_t count = 0;
 			};
 
-			auto AddSample = [](BandStats &Stats, double Value) {
+			auto AddSample = [](BandStats &Stats, double Value, uint64_t Timestamp) {
 				if (!Stats.min || Value < *Stats.min)
 					Stats.min = Value;
 				if (!Stats.max || Value > *Stats.max)
 					Stats.max = Value;
+				if (!Stats.latest || Timestamp >= Stats.latestTimestamp) {
+					Stats.latest = Value;
+					Stats.latestTimestamp = Timestamp;
+				}
 				Stats.sum += static_cast<long double>(Value);
 				++Stats.count;
 			};
@@ -481,9 +487,9 @@ namespace OpenWifi {
 						continue;
 
 					if (Radio.band == 2)
-						AddSample(Band2G, Value);
+						AddSample(Band2G, Value, Record.timestamp);
 					else
-						AddSample(Band5G, Value);
+						AddSample(Band5G, Value, Record.timestamp);
 					RecordContributed = true;
 				}
 
@@ -509,12 +515,14 @@ namespace OpenWifi {
 				Summary.max_wifi_temp_2_4G = Band2G.max;
 				Summary.avg_wifi_temp_2_4G =
 					static_cast<double>(Band2G.sum / static_cast<long double>(Band2G.count));
+				Summary.latest_wifi_temp_2_4G = Band2G.latest;
 			}
 			if (Band5G.count > 0) {
 				Summary.min_wifi_temp_5G = Band5G.min;
 				Summary.max_wifi_temp_5G = Band5G.max;
 				Summary.avg_wifi_temp_5G =
 					static_cast<double>(Band5G.sum / static_cast<long double>(Band5G.count));
+				Summary.latest_wifi_temp_5G = Band5G.latest;
 			}
 
 			return Summary;

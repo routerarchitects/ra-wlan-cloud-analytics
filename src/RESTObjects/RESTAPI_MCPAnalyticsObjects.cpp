@@ -67,9 +67,11 @@ namespace OpenWifi::AnalyticsObjects {
 		nullable_double_to_json(Obj, "min_wifi_temp_2.4G", min_wifi_temp_2_4G);
 		nullable_double_to_json(Obj, "max_wifi_temp_2.4G", max_wifi_temp_2_4G);
 		nullable_double_to_json(Obj, "avg_wifi_temp_2.4G", avg_wifi_temp_2_4G);
+		nullable_double_to_json(Obj, "latest_wifi_temp_2.4G", latest_wifi_temp_2_4G);
 		nullable_double_to_json(Obj, "min_wifi_temp_5G", min_wifi_temp_5G);
 		nullable_double_to_json(Obj, "max_wifi_temp_5G", max_wifi_temp_5G);
 		nullable_double_to_json(Obj, "avg_wifi_temp_5G", avg_wifi_temp_5G);
+		nullable_double_to_json(Obj, "latest_wifi_temp_5G", latest_wifi_temp_5G);
 	}
 
 } // namespace OpenWifi::AnalyticsObjects

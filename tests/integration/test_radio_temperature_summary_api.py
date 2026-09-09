@@ -247,9 +247,11 @@ def assert_empty_temperature_summary(body: dict[str, Any], expected_start: str, 
     assert body["min_wifi_temp_2.4G"] is None
     assert body["max_wifi_temp_2.4G"] is None
     assert body["avg_wifi_temp_2.4G"] is None
+    assert body["latest_wifi_temp_2.4G"] is None
     assert body["min_wifi_temp_5G"] is None
     assert body["max_wifi_temp_5G"] is None
     assert body["avg_wifi_temp_5G"] is None
+    assert body["latest_wifi_temp_5G"] is None
 
 
 def test_radio_temperature_summary_aggregates_persisted_wifi_temp_samples(seeded_board) -> None:
@@ -274,9 +276,11 @@ def test_radio_temperature_summary_aggregates_persisted_wifi_temp_samples(seeded
         "min_wifi_temp_2.4G",
         "max_wifi_temp_2.4G",
         "avg_wifi_temp_2.4G",
+        "latest_wifi_temp_2.4G",
         "min_wifi_temp_5G",
         "max_wifi_temp_5G",
         "avg_wifi_temp_5G",
+        "latest_wifi_temp_5G",
     }
     assert result.body["requestedWindow"] == {
         "startTime": format_utc(start_dt),
@@ -289,9 +293,11 @@ def test_radio_temperature_summary_aggregates_persisted_wifi_temp_samples(seeded
     assert result.body["min_wifi_temp_2.4G"] == 62
     assert result.body["max_wifi_temp_2.4G"] == 70
     assert result.body["avg_wifi_temp_2.4G"] == pytest.approx((62 + 70 + 68) / 3)
+    assert result.body["latest_wifi_temp_2.4G"] == 68
     assert result.body["min_wifi_temp_5G"] == 56
     assert result.body["max_wifi_temp_5G"] == 65
     assert result.body["avg_wifi_temp_5G"] == pytest.approx((56 + 65 + 60) / 3)
+    assert result.body["latest_wifi_temp_5G"] == 60
 
 
 def test_radio_temperature_summary_filters_window_board_serial_and_band(seeded_board) -> None:
@@ -318,7 +324,9 @@ def test_radio_temperature_summary_filters_window_board_serial_and_band(seeded_b
     assert result.body["min_wifi_temp_2.4G"] == 20
     assert result.body["max_wifi_temp_2.4G"] == 30
     assert result.body["avg_wifi_temp_2.4G"] == 25
+    assert result.body["latest_wifi_temp_2.4G"] == 30
     assert result.body["min_wifi_temp_5G"] is None
+    assert result.body["latest_wifi_temp_5G"] is None
     assert result.body["observedWindow"] == {
         "startTime": format_utc(start_sample_dt),
         "endTime": format_utc(inside_dt),
@@ -361,9 +369,11 @@ def test_radio_temperature_summary_ignores_invalid_missing_and_legacy_temperatur
     assert result.body["min_wifi_temp_2.4G"] == 20
     assert result.body["max_wifi_temp_2.4G"] == 30
     assert result.body["avg_wifi_temp_2.4G"] == 25
+    assert result.body["latest_wifi_temp_2.4G"] == 30
     assert result.body["min_wifi_temp_5G"] == 0
     assert result.body["max_wifi_temp_5G"] == 10
     assert result.body["avg_wifi_temp_5G"] == 5
+    assert result.body["latest_wifi_temp_5G"] == 10
     assert result.body["observedWindow"] == {
         "startTime": format_utc(t_valid_a),
         "endTime": format_utc(t_valid_b),
@@ -436,4 +446,3 @@ def test_radio_temperature_summary_local_venue_cache_does_not_bypass_authorizati
 
     assert result.status == 404
     assert result.body["error"] == "not_found"
-
