@@ -132,6 +132,55 @@ namespace {
 		assert(!MCP::ParseRFC3339Timestamp("2026-07-01T00:00:00+25:00", Epoch));
 	}
 
+	void TestOnlyOneBand() {
+		auto Summary2G = MCP::CalculateRadioTemperatureSummary(
+			{Point(1100, {Radio(2, 62)})}, TestWindow(), 1000);
+		assert(Summary2G.min_wifi_temp_2_4G == 62);
+		assert(Summary2G.max_wifi_temp_2_4G == 62);
+		assert(Summary2G.avg_wifi_temp_2_4G == 62);
+		assert(!Summary2G.min_wifi_temp_5G);
+		assert(!Summary2G.max_wifi_temp_5G);
+		assert(!Summary2G.avg_wifi_temp_5G);
+
+		auto Summary5G = MCP::CalculateRadioTemperatureSummary(
+			{Point(1100, {Radio(5, 55)})}, TestWindow(), 1000);
+		assert(!Summary5G.min_wifi_temp_2_4G);
+		assert(!Summary5G.max_wifi_temp_2_4G);
+		assert(!Summary5G.avg_wifi_temp_2_4G);
+		assert(Summary5G.min_wifi_temp_5G == 55);
+		assert(Summary5G.max_wifi_temp_5G == 55);
+		assert(Summary5G.avg_wifi_temp_5G == 55);
+	}
+
+	void TestHalfOpenWindowAndCutoverBoundary() {
+		auto W = TestWindow(); // startTime=1000, endTime=2000
+		auto Summary = MCP::CalculateRadioTemperatureSummary(
+			{Point(1000, {Radio(2, 40)}), // exactly on startTime boundary & cutover boundary
+			 Point(1500, {Radio(2, 50)}),
+			 Point(2000, {Radio(2, 60)})}, // on endTime boundary (exclusive, should be excluded)
+			W, 1000); // CutoverTime=1000
+
+		assert(Summary.min_wifi_temp_2_4G == 40);
+		assert(Summary.max_wifi_temp_2_4G == 50);
+		assert(Summary.avg_wifi_temp_2_4G == 45);
+		assert(Summary.observedWindow.startTime == "1970-01-01T00:16:40Z");
+		assert(Summary.observedWindow.endTime == "1970-01-01T00:25:00Z");
+	}
+
+	void TestZeroSentinelFlag() {
+		auto Summary = MCP::CalculateRadioTemperatureSummary(
+			{Point(1100, {Radio(2, 0, false)}), // 0 is valid measurement when flag is false
+			 Point(1200, {Radio(5, 0, true)})}, // 0 is sentinel when flag is true
+			TestWindow(), 1000);
+
+		assert(Summary.min_wifi_temp_2_4G == 0);
+		assert(Summary.max_wifi_temp_2_4G == 0);
+		assert(Summary.avg_wifi_temp_2_4G == 0);
+		assert(!Summary.min_wifi_temp_5G);
+		assert(!Summary.max_wifi_temp_5G);
+		assert(!Summary.avg_wifi_temp_5G);
+	}
+
 } // namespace
 
 int main() {
@@ -141,6 +190,9 @@ int main() {
 	TestSerializationShape();
 	TestCutoverValidation();
 	TestRFC3339CutoverParsing();
+	TestOnlyOneBand();
+	TestHalfOpenWindowAndCutoverBoundary();
+	TestZeroSentinelFlag();
 	std::cout << "test_mcp_radio_temperature_summary passed\n";
 	return 0;
 }

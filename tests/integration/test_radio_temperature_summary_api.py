@@ -415,3 +415,25 @@ def test_radio_temperature_summary_invalid_query_rejects_after_auth() -> None:
 
     assert result.status == 400
     assert result.body["error"] == "invalid_query_parameter"
+
+
+def test_radio_temperature_summary_local_venue_cache_does_not_bypass_authorization(seeded_board) -> None:
+    end_dt = utc_now() - timedelta(seconds=30)
+    with db_connection() as connection:
+        with connection.cursor() as cursor:
+            insert_timepoint(
+                cursor,
+                format_utc(end_dt - timedelta(minutes=10)),
+                [{"band": 2, "wifi_temp": 65}],
+                serial=UNAUTHORIZED_ROUTER_ID,
+                suffix="unauth-cache-test",
+            )
+
+    result = http_json(
+        temperature_summary_path(format_utc(end_dt), selected_router_id=UNAUTHORIZED_ROUTER_ID),
+        valid_token(),
+    )
+
+    assert result.status == 404
+    assert result.body["error"] == "not_found"
+
