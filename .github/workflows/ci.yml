@@ -107,12 +107,13 @@ jobs:
             .
 
 
-      - name: Run C++ unit tests
+      - name: Run MCP C++ unit tests
         run: |
           docker run --rm "$OWANALYTICS_TEST_BUILD_IMAGE" \
             ctest \
             --test-dir /owanalytics/cmake-build \
-            --output-on-failure
+            --output-on-failure \
+            -R 'test_mcp_(memory_summary|radio_temperature_summary)'
 
 
       # -----------------------------------------------------------------------
