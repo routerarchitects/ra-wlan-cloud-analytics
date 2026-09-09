@@ -267,6 +267,7 @@ jobs:
             -e RUN_CHOWN=false \
             -e SECURITY_RESTAPI_DISABLE=false \
             -e KAFKA_ENABLE=false \
+            -e TEMPERATURE_MIGRATION_CUTOVER_TIME=2026-07-01T00:00:00Z \
             -e CI_FAKE_EXTERNAL_SERVICES=1 \
             -e FAKE_EXTERNAL_SERVICE_OWSEC=http://127.0.0.1:18080 \
             -e FAKE_EXTERNAL_SERVICE_OWPROV=http://127.0.0.1:18081 \
