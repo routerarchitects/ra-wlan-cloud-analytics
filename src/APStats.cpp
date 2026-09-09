@@ -59,6 +59,29 @@ namespace OpenWifi {
 		return std::nullopt;
 	}
 
+	static std::optional<double> GetOptionalDoubleJSON(const char *field,
+													   const nlohmann::json &doc) {
+		try {
+			if (!doc.contains(field) || doc[field].is_null())
+				return std::nullopt;
+			if (doc[field].is_number())
+				return doc[field].get<double>();
+		} catch (...) {
+		}
+		return std::nullopt;
+	}
+
+	static bool GetBoolJSON(const char *field, const nlohmann::json &doc, bool def) {
+		try {
+			if (!doc.contains(field) || doc[field].is_null())
+				return def;
+			if (doc[field].is_boolean())
+				return doc[field].get<bool>();
+		} catch (...) {
+		}
+		return def;
+	}
+
 	inline double safe_div(uint64_t a, uint64_t b) {
 		if (b == 0)
 			return 0.0;
@@ -181,6 +204,10 @@ namespace OpenWifi {
 						GetJSON("tx_power", radio, RTP.tx_power, (uint64_t)0);
 						GetJSON("active_ms", radio, RTP.active_ms, (uint64_t)0);
 						GetJSON("channel", radio, RTP.channel, (uint64_t)0);
+						RTP.wifi_temp = GetOptionalDoubleJSON("temperature", radio);
+						RTP.wifi_temp_zero_is_unavailable =
+							GetBoolJSON("wifi_temp_zero_is_unavailable", radio,
+										GetBoolJSON("wifiTempZeroIsUnavailable", radio, false));
 						GetJSON("temperature", radio, RTP.temperature, (int64_t)20);
 						if (radio.contains("channel_width") && !radio["channel_width"].is_null()) {
 							if (radio["channel_width"].is_string()) {

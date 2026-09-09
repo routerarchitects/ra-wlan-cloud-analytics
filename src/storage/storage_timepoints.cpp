@@ -7,6 +7,7 @@
 #include "framework/OpenWifiTypes.h"
 #include "framework/RESTAPI_utils.h"
 #include "VenueCoordinator.h"
+#include <Poco/JSON/Parser.h>
 #include <utility>
 
 template <>
@@ -18,6 +19,33 @@ void ORM::DB<OpenWifi::TimePointDBRecordType, OpenWifi::AnalyticsObjects::Device
 	const OpenWifi::AnalyticsObjects::DeviceTimePoint &In, OpenWifi::TimePointDBRecordType &Out);
 
 namespace OpenWifi {
+	namespace {
+		bool ParseRadioData(const std::string &Json, const std::string &RecordId,
+							Poco::Logger &Logger,
+							std::vector<AnalyticsObjects::RadioTimePoint> &Radios) {
+			Radios.clear();
+			if (Json.empty())
+				return true;
+			try {
+				Poco::JSON::Parser Parser;
+				auto Array = Parser.parse(Json).extract<Poco::JSON::Array::Ptr>();
+				for (auto const &Item : *Array) {
+					auto Object = Item.extract<Poco::JSON::Object::Ptr>();
+					AnalyticsObjects::RadioTimePoint Radio;
+					if (Radio.from_json(Object))
+						Radios.emplace_back(std::move(Radio));
+				}
+				return true;
+			} catch (const Poco::Exception &E) {
+				Logger.warning("Skipping malformed radio_data in timepoint id=" + RecordId +
+							   ": " + E.displayText());
+			} catch (...) {
+				Logger.warning("Skipping malformed radio_data in timepoint id=" + RecordId);
+			}
+			Radios.clear();
+			return false;
+		}
+	} // namespace
 
 	static ORM::FieldVec TimePoint_Fields{// object info
 										  ORM::Field{"id", 64, true},
@@ -150,6 +178,36 @@ namespace OpenWifi {
 			Point.timestamp = Row.get<1>();
 			Point.resource_data =
 				RESTAPI_utils::to_object<AnalyticsObjects::DeviceResourceTimePoint>(Row.get<2>());
+			Recs.emplace_back(std::move(Point));
+		}
+		return true;
+	}
+
+	bool TimePointDB::SelectRadioRecordsBySerial(const std::string &boardId,
+												 const std::string &serialNumber,
+												 uint64_t startTime, uint64_t endTime,
+												 std::vector<AnalyticsObjects::DeviceTimePoint>
+													 &Recs) {
+		Recs.clear();
+		if (endTime <= startTime)
+			return true;
+
+		auto WhereClause = fmt::format(
+			" boardId='{}' and serialNumber='{}' and (timestamp >= {}) and (timestamp < {}) ",
+			ORM::Escape(boardId), ORM::Escape(serialNumber), startTime, endTime);
+		const auto Sql = fmt::format(
+			"select id, timestamp, radio_data from {} where {} order by timestamp, id ASC",
+			TableName_, WhereClause);
+		std::vector<TimePointRadioDBRecordType> RawRecords;
+		if (!Join(Sql, RawRecords))
+			return false;
+		Recs.reserve(RawRecords.size());
+		for (const auto &Row : RawRecords) {
+			AnalyticsObjects::DeviceTimePoint Point;
+			Point.id = Row.get<0>();
+			Point.timestamp = Row.get<1>();
+			if (!ParseRadioData(Row.get<2>(), Point.id, Logger_, Point.radio_data))
+				continue;
 			Recs.emplace_back(std::move(Point));
 		}
 		return true;
