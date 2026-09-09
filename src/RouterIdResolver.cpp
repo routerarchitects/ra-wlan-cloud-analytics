@@ -22,9 +22,6 @@ namespace OpenWifi {
 										bool &StorageFailure) {
 			std::vector<AnalyticsObjects::BoardInfo> MatchingBoards;
 			auto VisitBoard = [&](const AnalyticsObjects::BoardInfo &Board) -> bool {
-				if (Board.venueList.size() != 1 || Board.venueList[0].id != authorizedVenueId)
-					return true;
-
 				auto BoardId = Board.info.id;
 				AnalyticsObjects::DeviceInfoList Devices;
 				VenueCoordinator()->GetDevices(BoardId, Devices);
@@ -53,15 +50,10 @@ namespace OpenWifi {
 			}
 
 			const auto &Board = MatchingBoards.front();
-			if (Board.venueList.empty()) {
-				NotFound(E);
-				return false;
-			}
-
 			Resolved.routerId = routerId;
 			Resolved.board = Board;
 			Resolved.resolvedBoardId = Board.info.id;
-			Resolved.resolvedVenueId = authorizedVenueId;
+			Resolved.resolvedVenueId = Board.venueList.empty() ? authorizedVenueId : Board.venueList[0].id;
 			return true;
 		}
 
