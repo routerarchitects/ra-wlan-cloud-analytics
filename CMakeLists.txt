@@ -128,6 +128,7 @@ add_executable(owanalytics
         src/RESTObjects/RESTAPI_MCPAnalyticsObjects.cpp
         src/RESTAPI/RESTAPI_mcp_helpers.cpp src/RESTAPI/RESTAPI_mcp_helpers.h
         src/RESTAPI/RESTAPI_device_memory_summary_handler.cpp src/RESTAPI/RESTAPI_device_memory_summary_handler.h
+        src/RESTAPI/RESTAPI_device_radio_temperature_summary_handler.cpp src/RESTAPI/RESTAPI_device_radio_temperature_summary_handler.h
         src/RouterIdResolver.cpp src/RouterIdResolver.h
         src/RESTObjects/RESTAPI_SubObjects.cpp src/RESTObjects/RESTAPI_SubObjects.h
         src/RESTAPI/RESTAPI_routers.cpp
@@ -173,4 +174,13 @@ if(BUILD_TESTING)
             ${Poco_LIBRARIES}
             fmt::fmt)
     add_test(NAME test_mcp_memory_summary COMMAND test_mcp_memory_summary)
+
+    add_executable(test_mcp_radio_temperature_summary
+            tests/test_mcp_radio_temperature_summary.cpp
+            src/RESTObjects/RESTAPI_MCPAnalyticsObjects.cpp)
+    target_include_directories(test_mcp_radio_temperature_summary PRIVATE src)
+    target_link_libraries(test_mcp_radio_temperature_summary PUBLIC
+            ${Poco_LIBRARIES}
+            fmt::fmt)
+    add_test(NAME test_mcp_radio_temperature_summary COMMAND test_mcp_radio_temperature_summary)
 endif()
