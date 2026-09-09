@@ -353,6 +353,7 @@ bool Fingerprint::from_json(const Poco::JSON::Object::Ptr &Obj) {
 
 	bool RadioTimePoint::from_json(const Poco::JSON::Object::Ptr &Obj) {
 		try {
+			wifi_temp.reset();
 			field_from_json(Obj, "band", band);
 			field_from_json(Obj, "channel_width", channel_width);
 			field_from_json(Obj, "active_ms", active_ms);

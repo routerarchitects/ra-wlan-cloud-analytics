@@ -84,6 +84,19 @@ namespace OpenWifi {
 			return false;
 		}
 
+		bool ParseIsoTimestamp(const std::string &Value, uint64_t &Epoch) {
+			try {
+				Poco::DateTime DateTime;
+				int TimeZone = 0;
+				Poco::DateTimeParser::parse(Poco::DateTimeFormat::ISO8601_FORMAT, Value,
+											DateTime, TimeZone);
+				Epoch = DateTime.timestamp().epochTime();
+				return true;
+			} catch (...) {
+			}
+			return false;
+		}
+
 		std::string ToUtcString(uint64_t Epoch) {
 			std::time_t RawTime = static_cast<std::time_t>(Epoch);
 			std::tm Tm{};
@@ -112,17 +125,18 @@ namespace OpenWifi {
 		}
 
 		std::optional<uint64_t> GetTemperatureCutoverTime() {
-			auto Cutover =
-				MicroServiceConfigGetString("temperature.migration_cutover_time", "");
-			if (Cutover.empty()) {
-				if (const auto *EnvCutover = std::getenv("TEMPERATURE_MIGRATION_CUTOVER_TIME"))
+			std::string Cutover;
+			if (const auto *EnvCutover = std::getenv("TEMPERATURE_MIGRATION_CUTOVER_TIME")) {
+				if (*EnvCutover != '\0')
 					Cutover = EnvCutover;
 			}
+			if (Cutover.empty())
+				Cutover = MicroServiceConfigGetString("temperature.migration_cutover_time", "");
 			if (Cutover.empty())
 				return std::nullopt;
 
 			uint64_t Parsed = 0;
-			if (!ParseUtcTimestamp(Cutover, Parsed))
+			if (!ParseIsoTimestamp(Cutover, Parsed))
 				return std::nullopt;
 			return Parsed;
 		}
@@ -192,7 +206,12 @@ namespace OpenWifi {
 			Output.endTime = EndTime;
 
 			auto TemperatureCutoverTime = GetTemperatureCutoverTime();
-			if (TemperatureCutoverTime && Output.startTime < *TemperatureCutoverTime)
+			if (!TemperatureCutoverTime)
+				return SendMcpError(Handler, Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR,
+									"internal_error",
+									"Temperature migration cutover time is not configured"),
+					   false;
+			if (Output.startTime < *TemperatureCutoverTime)
 				return SendMcpError(Handler, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
 									"temperature_range_before_cutover",
 									"The requested summary interval starts before the "
@@ -202,19 +221,63 @@ namespace OpenWifi {
 			return true;
 		}
 
-		bool ResolveBoardByVenue(const std::string &VenueId, AnalyticsObjects::BoardInfo &Board,
-								 bool &MultipleBoards) {
+		bool ResolveBoardByVenue(RESTAPIHandler *Handler, const std::string &RouterId,
+								 const std::string &VenueId,
+								 AnalyticsObjects::BoardInfo &Board, bool &MultipleBoards,
+								 bool &ProvisioningUnavailable) {
 			MultipleBoards = false;
+			ProvisioningUnavailable = false;
 			std::vector<AnalyticsObjects::BoardInfo> Matches;
-			auto Visitor = [&](const AnalyticsObjects::BoardInfo &CurrentBoard) {
-				if (CurrentBoard.venueList.size() == 1 && !CurrentBoard.venueList[0].id.empty() &&
-					CurrentBoard.venueList[0].id == VenueId) {
+			auto AddMatch = [&](const AnalyticsObjects::BoardInfo &CurrentBoard) {
+				auto Existing = std::find_if(
+					Matches.begin(), Matches.end(), [&](const auto &ExistingBoard) {
+						return ExistingBoard.info.id == CurrentBoard.info.id;
+					});
+				if (Existing == Matches.end())
 					Matches.emplace_back(CurrentBoard);
+			};
+
+			auto Visitor = [&](const AnalyticsObjects::BoardInfo &CurrentBoard) {
+				for (const auto &Venue : CurrentBoard.venueList) {
+					if (!Venue.id.empty() && Venue.id == VenueId) {
+						AddMatch(CurrentBoard);
+						break;
+					}
 				}
 				return true;
 			};
 			if (!StorageService()->BoardsDB().Iterate(Visitor))
 				return false;
+
+			if (Matches.empty()) {
+				auto ChildVenueVisitor = [&](const AnalyticsObjects::BoardInfo &CurrentBoard) {
+					for (const auto &Venue : CurrentBoard.venueList) {
+						if (Venue.id.empty() || !Venue.monitorSubVenues)
+							continue;
+
+						ProvObjects::VenueDeviceList Devices;
+						bool VenueExists = true;
+						if (!SDK::Prov::Venue::GetDevices(Handler, Venue.id, true, Devices,
+														  VenueExists)) {
+							if (VenueExists)
+								ProvisioningUnavailable = true;
+							continue;
+						}
+						if (VenueExists &&
+							std::find(Devices.devices.begin(), Devices.devices.end(), RouterId) !=
+								Devices.devices.end()) {
+							AddMatch(CurrentBoard);
+							break;
+						}
+					}
+					return !ProvisioningUnavailable;
+				};
+				if (!StorageService()->BoardsDB().Iterate(ChildVenueVisitor))
+					return false;
+				if (ProvisioningUnavailable)
+					return false;
+			}
+
 			if (Matches.empty())
 				return true;
 			if (Matches.size() > 1) {
@@ -248,10 +311,14 @@ namespace OpenWifi {
 		}
 
 		std::optional<int64_t> GetRadioTemperature(const AnalyticsObjects::RadioTimePoint &Radio) {
-			auto Temperature = Radio.wifi_temp.value_or(Radio.temperature);
+			if (!Radio.wifi_temp)
+				return std::nullopt;
+			auto Temperature = *Radio.wifi_temp;
 			if (Temperature < -40 || Temperature > 125)
 				return std::nullopt;
-			if (Temperature == 0 && Radio.wifi_temp && Radio.wifi_temp_zero_is_unavailable)
+			if (Temperature == 255)
+				return std::nullopt;
+			if (Temperature == 0 && Radio.wifi_temp_zero_is_unavailable)
 				return std::nullopt;
 			return Temperature;
 		}
@@ -289,7 +356,14 @@ namespace OpenWifi {
 
 		AnalyticsObjects::BoardInfo Board;
 		bool MultipleBoards = false;
-		if (!ResolveBoardByVenue(Device.venue, Board, MultipleBoards)) {
+		bool ProvisioningUnavailable = false;
+		if (!ResolveBoardByVenue(this, RouterId, Device.venue, Board, MultipleBoards,
+								 ProvisioningUnavailable)) {
+			if (ProvisioningUnavailable) {
+				return SendMcpError(*this, Poco::Net::HTTPResponse::HTTP_BAD_GATEWAY,
+									"owprov_unavailable",
+									"Unable to resolve router through provisioning service");
+			}
 			return SendMcpError(*this, Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR,
 								"analytics_board_storage_failed",
 								"Unable to resolve Analytics board for router");
@@ -304,11 +378,16 @@ namespace OpenWifi {
 		}
 
 		auto RetentionSeconds = Board.venueList[0].retention;
-		if (RetentionSeconds > 0 && RequestedWindow.endTime - RequestedWindow.startTime >
-									  RetentionSeconds) {
-			return SendMcpError(*this, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
-								"invalid_lookback_hours",
-								"lookbackHours exceeds configured retention");
+		if (RetentionSeconds > 0) {
+			auto Now = Utils::Now();
+			auto RetentionStart = Now > RetentionSeconds ? Now - RetentionSeconds : 0;
+			if (RequestedWindow.endTime - RequestedWindow.startTime > RetentionSeconds ||
+				RequestedWindow.startTime < RetentionStart) {
+				return SendMcpError(
+					*this, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+					"lookback_outside_retention",
+					"Requested range is outside the configured monitoring retention window");
+			}
 		}
 
 		TimePointDB::RecordVec Records;
@@ -316,7 +395,7 @@ namespace OpenWifi {
 				Board.info.id, RouterId, RequestedWindow.startTime, RequestedWindow.endTime,
 				Records)) {
 			return SendMcpError(*this, Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR,
-								"temperature_summary_query_failed",
+								"radio_temperature_summary_query_failed",
 								"Unable to retrieve gateway Wi-Fi temperature history");
 		}
 

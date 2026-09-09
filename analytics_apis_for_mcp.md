@@ -337,44 +337,23 @@ A sample exactly at `11:00` belongs only to Request 2.
 
 ### Authorization
 
-All device metric handlers must enforce authorization before returning data:
+All device metric handlers enforce authorization using the following flow:
 
 ```text
-1. Authenticate the bearer token from Authorization: Bearer <token>.
-   If the token is missing, invalid, or expired, return 401 Unauthorized.
-2. Resolve the caller's accessible entity, venue, and board scope from the token.
-3. Resolve routerId to its current router ownership context.
-4. Verify that the resolved router belongs to a board or venue the caller may read.
-5. Return 404 Not Found when the router exists but the caller cannot access it.
-6. Return 404 Not Found when the router does not exist.
+Bearer token validated by OWSEC
+        ↓
+same caller token forwarded to OWPROV
+        ↓
+OWPROV inventory visibility determines router access
+        ↓
+OWPROV 401/403/404 normalized to Analytics 404 not_found
 ```
 
-The MCP analytics endpoints are bearer-token endpoints. Do not allow `X-API-KEY`
-authentication for these endpoints unless this specification is explicitly
-updated to define API-key semantics and error precedence.
-
-Required permission:
-
-```text
-analytics.gateway_metrics.read
-```
-
-The permission is evaluated against the resolved board first, then the resolved venue, then the parent entity. Child-venue access is allowed only when the caller's venue permission explicitly includes descendant venues according to the same venue hierarchy rules used by OWPROV and `VenueCoordinator`; otherwise access is limited to the exact resolved venue or board.
-
-Authorization must not rely on the caller-supplied `routerId` alone. A caller must not be able to request an arbitrary gateway serial number and retrieve metrics without proving access to the router's current ownership scope. The external API intentionally returns `404 Not Found` for both nonexistent routers and routers outside the caller's authorized scope to avoid exposing router existence. Internal logs and metrics should preserve the exact reason.
-
-Reserve `403 Forbidden` for cases where the authenticated caller has visibility
-of the router's ownership scope, but lacks permission to perform the requested
-operation. Do not use `403 Forbidden` merely because OWPROV confirms the
-router exists outside the caller's accessible scope.
-
-For historical availability, authorize by current router ownership before querying `device_availability_events` by `serialNumber`. The event-time `board_id` field is historical context only and must not be the sole authorization source. If current ownership cannot be resolved for a non-operator caller, do not serve serial-number-only availability history. A privileged operator-level permission may bypass current ownership resolution only if explicitly implemented and audited.
-
-Privileged operator bypass, if implemented, must use a separate permission:
-
-```text
-analytics.gateway_metrics.read_any
-```
+1. Authenticate the HTTP `Authorization: Bearer <token>` header via OWSEC `validateToken`. If missing, invalid, or expired, return `401 Unauthorized`.
+2. Forward the caller's bearer token on upstream OWPROV requests (e.g. `GET /api/v1/inventory/{routerId}`).
+3. OWPROV inventory visibility determines whether the caller has access to the requested router.
+4. Upstream OWPROV `401 Unauthorized`, `403 Forbidden`, or `404 Not Found` responses are normalized to Analytics `404 Not Found` (`error: "not_found"`).
+5. Unreachable or invalid OWPROV responses return `502 Bad Gateway`.
 
 ### Current Storage Model
 

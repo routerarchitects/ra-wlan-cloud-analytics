@@ -9,6 +9,8 @@
 #include "fmt/format.h"
 #include "framework/utils.h"
 
+#include <optional>
+
 namespace OpenWifi {
 
 	static std::string mac_filter(const std::string &m) {
@@ -39,6 +41,17 @@ namespace OpenWifi {
 			}
 		}
 		v = def;
+	}
+
+	std::optional<int64_t> GetOptionalInt64JSON(const nlohmann::json &doc,
+												const char *field) {
+		if (!doc.contains(field) || doc[field].is_null())
+			return std::nullopt;
+		try {
+			return doc[field].get<int64_t>();
+		} catch (...) {
+		}
+		return std::nullopt;
 	}
 
 	inline double safe_div(uint64_t a, uint64_t b) {
@@ -160,6 +173,18 @@ namespace OpenWifi {
 						GetJSON("active_ms", radio, RTP.active_ms, (uint64_t)0);
 						GetJSON("channel", radio, RTP.channel, (uint64_t)0);
 						GetJSON("temperature", radio, RTP.temperature, (int64_t)20);
+						RTP.wifi_temp = GetOptionalInt64JSON(radio, "wifi_temp");
+						if (!RTP.wifi_temp)
+							RTP.wifi_temp = GetOptionalInt64JSON(radio, "temperature");
+						if (radio.contains("wifi_temp_zero_is_unavailable") &&
+							radio["wifi_temp_zero_is_unavailable"].is_boolean()) {
+							RTP.wifi_temp_zero_is_unavailable =
+								radio["wifi_temp_zero_is_unavailable"].get<bool>();
+						} else if (radio.contains("wifiTempZeroIsUnavailable") &&
+								   radio["wifiTempZeroIsUnavailable"].is_boolean()) {
+							RTP.wifi_temp_zero_is_unavailable =
+								radio["wifiTempZeroIsUnavailable"].get<bool>();
+						}
 						if (radio.contains("channel_width") && !radio["channel_width"].is_null()) {
 							if (radio["channel_width"].is_string()) {
 								std::string C = radio["channel_width"];

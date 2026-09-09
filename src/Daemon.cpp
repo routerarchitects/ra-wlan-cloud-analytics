@@ -9,6 +9,10 @@
 #include "Daemon.h"
 
 #include "Poco/Environment.h"
+#include "Poco/DateTime.h"
+#include "Poco/DateTimeFormat.h"
+#include "Poco/DateTimeParser.h"
+#include "Poco/Exception.h"
 #include "Poco/Net/SSLManager.h"
 #include "Poco/Util/Application.h"
 #include "Poco/Util/Option.h"
@@ -20,10 +24,36 @@
 #include "StorageService.h"
 #include "VenueCoordinator.h"
 #include "WifiClientCache.h"
+#include "framework/MicroServiceFuncs.h"
 #include "framework/UI_WebSocketClientServer.h"
+
+#include <cstdlib>
 
 namespace OpenWifi {
 	class Daemon *Daemon::instance_ = nullptr;
+
+	namespace {
+		std::string GetTemperatureCutoverConfigValue() {
+			if (const auto *EnvCutover = std::getenv("TEMPERATURE_MIGRATION_CUTOVER_TIME")) {
+				if (*EnvCutover != '\0')
+					return EnvCutover;
+			}
+			return MicroServiceConfigGetString("temperature.migration_cutover_time", "");
+		}
+
+		bool ParseTemperatureCutoverTime(const std::string &Value) {
+			try {
+				Poco::DateTime DateTime;
+				int TimeZone = 0;
+				Poco::DateTimeParser::parse(Poco::DateTimeFormat::ISO8601_FORMAT, Value,
+											DateTime, TimeZone);
+				(void)DateTime.timestamp().epochTime();
+				return true;
+			} catch (...) {
+			}
+			return false;
+		}
+	}
 
 	class Daemon *Daemon::instance() {
 		if (instance_ == nullptr) {
@@ -37,7 +67,21 @@ namespace OpenWifi {
 		return instance_;
 	}
 
-	void Daemon::PostInitialization([[maybe_unused]] Poco::Util::Application &self) {}
+	void Daemon::PostInitialization([[maybe_unused]] Poco::Util::Application &self) {
+		const auto Cutover = GetTemperatureCutoverConfigValue();
+		if (Cutover.empty()) {
+			Log().fatal("FATAL: Missing required configuration "
+						"'temperature.migration_cutover_time'");
+			throw Poco::InvalidArgumentException(
+				"Missing required configuration 'temperature.migration_cutover_time'");
+		}
+		if (!ParseTemperatureCutoverTime(Cutover)) {
+			Log().fatal("FATAL: Unparseable configuration "
+						"'temperature.migration_cutover_time'");
+			throw Poco::InvalidArgumentException(
+				"Unparseable configuration 'temperature.migration_cutover_time'");
+		}
+	}
 
 	void DaemonPostInitialization(Poco::Util::Application &self) {
 		Daemon()->PostInitialization(self);
