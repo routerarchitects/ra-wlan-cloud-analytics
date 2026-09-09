@@ -7,7 +7,10 @@
 #include "WifiClientCache.h"
 #include "dict_ssid.h"
 #include "fmt/format.h"
+#include "framework/MicroServiceFuncs.h"
 #include "framework/utils.h"
+#include <Poco/String.h>
+#include <Poco/StringTokenizer.h>
 #include <optional>
 
 namespace OpenWifi {
@@ -71,15 +74,61 @@ namespace OpenWifi {
 		return std::nullopt;
 	}
 
-	static bool GetBoolJSON(const char *field, const nlohmann::json &doc, bool def) {
+	static bool GetOptionalBoolJSON(const char *field, const nlohmann::json &doc, bool &value) {
 		try {
-			if (!doc.contains(field) || doc[field].is_null())
-				return def;
-			if (doc[field].is_boolean())
-				return doc[field].get<bool>();
+			if (!doc.contains(field) || doc[field].is_null() || !doc[field].is_boolean())
+				return false;
+			value = doc[field].get<bool>();
+			return true;
 		} catch (...) {
 		}
-		return def;
+		return false;
+	}
+
+	static bool ConfigListContains(const std::string &ConfigKey, const std::string &Value) {
+		if (Value.empty())
+			return false;
+
+		Poco::StringTokenizer Tokens(MicroServiceConfigGetString(ConfigKey, ""), ",",
+									 Poco::StringTokenizer::TOK_TRIM |
+										 Poco::StringTokenizer::TOK_IGNORE_EMPTY);
+		for (const auto &Token : Tokens) {
+			if (!Poco::icompare(Token, Value))
+				return true;
+		}
+		return false;
+	}
+
+	static bool ConfigListContainsPrefix(const std::string &ConfigKey,
+										 const std::string &Value) {
+		if (Value.empty())
+			return false;
+
+		Poco::StringTokenizer Tokens(MicroServiceConfigGetString(ConfigKey, ""), ",",
+									 Poco::StringTokenizer::TOK_TRIM |
+										 Poco::StringTokenizer::TOK_IGNORE_EMPTY);
+		for (const auto &Token : Tokens) {
+			if (Value.size() >= Token.size() &&
+				!Poco::icompare(Value.substr(0, Token.size()), Token))
+				return true;
+		}
+		return false;
+	}
+
+	static bool ResolveWifiTempZeroIsUnavailableContract(
+		const nlohmann::json &radio, const AnalyticsObjects::DeviceInfo &Device) {
+		bool ExplicitContract = false;
+		if (GetOptionalBoolJSON("wifi_temp_zero_is_unavailable", radio, ExplicitContract) ||
+			GetOptionalBoolJSON("wifiTempZeroIsUnavailable", radio, ExplicitContract))
+			return ExplicitContract;
+
+		return ConfigListContains("temperature.wifi_temp_zero_unavailable_device_types",
+								  Device.deviceType) ||
+			   ConfigListContains("temperature.wifi_temp_zero_unavailable_platforms",
+								  Device.platform) ||
+			   ConfigListContainsPrefix(
+				   "temperature.wifi_temp_zero_unavailable_firmware_prefixes",
+				   Device.lastFirmware);
 	}
 
 	inline double safe_div(uint64_t a, uint64_t b) {
@@ -206,8 +255,7 @@ namespace OpenWifi {
 						GetJSON("channel", radio, RTP.channel, (uint64_t)0);
 						RTP.wifi_temp = GetOptionalDoubleJSON("temperature", radio);
 						RTP.wifi_temp_zero_is_unavailable =
-							GetBoolJSON("wifi_temp_zero_is_unavailable", radio,
-										GetBoolJSON("wifiTempZeroIsUnavailable", radio, false));
+							ResolveWifiTempZeroIsUnavailableContract(radio, DI_);
 						GetJSON("temperature", radio, RTP.temperature, (int64_t)20);
 						if (radio.contains("channel_width") && !radio["channel_width"].is_null()) {
 							if (radio["channel_width"].is_string()) {
@@ -631,6 +679,7 @@ namespace OpenWifi {
 				DI_.lastPing = Utils::Now();
 				auto ping = (*Connection)["ping"];
 				GetJSON("compatible", ping, DI_.deviceType, std::string{});
+				GetJSON("platform", ping, DI_.platform, std::string{});
 				GetJSON("connectionIp", ping, DI_.connectionIp, std::string{});
 				GetJSON("locale", ping, DI_.locale, std::string{});
 				GetJSON("timestamp", ping, DI_.lastConnection, (uint64_t)Utils::Now());
@@ -653,6 +702,8 @@ namespace OpenWifi {
 				DI_.connected = true;
 				DI_.lastConnection = Utils::Now();
 				auto ConnectionData = (*Connection)["capabilities"];
+				GetJSON("compatible", ConnectionData, DI_.deviceType, std::string{});
+				GetJSON("platform", ConnectionData, DI_.platform, std::string{});
 				if (ConnectionData.contains("firmware")) {
 					auto NewFirmware = ConnectionData["firmware"];
 					if (NewFirmware != DI_.lastFirmware) {

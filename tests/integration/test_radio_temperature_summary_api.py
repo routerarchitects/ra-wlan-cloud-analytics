@@ -35,6 +35,8 @@ import pytest
 pytestmark = pytest.mark.integration
 
 DEFAULT_ROUTER_ID = "60cf84f22290"
+UNKNOWN_ROUTER_ID = "60cf84f22291"
+UNAUTHORIZED_ROUTER_ID = "60cf84f22292"
 DEFAULT_BOARD_ID = "board-test-01"
 DEFAULT_VENUE_ID = "venue-test-01"
 OTHER_BOARD_ID = "temperature-other-board"
@@ -379,6 +381,23 @@ def test_radio_temperature_summary_rejects_range_before_cutover() -> None:
     assert result.body["message"] == (
         "The requested summary interval starts before the temperature migration cutover timestamp."
     )
+
+
+@pytest.mark.parametrize("selected_router_id", [UNKNOWN_ROUTER_ID, UNAUTHORIZED_ROUTER_ID])
+def test_radio_temperature_summary_resolves_router_before_cutover_validation(
+    selected_router_id: str,
+) -> None:
+    result = http_json(
+        temperature_summary_path(
+            "2026-07-01T00:30:00Z",
+            lookback_hours="1",
+            selected_router_id=selected_router_id,
+        ),
+        valid_token(),
+    )
+
+    assert result.status == 404
+    assert result.body["error"] == "not_found"
 
 
 def test_radio_temperature_summary_missing_auth_rejects_before_query_validation() -> None:

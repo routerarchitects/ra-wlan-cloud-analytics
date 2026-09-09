@@ -439,6 +439,8 @@ components:
           type: string
         deviceType:
           type: string
+        platform:
+          type: string
         lastHealth:
           type: integer
           format: int64

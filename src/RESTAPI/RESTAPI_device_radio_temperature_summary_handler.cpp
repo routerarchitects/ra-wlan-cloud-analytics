@@ -42,17 +42,6 @@ namespace OpenWifi {
 		if (!MCP::ValidateWindowQuery(Parameters_, Utils::Now(), ClockSkewSeconds, Window, Error))
 			return MCP::SendError(*this, Error);
 
-		uint64_t CutoverTime = 0;
-		if (!MCP::GetTemperatureMigrationCutoverTime(CutoverTime, Error)) {
-			poco_error(Logger(), Error.message);
-			MCP::SetError(Error, Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR,
-						  "radio_temperature_summary_query_failed",
-						  "Unable to retrieve gateway radio temperature history");
-			return MCP::SendError(*this, Error);
-		}
-		if (!MCP::ValidateTemperatureCutover(Window, CutoverTime, Error))
-			return MCP::SendError(*this, Error);
-
 		RouterIdResolver Resolver;
 		RouterIdResolver::Result Resolved;
 		RouterIdResolver::Error ResolverError;
@@ -70,6 +59,17 @@ namespace OpenWifi {
 			return MCP::SendError(*this, Error);
 		}
 		if (!MCP::ValidateRetention(Window, RetentionSeconds, Utils::Now(), ClockSkewSeconds, Error))
+			return MCP::SendError(*this, Error);
+
+		uint64_t CutoverTime = 0;
+		if (!MCP::GetTemperatureMigrationCutoverTime(CutoverTime, Error)) {
+			poco_error(Logger(), Error.message);
+			MCP::SetError(Error, Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR,
+						  "radio_temperature_summary_query_failed",
+						  "Unable to retrieve gateway radio temperature history");
+			return MCP::SendError(*this, Error);
+		}
+		if (!MCP::ValidateTemperatureCutover(Window, CutoverTime, Error))
 			return MCP::SendError(*this, Error);
 
 		std::vector<AnalyticsObjects::DeviceTimePoint> Records;

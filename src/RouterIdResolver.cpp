@@ -16,11 +16,15 @@ namespace OpenWifi {
 		}
 
 		bool ResolveFromCurrentVenueMap(const std::string &routerId,
+										const std::string &authorizedVenueId,
 										RouterIdResolver::Result &Resolved,
 										RouterIdResolver::Error &E,
 										bool &StorageFailure) {
 			std::vector<AnalyticsObjects::BoardInfo> MatchingBoards;
 			auto VisitBoard = [&](const AnalyticsObjects::BoardInfo &Board) -> bool {
+				if (Board.venueList.size() != 1 || Board.venueList[0].id != authorizedVenueId)
+					return true;
+
 				auto BoardId = Board.info.id;
 				AnalyticsObjects::DeviceInfoList Devices;
 				VenueCoordinator()->GetDevices(BoardId, Devices);
@@ -57,7 +61,7 @@ namespace OpenWifi {
 			Resolved.routerId = routerId;
 			Resolved.board = Board;
 			Resolved.resolvedBoardId = Board.info.id;
-			Resolved.resolvedVenueId = Board.venueList[0].id;
+			Resolved.resolvedVenueId = authorizedVenueId;
 			return true;
 		}
 
@@ -114,12 +118,6 @@ namespace OpenWifi {
 			return false;
 		}
 
-		bool MapStorageFailure = false;
-		if (ResolveFromCurrentVenueMap(routerId, Resolved, E, MapStorageFailure))
-			return true;
-		if (MapStorageFailure || E.status == Poco::Net::HTTPResponse::HTTP_CONFLICT)
-			return false;
-
 		ProvObjects::InventoryTag Device;
 		Poco::Net::HTTPResponse::HTTPStatus ProvisioningStatus =
 			Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR;
@@ -137,6 +135,12 @@ namespace OpenWifi {
 			NotFound(E);
 			return false;
 		}
+
+		bool MapStorageFailure = false;
+		if (ResolveFromCurrentVenueMap(routerId, Device.venue, Resolved, E, MapStorageFailure))
+			return true;
+		if (MapStorageFailure || E.status == Poco::Net::HTTPResponse::HTTP_CONFLICT)
+			return false;
 
 		std::vector<AnalyticsObjects::BoardInfo> Matches;
 		if (!StorageService()->BoardsDB().FindBoardsByVenue(Device.venue, Matches)) {

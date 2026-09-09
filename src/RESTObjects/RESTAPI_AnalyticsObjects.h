@@ -50,6 +50,7 @@ namespace OpenWifi {
 			std::string type;
 			std::string serialNumber;
 			std::string deviceType;
+			std::string platform;
 			uint64_t lastContact = 0;
 			uint64_t lastPing = 0;
 			uint64_t lastState = 0;

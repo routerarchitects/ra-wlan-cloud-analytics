@@ -96,6 +96,7 @@ namespace OpenWifi::AnalyticsObjects {
 		field_to_json(Obj, "type", type);
 		field_to_json(Obj, "serialNumber", serialNumber);
 		field_to_json(Obj, "deviceType", deviceType);
+		field_to_json(Obj, "platform", platform);
 		field_to_json(Obj, "lastContact", lastContact);
 		field_to_json(Obj, "lastPing", lastPing);
 		field_to_json(Obj, "lastState", lastState);
@@ -123,6 +124,7 @@ namespace OpenWifi::AnalyticsObjects {
 			field_from_json(Obj, "type", type);
 			field_from_json(Obj, "serialNumber", serialNumber);
 			field_from_json(Obj, "deviceType", deviceType);
+			field_from_json(Obj, "platform", platform);
 			field_from_json(Obj, "lastContact", lastContact);
 			field_from_json(Obj, "lastPing", lastPing);
 			field_from_json(Obj, "lastState", lastState);
