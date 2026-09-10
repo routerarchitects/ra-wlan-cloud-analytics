@@ -150,7 +150,7 @@ def db_connection():
 def cleanup_test_rows(cursor) -> None:
     cursor.execute(
         "delete from timepoints where serialnumber in (%s, %s)",
-        (router_id(), "temperature-other-router"),
+        (router_id(), "temp-other-router"),
     )
     cursor.execute(
         "delete from timepoints where boardid in (%s, %s)",
@@ -315,7 +315,7 @@ def test_radio_temperature_summary_filters_window_board_serial_and_band(seeded_b
             insert_timepoint(cursor, format_utc(start_sample_dt), [{"band": 2, "wifi_temp": 20}], suffix="start")
             insert_timepoint(cursor, format_utc(inside_dt), [{"band": 2, "wifi_temp": 30}, {"band": 6, "wifi_temp": 99}], suffix="inside")
             insert_timepoint(cursor, format_utc(end_sample_dt), [{"band": 2, "wifi_temp": 100}], suffix="end")
-            insert_timepoint(cursor, format_utc(mid_dt), [{"band": 2, "wifi_temp": 2}], serial="temperature-other-router", suffix="other-router")
+            insert_timepoint(cursor, format_utc(mid_dt), [{"band": 2, "wifi_temp": 2}], serial="temp-other-router", suffix="oth")
             insert_timepoint(cursor, format_utc(mid_dt), [{"band": 2, "wifi_temp": 3}], board=OTHER_BOARD_ID, suffix="other-board")
 
     result = http_json(temperature_summary_path(format_utc(end_dt)), valid_token())
@@ -380,7 +380,7 @@ def test_radio_temperature_summary_ignores_invalid_missing_and_legacy_temperatur
     }
 
 
-def test_radio_temperature_summary_rejects_range_before_cutover() -> None:
+def test_radio_temperature_summary_rejects_range_before_cutover(seeded_board) -> None:
     result = http_json(
         temperature_summary_path("2026-07-01T00:30:00Z", lookback_hours="1"),
         valid_token(),
