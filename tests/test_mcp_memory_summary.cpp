@@ -338,8 +338,7 @@ namespace {
 			Params("timestampTill=2026-08-21T06:25:00Z&lookbackHours=1.5"), Now, 300, W, E));
 		assert(E.error == "invalid_lookback_hours");
 		assert(!MCP::ValidateWindowQuery(
-			Params("timestampTill=2026-08-21T06:25:00Z&lookbackHours=999999999999999999999"),
-			Now, 300, W, E));
+			Params("timestampTill=2026-08-21T06:25:00Z&lookbackHours=87601"), Now, 300, W, E));
 		assert(E.error == "invalid_lookback_hours");
 		assert(!MCP::ValidateWindowQuery(
 			Params("timestampTill=2026-08-21T06:25:00Z&lookbackHours=2147483648"), Now, 300,

@@ -275,14 +275,15 @@ components:
       name: lookbackHours
       description: >
         Number of hours to look back from timestampTill. Must be greater than 0 and less than or equal to
-        maxLookbackHours, where maxLookbackHours is derived from the configured monitoringDuration; the
-        resulting half-open range must fit inside the configured retention window. Handlers must parse the
-        raw HTTP query parameter collection to ensure lookbackHours appears exactly once and reject repeated,
-        empty, fractional, partially numeric, overflowing, zero, and negative values.
+        maxLookbackHours, where maxLookbackHours is bounded by the configured board retention (monitoringDuration / 3600)
+        up to an absolute maximum API safety limit of 87600 hours (10 years); the resulting half-open range must fit inside
+        the configured retention window. Handlers must parse the raw HTTP query parameter collection to ensure lookbackHours
+        appears exactly once and reject repeated, empty, fractional, partially numeric, overflowing, zero, and negative values.
       schema:
         type: integer
         format: int32
         minimum: 1
+        maximum: 87600
         example: 24
       required: true
   schemas:

@@ -306,15 +306,10 @@ namespace OpenWifi {
 						 "lookbackHours must be a positive whole number");
 				return false;
 			}
-			if (Parsed.lookbackHours > static_cast<uint64_t>(std::numeric_limits<int32_t>::max())) {
+			constexpr uint64_t MaxApiLookbackHours = 87600; // 10 years maximum API limit
+			if (Parsed.lookbackHours > MaxApiLookbackHours) {
 				SetError(E, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST, "invalid_lookback_hours",
-						 "lookbackHours is too large");
-				return false;
-			}
-			if (Parsed.lookbackHours >
-				std::numeric_limits<uint64_t>::max() / static_cast<uint64_t>(3600)) {
-				SetError(E, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST, "invalid_lookback_hours",
-						 "lookbackHours is too large");
+						 "lookbackHours exceeds maximum API limit of 87600 hours");
 				return false;
 			}
 			auto LookbackSeconds = Parsed.lookbackHours * static_cast<uint64_t>(3600);

@@ -182,7 +182,7 @@ Unless a deployment explicitly configures another value, allowedClockSkewSeconds
 endTime must be less than or equal to currentServerTime + allowedClockSkewSeconds.
 lookbackHours must be present exactly once.
 lookbackHours must parse as a strict whole decimal integer with no trailing characters.
-lookbackHours must be greater than 0.
+lookbackHours must be greater than 0 and less than or equal to 87600 (10 years API safety cap).
 maxLookbackHours = floor(configured monitoringDuration / 3600).
 lookbackHours must be less than or equal to maxLookbackHours.
 startTime must be less than endTime.
@@ -193,7 +193,7 @@ If `timestampTill` is beyond `currentServerTime + allowedClockSkewSeconds`, retu
 server time. The returned aggregate must represent the requested half-open
 window exactly, not a silently shortened window.
 
-All APIs in this document derive `maxLookbackHours` from the configured `monitoringDuration` for the resolved router ownership scope. All APIs share this limit unless an endpoint section explicitly names a stricter limit. No endpoint currently defines a separate limit.
+All APIs in this document derive `maxLookbackHours` from the configured `monitoringDuration` for the resolved router venue scope, bounded by an absolute API safety limit of 87600 hours (10 years). Board retention is the authoritative resource bound capping in-memory record loading and parsing; queries requesting lookback windows larger than the resolved board retention (`lookbackHours > maxLookbackHours`) are rejected with `400 invalid_lookback_hours` before querying storage.
 
 For a one-year monitoring configuration, `maxLookbackHours` is `365 * 24` only when the configured monitoring duration is exactly 365 days. Do not assume every calendar year is 8760 hours; use the configured duration and effective retention timestamps when validating the request.
 
@@ -206,7 +206,7 @@ invalid_timestamp:
 
 invalid_lookback_hours:
   lookbackHours is missing, repeated, empty, non-numeric, fractional, partially numeric, overflowing,
-  zero, negative, or greater than maxLookbackHours.
+  zero, negative, greater than 87600, or greater than maxLookbackHours.
 
 lookback_outside_retention:
   the calculated [startTime, endTime) window starts before the retained data window
