@@ -376,7 +376,7 @@ Authorization must not rely on the caller-supplied `routerId` alone. A caller mu
 
 If OWPROV returns `404 Not Found`, `401 Unauthorized`, or `403 Forbidden` for the caller's token, Analytics normalizes the response to `404 Not Found` (`{"error": "not_found", "message": "Router was not found"}`). This prevents router existence disclosure.
 
-Do not introduce Analytics-specific metric permissions such as `analytics.gateway_metrics.read`.
+Do not introduce Analytics-specific metric permissions.
 
 For historical availability, authorize by current router ownership through OWPROV before querying `device_availability_events` by `serialNumber`. The event-time `board_id` field is historical context only and must not be the sole authorization source.
 
