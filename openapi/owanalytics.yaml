@@ -1993,8 +1993,6 @@ paths:
           $ref: '#/components/responses/CommonAnalyticsBadRequest'
         401:
           $ref: '#/components/responses/AnalyticsUnauthorized'
-        403:
-          $ref: '#/components/responses/AnalyticsForbidden'
         404:
           $ref: '#/components/responses/AnalyticsNotFound'
         409:
@@ -2044,8 +2042,6 @@ paths:
           $ref: '#/components/responses/TemperatureAnalyticsBadRequest'
         401:
           $ref: '#/components/responses/AnalyticsUnauthorized'
-        403:
-          $ref: '#/components/responses/AnalyticsForbidden'
         404:
           $ref: '#/components/responses/AnalyticsNotFound'
         409:

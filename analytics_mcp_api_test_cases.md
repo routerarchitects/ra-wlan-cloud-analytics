@@ -100,7 +100,7 @@ Retention / cutover validation (availabilityValidFrom)
 Analytics database / query processing
 ```
 
-Bearer-token authentication is a hard gate. Missing, malformed, expired, wrong-scheme, or otherwise invalid authentication must be rejected before request/path/query parameter validation, before local ownership/cache resolution, before OWPROV network lookup, before caller scope authorization, and before Analytics datastore queries. Pure request validation occurs before router ownership resolution; caller visibility and permission authorization (`analytics.gateway_metrics.read`) are evaluated against the resolved board/venue/entity scope.
+Bearer-token authentication is a hard gate. Missing, malformed, expired, wrong-scheme, or otherwise invalid authentication must be rejected before request/path/query parameter validation, before local ownership/cache resolution, before OWPROV network lookup, and before Analytics datastore queries. Pure request validation occurs before router ownership resolution; caller router access authorization is evaluated against OWPROV inventory lookup using the caller's token.
 
 Common behavior is tested once with a representative endpoint, usually `memory-summary`. The same behavior applies to all bearer-protected Analytics APIs that share the same OpenAPI response contract. Endpoint-specific tests exist only when the public error contract or behavior is genuinely endpoint-specific.
 
@@ -839,27 +839,22 @@ No `Authorization: Bearer ...` header is supplied.
 
 ---
 
-## TC-COMMON-019: Authenticated caller lacks analytics permission
+## TC-COMMON-019: Router unauthorized or forbidden in OWPROV
 
 ### Preconditions
 
 * Caller has a valid bearer token.
-* Router ownership resolves to a scope visible to the caller.
-* Caller lacks `analytics.gateway_metrics.read` for the requested operation on that resolved router scope.
+* OWPROV returns `401 Unauthorized` or `403 Forbidden` for the caller's token when looking up the requested router.
 
 ### Expected result
 
-* HTTP `403 Forbidden`.
-* Error is `forbidden`.
-* Authentication and authorization are distinguished:
-
-```text
-No valid identity -> 401 unauthorized
-Valid identity but insufficient analytics permission -> 403 forbidden
-```
-
-* Nonexistent routers and routers outside the caller's visible ownership scope are still normalized to `404 not_found` according to the OpenAPI `AnalyticsNotFound` contract.
-* The same authorization behavior applies to the other bearer-protected Analytics APIs.
+* HTTP `404 Not Found`.
+* Error is `not_found`.
+* Response body is `{"error": "not_found", "message": "Router was not found"}`.
+* Routers outside the caller's authorized scope in OWPROV are normalized to `404 Not Found` to prevent router existence disclosure.
+* The endpoint does not return `403 Forbidden`.
+* `analytics.gateway_metrics.read` permission is not required or evaluated.
+* The same authorization behavior applies to all bearer-protected Analytics APIs.
 
 ---
 
@@ -4849,7 +4844,7 @@ The PR implementation is functionally accepted when:
 3. Router ownership resolves correctly from the maintained local map.
 4. Bearer authentication is enforced before parameter validation, router ownership resolution, caller authorization, or Analytics datastore queries.
 5. Missing, malformed, expired, wrong-scheme, and API-key-only authentication failures return `401 unauthorized` and never contact OWPROV.
-6. Valid authenticated callers without `analytics.gateway_metrics.read` on a visible resolved scope receive `403 forbidden`; inaccessible or nonexistent routers remain normalized to `404 not_found`.
+6. OWPROV router access authorization determines visibility; inaccessible (401/403) or nonexistent (404) routers are normalized to `404 not_found`.
 7. OWPROV fallback resolution distinguishes `404`, `409`, `502 owprov_unavailable`, and `502 owprov_invalid_response` outcomes.
 8. Valid usable cached ownership fallback is used only after successful bearer authentication and only when the cache entry is safe to use.
 9. Child-venue gateway resolution works.
