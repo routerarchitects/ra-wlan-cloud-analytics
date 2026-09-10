@@ -4841,13 +4841,13 @@ The PR implementation is functionally accepted when:
 
 1. All five endpoints are available in OpenAPI.
 2. Every endpoint uses the gateway serial number as `routerId`.
-3. Router ownership resolves correctly from the maintained local map.
+3. Router ownership resolves correctly via caller-scoped OWPROV device lookup and board venue matching.
 4. Bearer authentication is enforced before parameter validation, router ownership resolution, caller authorization, or Analytics datastore queries.
 5. Missing, malformed, expired, wrong-scheme, and API-key-only authentication failures return `401 unauthorized` and never contact OWPROV.
 6. OWPROV router access authorization determines visibility; inaccessible (401/403) or nonexistent (404) routers are normalized to `404 not_found`.
-7. OWPROV fallback resolution distinguishes `404`, `409`, `502 owprov_unavailable`, and `502 owprov_invalid_response` outcomes.
-8. Valid usable cached ownership fallback is used only after successful bearer authentication and only when the cache entry is safe to use.
-9. Child-venue gateway resolution works.
+7. OWPROV resolution distinguishes `404 not_found`, `409 multiple_boards`, `502 owprov_unavailable`, and `502 owprov_invalid_response` outcomes.
+8. Authorization checks use the caller's bearer token on OWPROV queries to ensure visibility cannot be bypassed.
+9. Router venue resolution maps InventoryTag.venue to single-venue board records in Analytics storage.
 10. Timestamp, lookback, and query-parameter validation is consistent, including rejection of repeated `timestampTill`, repeated `lookbackHours`, and unknown query parameters before OWPROV or database work.
 11. Memory aggregation ignores missing historical fields instead of treating them as zero.
 12. Temperature aggregation excludes synthetic or invalid fallback values.

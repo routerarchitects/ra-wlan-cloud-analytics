@@ -858,6 +858,15 @@ from the observed temperature value itself.
 
 If no producer/device contract can be resolved for a sample, the default is:
   wifiTempZeroIsUnavailable = false
+
+### Venue Reassignment & Observed Window Rules
+
+When a gateway moves from an old venue (Board A) to a new venue (Board B):
+1. `routerId` resolves via OWPROV to the current venue (`Board B`).
+2. Analytics queries timepoints filtered by `boardId == Board B` and `serialNumber == routerId`. Historical samples associated with `Board A` are not queried or included.
+3. `requestedWindow` reflects the full requested interval (`startTime` to `endTime`).
+4. `observedWindow` reflects the first and last valid sample timestamps found for `Board B` within `[startTime, endTime)`.
+5. Temperature aggregates (`min`, `max`, `avg`, `latest`) are calculated exclusively from valid samples on `Board B`.
 ```
 
 Migration boundary configuration & rule:

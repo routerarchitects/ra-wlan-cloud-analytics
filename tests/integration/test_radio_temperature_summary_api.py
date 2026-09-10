@@ -497,3 +497,63 @@ def test_radio_temperature_summary_local_venue_cache_does_not_bypass_authorizati
     assert result.status == 404
     assert result.body["error"] == "not_found"
 
+
+def test_radio_temperature_summary_reassigned_router_ignores_old_board_samples(seeded_board) -> None:
+    end_dt = utc_now() - timedelta(seconds=30)
+    old_board_id = "old-board-reassigned"
+    
+    with db_connection() as connection:
+        with connection.cursor() as cursor:
+            # Seed old board with old venue
+            seed_board(cursor, board=old_board_id, venue="old-venue-reassigned")
+            
+            # Historical samples on old Board A
+            insert_timepoint(
+                cursor,
+                format_utc(end_dt - timedelta(hours=5)),
+                [{"band": 2, "wifi_temp": 40.0}],
+                board_id=old_board_id,
+                suffix="old-board-sample-1",
+            )
+            insert_timepoint(
+                cursor,
+                format_utc(end_dt - timedelta(hours=4)),
+                [{"band": 2, "wifi_temp": 45.0}],
+                board_id=old_board_id,
+                suffix="old-board-sample-2",
+            )
+
+            # Current samples on current Board B
+            t1 = end_dt - timedelta(hours=2)
+            t2 = end_dt - timedelta(hours=1)
+            insert_timepoint(
+                cursor,
+                format_utc(t1),
+                [{"band": 2, "wifi_temp": 72.0}],
+                suffix="current-board-sample-1",
+            )
+            insert_timepoint(
+                cursor,
+                format_utc(t2),
+                [{"band": 2, "wifi_temp": 78.0}],
+                suffix="current-board-sample-2",
+            )
+
+    req_start = end_dt - timedelta(hours=6)
+    result = http_json(
+        temperature_summary_path(format_utc(end_dt), lookback_hours=6),
+        valid_token(),
+    )
+
+    assert result.status == 200
+    assert result.body["requestedWindow"]["startTime"] == format_utc(req_start)
+    assert result.body["requestedWindow"]["endTime"] == format_utc(end_dt)
+    # Observed window & statistics should be derived strictly from current board B samples
+    assert result.body["observedWindow"]["startTime"] == format_utc(t1)
+    assert result.body["observedWindow"]["endTime"] == format_utc(t2)
+    assert result.body["min_wifi_temp_2.4G"] == 72.0
+    assert result.body["max_wifi_temp_2.4G"] == 78.0
+    assert result.body["avg_wifi_temp_2.4G"] == 75.0
+    assert result.body["latest_wifi_temp_2.4G"] == 78.0
+
+
