@@ -43,8 +43,8 @@ namespace OpenWifi {
 			return false;
 		}
 
-		std::vector<AnalyticsObjects::BoardInfo> Matches;
-		if (!StorageService()->BoardsDB().FindBoardsByVenue(Device.venue, Matches)) {
+		std::vector<BoardsDB::BoardVenueRecord> Matches;
+		if (!StorageService()->BoardsDB().FindBoardVenueRecordsByVenue(Device.venue, Matches)) {
 			poco_error(Client.Logger(),
 					   "Failed to read Analytics boards while resolving routerId=" +
 						   routerId);
@@ -52,29 +52,8 @@ namespace OpenWifi {
 			return false;
 		}
 
-		if (Matches.empty()) {
-			NotFound(E);
-			return false;
-		}
-
-		if (Matches.size() > 1) {
-			E.status = Poco::Net::HTTPResponse::HTTP_CONFLICT;
-			E.error = "multiple_boards";
-			E.message = "Router is mapped to multiple current boards";
-			return false;
-		}
-
 		Resolved.routerId = routerId;
-		Resolved.board = Matches.front();
-		Resolved.resolvedBoardId = Matches.front().info.id;
-		Resolved.resolvedVenueId = Device.venue;
-		if (!Matches.front().venueList.empty()) {
-			const auto &V = Matches.front().venueList[0];
-			Resolved.retention = V.retention;
-			Resolved.interval = V.interval;
-			Resolved.monitorSubVenues = V.monitorSubVenues;
-		}
-		return true;
+		return ResolveBoardForVenue(Device.venue, Matches, Resolved, E);
 	}
 
 } // namespace OpenWifi

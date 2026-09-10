@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include "storage/storage_boards.h"
+
 namespace OpenWifi {
 
 	class RESTAPIHandler;
@@ -19,7 +21,6 @@ namespace OpenWifi {
 			uint64_t retention = 0;
 			uint64_t interval = 0;
 			bool monitorSubVenues = false;
-			AnalyticsObjects::BoardInfo board;
 		};
 
 		struct Error {
@@ -39,7 +40,7 @@ namespace OpenWifi {
 		static bool AnalyticsBoardStorageFailure(Error &E);
 		static bool InvalidProvisioningResponse(Error &E);
 		static bool ResolveBoardForVenue(const std::string &venueId,
-										 const std::vector<AnalyticsObjects::BoardInfo> &Boards,
+										 const std::vector<BoardsDB::BoardVenueRecord> &Boards,
 										 Result &Resolved, Error &E);
 	};
 
@@ -84,13 +85,11 @@ namespace OpenWifi {
 	}
 
 	inline bool RouterIdResolver::ResolveBoardForVenue(
-		const std::string &venueId, const std::vector<AnalyticsObjects::BoardInfo> &Boards,
+		const std::string &venueId, const std::vector<BoardsDB::BoardVenueRecord> &Boards,
 		Result &Resolved, Error &E) {
-		std::vector<AnalyticsObjects::BoardInfo> MatchingBoards;
+		std::vector<BoardsDB::BoardVenueRecord> MatchingBoards;
 		for (const auto &Board : Boards) {
-			if (Board.venueList.size() == 1 &&
-				!Board.venueList[0].id.empty() &&
-				Board.venueList[0].id == venueId) {
+			if (!Board.venueId.empty() && Board.venueId == venueId) {
 				MatchingBoards.emplace_back(Board);
 			}
 		}
@@ -109,14 +108,10 @@ namespace OpenWifi {
 		}
 
 		Resolved.resolvedVenueId = venueId;
-		Resolved.board = MatchingBoards.front();
-		Resolved.resolvedBoardId = Resolved.board.info.id;
-		if (!Resolved.board.venueList.empty()) {
-			const auto &V = Resolved.board.venueList[0];
-			Resolved.retention = V.retention;
-			Resolved.interval = V.interval;
-			Resolved.monitorSubVenues = V.monitorSubVenues;
-		}
+		Resolved.resolvedBoardId = MatchingBoards.front().boardId;
+		Resolved.retention = MatchingBoards.front().retention;
+		Resolved.interval = MatchingBoards.front().interval;
+		Resolved.monitorSubVenues = MatchingBoards.front().monitorSubVenues;
 		return true;
 	}
 
