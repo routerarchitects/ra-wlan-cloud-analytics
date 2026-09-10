@@ -134,17 +134,6 @@ components:
               value:
                 error: unauthorized
                 message: Missing, invalid, or expired bearer token
-    AnalyticsForbidden:
-      description: Caller has visibility of the resolved router ownership scope, but lacks analytics.gateway_metrics.read permission for the requested operation. Do not use this response for nonexistent routers or routers outside the caller's accessible ownership scope; those cases are normalized to 404 not_found to avoid disclosing router existence.
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/AnalyticsForbiddenError'
-          examples:
-            forbidden:
-              value:
-                error: forbidden
-                message: Caller lacks analytics.gateway_metrics.read permission for this router scope
     AnalyticsNotFound:
       description: Router was not found, caller cannot access it, or monitoring is not configured for the resolved router scope. Public 404 responses for inventory missing, empty venue, board not configured, and access denied are intentionally collapsed to not_found unless monitoring is not configured.
       content:
@@ -286,14 +275,15 @@ components:
       name: lookbackHours
       description: >
         Number of hours to look back from timestampTill. Must be greater than 0 and less than or equal to
-        maxLookbackHours, where maxLookbackHours is derived from the configured monitoringDuration; the
-        resulting half-open range must fit inside the configured retention window. Handlers must parse the
-        raw HTTP query parameter collection to ensure lookbackHours appears exactly once and reject repeated,
-        empty, fractional, partially numeric, overflowing, zero, and negative values.
+        maxLookbackHours, where maxLookbackHours is bounded by the configured board retention (monitoringDuration / 3600)
+        up to an absolute maximum API safety limit of 87600 hours (10 years); the resulting half-open range must fit inside
+        the configured retention window. Handlers must parse the raw HTTP query parameter collection to ensure lookbackHours
+        appears exactly once and reject repeated, empty, fractional, partially numeric, overflowing, zero, and negative values.
       schema:
         type: integer
         format: int32
         minimum: 1
+        maximum: 87600
         example: 24
       required: true
   schemas:
@@ -438,6 +428,8 @@ components:
         serialNumber:
           type: string
         deviceType:
+          type: string
+        platform:
           type: string
         lastHealth:
           type: integer
@@ -1117,19 +1109,6 @@ components:
         message:
           type: string
 
-    AnalyticsForbiddenError:
-      type: object
-      required:
-        - error
-        - message
-      properties:
-        error:
-          type: string
-          enum:
-            - forbidden
-        message:
-          type: string
-
     AnalyticsNotFoundError:
       type: object
       required:
@@ -1291,7 +1270,7 @@ components:
         requested half-open window. They are not time-weighted. For gateways with multiple
         radios in the same band, all valid samples for that band are combined directly rather
         than averaging each radio first. Null applies independently per band: a band returns
-        null min, max, and average values when that band has no valid temperature samples,
+        null min, max, average, and latest values when that band has no valid temperature samples,
         even if another band has samples. A valid radio temperature sample is a present,
         finite Celsius value where -40 <= temperature <= 125. A reported 0°C value is valid
         unless the persisted/resolved telemetry contract has wifiTempZeroIsUnavailable = true;
@@ -1304,9 +1283,11 @@ components:
         - min_wifi_temp_2.4G
         - max_wifi_temp_2.4G
         - avg_wifi_temp_2.4G
+        - latest_wifi_temp_2.4G
         - min_wifi_temp_5G
         - max_wifi_temp_5G
         - avg_wifi_temp_5G
+        - latest_wifi_temp_5G
       properties:
         requestedWindow:
           $ref: '#/components/schemas/RequestedWindow'
@@ -1333,6 +1314,13 @@ components:
           maximum: 125
           nullable: true
           description: Arithmetic average of reported 2.4 GHz Wi-Fi radio temperature samples in degrees Celsius for the effective aggregation window. Literal MCP JSON key; dotted suffix is required for compatibility.
+        latest_wifi_temp_2.4G:
+          type: number
+          format: double
+          minimum: -40
+          maximum: 125
+          nullable: true
+          description: Latest valid 2.4 GHz Wi-Fi radio temperature sample in degrees Celsius for the effective aggregation window. Literal MCP JSON key; dotted suffix is required for compatibility.
         min_wifi_temp_5G:
           type: number
           format: double
@@ -1354,6 +1342,13 @@ components:
           maximum: 125
           nullable: true
           description: Arithmetic average of reported 5 GHz Wi-Fi radio temperature samples in degrees Celsius for the effective aggregation window.
+        latest_wifi_temp_5G:
+          type: number
+          format: double
+          minimum: -40
+          maximum: 125
+          nullable: true
+          description: Latest valid 5 GHz Wi-Fi radio temperature sample in degrees Celsius for the effective aggregation window.
 
     ClientBandwidthConsumption:
       type: object
@@ -1975,8 +1970,6 @@ paths:
           $ref: '#/components/responses/CommonAnalyticsBadRequest'
         401:
           $ref: '#/components/responses/AnalyticsUnauthorized'
-        403:
-          $ref: '#/components/responses/AnalyticsForbidden'
         404:
           $ref: '#/components/responses/AnalyticsNotFound'
         409:
@@ -2017,15 +2010,15 @@ paths:
                     min_wifi_temp_2.4G: 62
                     max_wifi_temp_2.4G: 70
                     avg_wifi_temp_2.4G: 66.64
+                    latest_wifi_temp_2.4G: 68
                     min_wifi_temp_5G: 56
                     max_wifi_temp_5G: 65
                     avg_wifi_temp_5G: 60.38
+                    latest_wifi_temp_5G: 60
         400:
           $ref: '#/components/responses/TemperatureAnalyticsBadRequest'
         401:
           $ref: '#/components/responses/AnalyticsUnauthorized'
-        403:
-          $ref: '#/components/responses/AnalyticsForbidden'
         404:
           $ref: '#/components/responses/AnalyticsNotFound'
         409:
@@ -2079,8 +2072,6 @@ paths:
           $ref: '#/components/responses/CommonAnalyticsBadRequest'
         401:
           $ref: '#/components/responses/AnalyticsUnauthorized'
-        403:
-          $ref: '#/components/responses/AnalyticsForbidden'
         404:
           $ref: '#/components/responses/AnalyticsNotFound'
         409:
@@ -2142,8 +2133,6 @@ paths:
           $ref: '#/components/responses/CommonAnalyticsBadRequest'
         401:
           $ref: '#/components/responses/AnalyticsUnauthorized'
-        403:
-          $ref: '#/components/responses/AnalyticsForbidden'
         404:
           $ref: '#/components/responses/AnalyticsNotFound'
         409:
@@ -2205,8 +2194,6 @@ paths:
           $ref: '#/components/responses/AvailabilityAnalyticsBadRequest'
         401:
           $ref: '#/components/responses/AnalyticsUnauthorized'
-        403:
-          $ref: '#/components/responses/AnalyticsForbidden'
         404:
           $ref: '#/components/responses/AnalyticsNotFound'
         409:

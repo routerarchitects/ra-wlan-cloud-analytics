@@ -93,14 +93,14 @@ Local ownership resolution / cache lookup
     ↓
 OWPROV lookup if required
     ↓
-Caller visibility & permission authorization (evaluated against resolved scope)
+OWPROV caller visibility authorization
     ↓
 Retention / cutover validation (availabilityValidFrom)
     ↓
 Analytics database / query processing
 ```
 
-Bearer-token authentication is a hard gate. Missing, malformed, expired, wrong-scheme, or otherwise invalid authentication must be rejected before request/path/query parameter validation, before local ownership/cache resolution, before OWPROV network lookup, before caller scope authorization, and before Analytics datastore queries. Pure request validation occurs before router ownership resolution; caller visibility and permission authorization (`analytics.gateway_metrics.read`) are evaluated against the resolved board/venue/entity scope.
+Bearer-token authentication is a hard gate. Missing, malformed, expired, wrong-scheme, or otherwise invalid authentication must be rejected before request/path/query parameter validation, before local ownership/cache resolution, before OWPROV network lookup, and before Analytics datastore queries. Pure request validation occurs before router ownership resolution; caller router access authorization is evaluated against OWPROV inventory lookup using the caller's token.
 
 Common behavior is tested once with a representative endpoint, usually `memory-summary`. The same behavior applies to all bearer-protected Analytics APIs that share the same OpenAPI response contract. Endpoint-specific tests exist only when the public error contract or behavior is genuinely endpoint-specific.
 
@@ -839,27 +839,22 @@ No `Authorization: Bearer ...` header is supplied.
 
 ---
 
-## TC-COMMON-019: Authenticated caller lacks analytics permission
+## TC-COMMON-019: Router unauthorized or forbidden in OWPROV
 
 ### Preconditions
 
 * Caller has a valid bearer token.
-* Router ownership resolves to a scope visible to the caller.
-* Caller lacks `analytics.gateway_metrics.read` for the requested operation on that resolved router scope.
+* OWPROV returns `401 Unauthorized` or `403 Forbidden` for the caller's token when looking up the requested router.
 
 ### Expected result
 
-* HTTP `403 Forbidden`.
-* Error is `forbidden`.
-* Authentication and authorization are distinguished:
-
-```text
-No valid identity -> 401 unauthorized
-Valid identity but insufficient analytics permission -> 403 forbidden
-```
-
-* Nonexistent routers and routers outside the caller's visible ownership scope are still normalized to `404 not_found` according to the OpenAPI `AnalyticsNotFound` contract.
-* The same authorization behavior applies to the other bearer-protected Analytics APIs.
+* HTTP `404 Not Found`.
+* Error is `not_found`.
+* Response body is `{"error": "not_found", "message": "Router was not found"}`.
+* Routers outside the caller's authorized scope in OWPROV are normalized to `404 Not Found` to prevent router existence disclosure.
+* The endpoint does not return `403 Forbidden`.
+* No Analytics-specific metric permission is required or evaluated.
+* The same authorization behavior applies to all bearer-protected Analytics APIs.
 
 ---
 
@@ -1163,7 +1158,7 @@ OpenAPI also permits `internal_error` in each endpoint-specific 500 schema. Use 
 | Expired bearer token | `TC-COMMON-018C` | 401 | `unauthorized` |
 | Wrong authorization scheme | `TC-COMMON-018D` | 401 | `unauthorized` |
 | API-key-only authentication | `TC-COMMON-018E` | 401 | `unauthorized` |
-| Valid caller lacks analytics permission | `TC-COMMON-019` | 403 | `forbidden` |
+| Router unauthorized or forbidden in OWPROV | `TC-COMMON-019` | 404 | `not_found` |
 | Invalid router ID | `TC-COMMON-005` | 400 | `invalid_router_id` |
 | Repeated `timestampTill` | `TC-COMMON-012A` | 400 | `invalid_timestamp` |
 | Repeated `lookbackHours` | `TC-COMMON-017F` | 400 | `invalid_lookback_hours` |
@@ -3032,9 +3027,11 @@ Expected response:
   "min_wifi_temp_2.4G": 62,
   "max_wifi_temp_2.4G": 70,
   "avg_wifi_temp_2.4G": 66.64,
+  "latest_wifi_temp_2.4G": 68,
   "min_wifi_temp_5G": 56,
   "max_wifi_temp_5G": 65,
-  "avg_wifi_temp_5G": 60.38
+  "avg_wifi_temp_5G": 60.38,
+  "latest_wifi_temp_5G": 60
 }
 ```
 
@@ -3064,9 +3061,11 @@ Expected response:
   "min_wifi_temp_2.4G": 60,
   "max_wifi_temp_2.4G": 70,
   "avg_wifi_temp_2.4G": 65.0,
+  "latest_wifi_temp_2.4G": 70,
   "min_wifi_temp_5G": 50,
   "max_wifi_temp_5G": 60,
-  "avg_wifi_temp_5G": 55.0
+  "avg_wifi_temp_5G": 55.0,
+  "latest_wifi_temp_5G": 60
 }
 ```
 
@@ -3089,9 +3088,11 @@ Expected response:
   "min_wifi_temp_2.4G": 60,
   "max_wifi_temp_2.4G": 70,
   "avg_wifi_temp_2.4G": 65.0,
+  "latest_wifi_temp_2.4G": 70,
   "min_wifi_temp_5G": null,
   "max_wifi_temp_5G": null,
-  "avg_wifi_temp_5G": null
+  "avg_wifi_temp_5G": null,
+  "latest_wifi_temp_5G": null
 }
 ```
 
@@ -3123,9 +3124,11 @@ Expected response:
   "min_wifi_temp_2.4G": null,
   "max_wifi_temp_2.4G": null,
   "avg_wifi_temp_2.4G": null,
+  "latest_wifi_temp_2.4G": null,
   "min_wifi_temp_5G": null,
   "max_wifi_temp_5G": null,
-  "avg_wifi_temp_5G": null
+  "avg_wifi_temp_5G": null,
+  "latest_wifi_temp_5G": null
 }
 ```
 
@@ -4683,9 +4686,11 @@ observedWindow
 min_wifi_temp_2.4G
 max_wifi_temp_2.4G
 avg_wifi_temp_2.4G
+latest_wifi_temp_2.4G
 min_wifi_temp_5G
 max_wifi_temp_5G
 avg_wifi_temp_5G
+latest_wifi_temp_5G
 ```
 
 All temperature fields are reported in degrees Celsius.
@@ -4836,13 +4841,13 @@ The PR implementation is functionally accepted when:
 
 1. All five endpoints are available in OpenAPI.
 2. Every endpoint uses the gateway serial number as `routerId`.
-3. Router ownership resolves correctly from the maintained local map.
+3. Router ownership resolves correctly via caller-scoped OWPROV device lookup and board venue matching.
 4. Bearer authentication is enforced before parameter validation, router ownership resolution, caller authorization, or Analytics datastore queries.
 5. Missing, malformed, expired, wrong-scheme, and API-key-only authentication failures return `401 unauthorized` and never contact OWPROV.
-6. Valid authenticated callers without `analytics.gateway_metrics.read` on a visible resolved scope receive `403 forbidden`; inaccessible or nonexistent routers remain normalized to `404 not_found`.
-7. OWPROV fallback resolution distinguishes `404`, `409`, `502 owprov_unavailable`, and `502 owprov_invalid_response` outcomes.
-8. Valid usable cached ownership fallback is used only after successful bearer authentication and only when the cache entry is safe to use.
-9. Child-venue gateway resolution works.
+6. OWPROV router access authorization determines visibility; inaccessible (401/403) or nonexistent (404) routers are normalized to `404 not_found`.
+7. OWPROV resolution distinguishes `404 not_found`, `409 multiple_boards`, `502 owprov_unavailable`, and `502 owprov_invalid_response` outcomes.
+8. Authorization checks use the caller's bearer token on OWPROV queries to ensure visibility cannot be bypassed.
+9. Router venue resolution maps InventoryTag.venue to single-venue board records in Analytics storage.
 10. Timestamp, lookback, and query-parameter validation is consistent, including rejection of repeated `timestampTill`, repeated `lookbackHours`, and unknown query parameters before OWPROV or database work.
 11. Memory aggregation ignores missing historical fields instead of treating them as zero.
 12. Temperature aggregation excludes synthetic or invalid fallback values.

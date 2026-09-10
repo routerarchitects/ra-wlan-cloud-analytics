@@ -182,7 +182,7 @@ Unless a deployment explicitly configures another value, allowedClockSkewSeconds
 endTime must be less than or equal to currentServerTime + allowedClockSkewSeconds.
 lookbackHours must be present exactly once.
 lookbackHours must parse as a strict whole decimal integer with no trailing characters.
-lookbackHours must be greater than 0.
+lookbackHours must be greater than 0 and less than or equal to 87600 (10 years API safety cap).
 maxLookbackHours = floor(configured monitoringDuration / 3600).
 lookbackHours must be less than or equal to maxLookbackHours.
 startTime must be less than endTime.
@@ -193,7 +193,7 @@ If `timestampTill` is beyond `currentServerTime + allowedClockSkewSeconds`, retu
 server time. The returned aggregate must represent the requested half-open
 window exactly, not a silently shortened window.
 
-All APIs in this document derive `maxLookbackHours` from the configured `monitoringDuration` for the resolved router ownership scope. All APIs share this limit unless an endpoint section explicitly names a stricter limit. No endpoint currently defines a separate limit.
+All APIs in this document derive `maxLookbackHours` from the configured `monitoringDuration` for the resolved router venue scope, bounded by an absolute API safety limit of 87600 hours (10 years). Board retention is the authoritative resource bound capping in-memory record loading and parsing; queries requesting lookback windows larger than the resolved board retention (`lookbackHours > maxLookbackHours`) are rejected with `400 invalid_lookback_hours` before querying storage.
 
 For a one-year monitoring configuration, `maxLookbackHours` is `365 * 24` only when the configured monitoring duration is exactly 365 days. Do not assume every calendar year is 8760 hours; use the configured duration and effective retention timestamps when validating the request.
 
@@ -206,7 +206,7 @@ invalid_timestamp:
 
 invalid_lookback_hours:
   lookbackHours is missing, repeated, empty, non-numeric, fractional, partially numeric, overflowing,
-  zero, negative, or greater than maxLookbackHours.
+  zero, negative, greater than 87600, or greater than maxLookbackHours.
 
 lookback_outside_retention:
   the calculated [startTime, endTime) window starts before the retained data window
@@ -353,28 +353,32 @@ The MCP analytics endpoints are bearer-token endpoints. Do not allow `X-API-KEY`
 authentication for these endpoints unless this specification is explicitly
 updated to define API-key semantics and error precedence.
 
-Required permission:
+Authorization Model:
+
+The effective router authorization model relies on caller-scoped OWPROV inventory resolution using the caller's Bearer token:
 
 ```text
-analytics.gateway_metrics.read
+Valid Bearer token
+        ↓
+OWPROV inventory lookup using caller token
+        ↓
+Caller allowed to access router?
+        ↓
+NO  → 404 not_found
+YES
+        ↓
+Resolve Analytics board
+        ↓
+Read telemetry
 ```
 
-The permission is evaluated against the resolved board first, then the resolved venue, then the parent entity. Child-venue access is allowed only when the caller's venue permission explicitly includes descendant venues according to the same venue hierarchy rules used by OWPROV and `VenueCoordinator`; otherwise access is limited to the exact resolved venue or board.
+Authorization must not rely on the caller-supplied `routerId` alone. A caller must not be able to request an arbitrary gateway serial number and retrieve metrics without proving access to the router's current ownership scope. OWPROV is the authoritative source for determining whether the caller can access the router.
 
-Authorization must not rely on the caller-supplied `routerId` alone. A caller must not be able to request an arbitrary gateway serial number and retrieve metrics without proving access to the router's current ownership scope. The external API intentionally returns `404 Not Found` for both nonexistent routers and routers outside the caller's authorized scope to avoid exposing router existence. Internal logs and metrics should preserve the exact reason.
+If OWPROV returns `404 Not Found`, `401 Unauthorized`, or `403 Forbidden` for the caller's token, Analytics normalizes the response to `404 Not Found` (`{"error": "not_found", "message": "Router was not found"}`). This prevents router existence disclosure.
 
-Reserve `403 Forbidden` for cases where the authenticated caller has visibility
-of the router's ownership scope, but lacks permission to perform the requested
-operation. Do not use `403 Forbidden` merely because OWPROV confirms the
-router exists outside the caller's accessible scope.
+Do not introduce Analytics-specific metric permissions.
 
-For historical availability, authorize by current router ownership before querying `device_availability_events` by `serialNumber`. The event-time `board_id` field is historical context only and must not be the sole authorization source. If current ownership cannot be resolved for a non-operator caller, do not serve serial-number-only availability history. A privileged operator-level permission may bypass current ownership resolution only if explicitly implemented and audited.
-
-Privileged operator bypass, if implemented, must use a separate permission:
-
-```text
-analytics.gateway_metrics.read_any
-```
+For historical availability, authorize by current router ownership through OWPROV before querying `device_availability_events` by `serialNumber`. The event-time `board_id` field is historical context only and must not be the sole authorization source.
 
 ### Current Storage Model
 
@@ -414,21 +418,20 @@ Resolution flow:
 
 ```text
 1. Validate routerId.
-2. Read the current VenueCoordinator ownershipVersion.
-3. Check the process-level router resolution cache.
-4. Use an unexpired positive cache entry only if its ownershipVersion matches
-   the current VenueCoordinator ownershipVersion.
-5. Resolve board ownership from the maintained routerId -> boardId map.
-6. If the map has a current entry, use it as resolvedBoardId.
-7. On cache/map miss or expired cache entry, call OWPROV inventory with status-aware handling:
+2. Call OWPROV inventory with status-aware handling using the requesting
+   caller's bearer token:
      GET /api/v1/inventory/{routerId}
-8. Read inventoryTag.venue as venueId.
-9. Use the OWPROV venue result to verify or refresh board ownership.
-10. Store the resolved result in the process-level cache.
-11. Query Analytics storage with resolvedBoardId and serialNumber = routerId.
+3. If OWPROV returns not found, unauthorized, or forbidden, return
+   `404 not_found`.
+4. Read inventoryTag.venue as venueId.
+5. If venueId is empty, return `404 not_found`.
+6. Call `BoardsDB.FindBoardVenueRecordsByVenue(venueId)`.
+7. If no Analytics board matches the venue, return `404 not_found`.
+8. If more than one board matches the venue, return `409 multiple_boards`.
+9. Query Analytics storage with resolvedBoardId and serialNumber = routerId.
 ```
 
-Separate MCP metric calls are separate HTTP requests. They do not share an HTTP request context, so router resolution reuse across different metric endpoints must come from the maintained `VenueCoordinator` ownership map or the process-level cache, not from request-scoped state.
+Separate MCP metric calls are separate HTTP requests. Each timepoint-backed handler must resolve the router through the same caller-scoped OWPROV and Analytics board lookup flow before reading stored metrics.
 
 Implementation notes:
 
@@ -440,62 +443,31 @@ OWPROV response field:
   InventoryTag.venue
 
 Analytics local source:
-  VenueCoordinator maintained routerId -> boardId map
-  BoardInfo records for venue metadata and validation
-  BoardInfo.venueList[].id
-  BoardInfo.venueList[].monitorSubVenues
+  BoardInfo / DB board records for venue metadata, retention, and validation
+  RouterIdResolver::Result normalized board fields (resolvedBoardId, retention, interval, monitorSubVenues)
 ```
-
-Board ownership resolution must use the maintained `routerId -> boardId` map as the primary design. `VenueCoordinator` should maintain this map from the same board device lists used by `VenueWatcher`, updating it when boards start, reconcile, or change device membership.
-
-OWPROV inventory lookup is not the normal path for every metric query. It is used when the local map has no entry, when the entry needs verification, or when ownership may be stale. Board ownership refresh must account for child venues. Do not only check whether `inventoryTag.venue` is directly present in `BoardInfo.venueList`.
 
 Primary ownership algorithm:
 
 ```text
-Look up routerId in VenueCoordinator's maintained routerId -> boardId map.
+Call OWPROV inventory for routerId with the current caller token.
 
-If exactly one current board mapping exists:
-  resolvedBoardId = mapped boardId
+If OWPROV denies access or cannot find the router:
+  return 404 Not Found
+
+If InventoryTag.venue is empty:
+  return 404 Not Found
+
+Find Analytics boards for InventoryTag.venue.
+
+If exactly one board exists:
   return Success
 
-If multiple current board mappings exist:
-  return MultipleBoards
-  log a configuration error
+If no board exists:
+  return 404 Not Found
 
-If no mapping exists:
-  perform status-aware OWPROV inventory lookup
-  read InventoryTag.venue
-  refresh candidate board ownership from current venue device lists
-  update the maintained routerId -> boardId map when ownership is determined
-```
-
-This mirrors the existing watcher behavior, where board devices are fetched from OWPROV with the board venue's `monitorSubVenues` setting.
-
-A router must have exactly one authoritative board mapping. Never resolve multiple candidates by list order, oldest board, most recently updated board, or direct venue preference. If multiple active mappings exist, return `409 Conflict` and log a configuration error.
-
-Refresh algorithm for cache/map misses:
-
-```text
-For each local BoardInfo record that can own the inventory venue:
-  for each VenueInfo in BoardInfo.venueList:
-    call SDK::Prov::Venue::GetDevices(
-      client,
-      VenueInfo.id,
-      VenueInfo.monitorSubVenues,
-      venueDeviceList,
-      venueExists)
-
-    if routerId is present in venueDeviceList.devices:
-      add BoardInfo.info.id as a candidate board
-
-If exactly one candidate exists:
-  resolvedBoardId = candidate board
-  update routerId -> boardId map
-
-If more than one candidate exists:
-  return MultipleBoards
-  do not choose a candidate by list order or heuristic tie-breaker
+If more than one board exists:
+  return 409 Conflict
 ```
 
 Failure handling:
@@ -506,51 +478,7 @@ OWPROV inventory outside caller scope   -> 404 Not Found
 Inventory exists but venue is empty     -> 404 Not Found
 No Analytics board configured for venue -> 404 Not Found
 Multiple matching boards                -> 409 Conflict
-OWPROV unavailable or invalid response  -> 502 Bad Gateway after cache fallback is exhausted
-```
-
-The resolver must return a status-bearing result, not a boolean, so handlers can map each failure to the correct HTTP response.
-
-```cpp
-enum class RouterIdResolutionStatus {
-    Success,
-    InvalidRouterId,
-    InventoryNotFound,
-    EmptyVenue,
-    BoardNotConfigured,
-    MultipleBoards,
-    AccessDenied,
-    MonitoringNotConfigured,
-    MonitoringDisabled,
-    OwprovUnavailable,
-    OwprovInvalidResponse
-};
-
-struct RouterIdResolutionResult {
-    RouterIdResolutionStatus status = RouterIdResolutionStatus::OwprovUnavailable;
-    std::string routerId;
-    std::string venueId;
-    std::string resolvedBoardId;
-    uint64_t resolvedAt = 0;
-    uint64_t ownershipVersion = 0;
-    std::string message;
-};
-```
-
-Status mapping:
-
-```text
-Success               -> continue request
-InvalidRouterId       -> 400 Bad Request
-InventoryNotFound     -> 404 Not Found
-EmptyVenue            -> 404 Not Found
-BoardNotConfigured    -> 404 Not Found
-MultipleBoards        -> 409 Conflict
-AccessDenied          -> 404 Not Found when the router exists in OWPROV but is outside the caller's accessible scope
-MonitoringNotConfigured -> 404 Not Found
-MonitoringDisabled    -> 409 Conflict
-OwprovUnavailable     -> 502 Bad Gateway
-OwprovInvalidResponse -> 502 Bad Gateway
+OWPROV unavailable or invalid response  -> 502 Bad Gateway
 ```
 
 The existing `SDK::Prov::Device::Get` helper returns only `bool` and does not expose the OWPROV HTTP status. Do not use that bool-only helper when the handler must distinguish `404 Not Found` from OWPROV connectivity or parsing failures. Use one of these instead:
@@ -565,80 +493,7 @@ Option B:
   directly from ResolveRouterIdContext and inspect the HTTP response status.
 ```
 
-Router resolution process cache:
-
-```text
-Scope:
-  thread-safe, process-level cache shared by all REST handlers
-
-Key:
-  routerId
-
-Positive value:
-  venueId
-  boardId
-  resolvedAt
-  ownershipVersion
-
-Negative value:
-  resolution status
-  resolvedAt
-  ownershipVersion when available
-
-Positive TTL:
-  5 minutes, absolute from resolvedAt
-
-Negative TTL:
-  30 seconds or less, absolute from resolvedAt
-
-Maximum size:
-  10000 routerId entries per process
-
-Eviction:
-  expire entries by TTL first, then evict least-recently-used entries when the
-  maximum size is reached
-
-On unexpired positive cache hit:
-  return cached venueId and boardId if ownershipVersion still matches the
-  current VenueCoordinator ownershipVersion
-
-On expired entry:
-  resolve again before serving the request
-
-On OWPROV failure:
-  an unexpired positive local ownership entry may be used if ownershipVersion
-  still matches
-  an expired entry must not be extended silently
-  if no usable unexpired entry exists, return OwprovUnavailable or
-  OwprovInvalidResponse according to the failure
-
-Negative-result caching:
-  cache InventoryNotFound, EmptyVenue, BoardNotConfigured, MultipleBoards, and
-  MonitoringNotConfigured for the negative TTL
-  do not cache OwprovUnavailable or OwprovInvalidResponse as ownership facts
-
-Invalidation:
-  invalidate the routerId entry immediately when OWPROV reports a different
-  venue for the router
-  invalidate affected routerId entries when VenueCoordinator detects board
-  membership changes
-  invalidate affected routerId entries on board deletion or board venue
-  reconfiguration
-  invalidate affected routerId entries when board configuration changes
-  invalidate affected routerId entries when venue monitoring settings change
-  invalidate the routerId entry when router assignment changes
-  invalidate the routerId entry when the router is removed
-  invalidate the routerId entry when ownershipVersion changes
-
-Concurrency:
-  cache reads and writes must be synchronized
-  concurrent misses for the same routerId should coalesce to one refresh when
-  practical
-  if coalescing is not implemented, racing refreshes must not publish older
-  ownershipVersion results over newer results
-```
-
-The cache is secondary to `VenueCoordinator` ownership. A cache hit must not override a newer `VenueCoordinator` ownershipVersion.
+This resolver intentionally does not use the global `VenueCoordinator` device map, monitored-subvenue board scans, or a process-level ownership cache. Any future board lookup optimization must remain secondary to the caller-scoped OWPROV authorization result and must not change memory-summary behavior without an explicit requirement.
 
 ---
 
@@ -953,9 +808,11 @@ None
   "min_wifi_temp_2.4G": 62,
   "max_wifi_temp_2.4G": 70,
   "avg_wifi_temp_2.4G": 66.64,
+  "latest_wifi_temp_2.4G": 68,
   "min_wifi_temp_5G": 56,
   "max_wifi_temp_5G": 65,
-  "avg_wifi_temp_5G": 60.38
+  "avg_wifi_temp_5G": 60.38,
+  "latest_wifi_temp_5G": 60
 }
 ```
 
@@ -1001,6 +858,15 @@ from the observed temperature value itself.
 
 If no producer/device contract can be resolved for a sample, the default is:
   wifiTempZeroIsUnavailable = false
+
+### Venue Reassignment & Observed Window Rules
+
+When a gateway moves from an old venue (Board A) to a new venue (Board B):
+1. `routerId` resolves via OWPROV to the current venue (`Board B`).
+2. Analytics queries timepoints filtered by `boardId == Board B` and `serialNumber == routerId`. Historical samples associated with `Board A` are not queried or included.
+3. `requestedWindow` reflects the full requested interval (`startTime` to `endTime`).
+4. `observedWindow` reflects the first and last valid sample timestamps found for `Board B` within `[startTime, endTime)`.
+5. Temperature aggregates (`min`, `max`, `avg`, `latest`) are calculated exclusively from valid samples on `Board B`.
 ```
 
 Migration boundary configuration & rule:
@@ -1070,6 +936,7 @@ For each band:
   min_temperature = min(samples)
   max_temperature = max(samples)
   avg_temperature = sum(samples) / sample_count
+  latest_temperature = temperature from the latest valid sample timestamp
 
 observedWindow.startTime =
   earliest timestamp of a valid temperature sample contributing to any returned band aggregation
@@ -1086,7 +953,7 @@ radio.wifi_temp is present, non-null, and within range [-40, 125]
 radio.wifi_temp = 0 is excluded only when the persisted/resolved temperature contract has wifiTempZeroIsUnavailable = true
 ```
 
-If all samples for a band are invalid or missing, return `null` for that band's min, max, and average fields.
+If all samples for a band are invalid or missing, return `null` for that band's min, max, average, and latest fields.
 
 Do not query `radio_timepoints` unless a separate normalized table and migration are introduced.
 
@@ -1097,12 +964,14 @@ if (radio.band == 2) {
     response.min_wifi_temp_2_4G = summary.min;
     response.max_wifi_temp_2_4G = summary.max;
     response.avg_wifi_temp_2_4G = summary.avg;
+    response.latest_wifi_temp_2_4G = summary.latest;
 }
 
 if (radio.band == 5) {
     response.min_wifi_temp_5G = summary.min;
     response.max_wifi_temp_5G = summary.max;
     response.avg_wifi_temp_5G = summary.avg;
+    response.latest_wifi_temp_5G = summary.latest;
 }
 ```
 
@@ -1121,9 +990,11 @@ if (radio.band == 5) {
   "min_wifi_temp_2.4G": 62,
   "max_wifi_temp_2.4G": 70,
   "avg_wifi_temp_2.4G": 66.64,
+  "latest_wifi_temp_2.4G": 68,
   "min_wifi_temp_5G": null,
   "max_wifi_temp_5G": null,
-  "avg_wifi_temp_5G": null
+  "avg_wifi_temp_5G": null,
+  "latest_wifi_temp_5G": null
 }
 ```
 
@@ -3051,9 +2922,9 @@ usage-summary
 rssi-summary
 ```
 
-The helper must use the current `routerId -> boardId` map maintained by `VenueCoordinator` as the primary ownership source. OWPROV inventory lookup must be status-aware and is used to verify or refresh ownership on cache/map misses. Any refresh path must read `InventoryTag.venue` and resolve board ownership with `monitorSubVenues` support, using candidate board device lists through `SDK::Prov::Venue::GetDevices(..., VenueInfo.monitorSubVenues, ...)` when needed.
+The helper must resolve current ownership through a status-aware OWPROV inventory lookup using the requesting caller's token. If OWPROV returns not found, unauthorized, or forbidden, the helper must return `404 not_found`. After OWPROV returns the visible device, the helper must read `InventoryTag.venue`, call `BoardsDB.FindBoardVenueRecordsByVenue(Device.venue)`, require exactly one matching Analytics board, and return that `boardId` plus `venueId`.
 
-`availability-summary` is the storage-query exception, not an authorization exception. It must authenticate the caller, resolve current router ownership, and verify the caller has `analytics.gateway_metrics.read` on the resolved board, venue, or parent entity before querying availability storage. After authorization succeeds, the historical count must query availability storage by durable `serialNumber`, not by mandatory current `resolvedBoardId`. Event-time `board_id` is historical context only and must not authorize the request by itself.
+`availability-summary` is the storage-query exception, not an authorization exception. It must authenticate the caller, resolve current router ownership via OWPROV using the caller's token, and verify the router is accessible before querying availability storage. After authorization succeeds, the historical count must query availability storage by durable `serialNumber`, not by mandatory current `resolvedBoardId`. Event-time `board_id` is historical context only and must not authorize the request by itself.
 
 ---
 

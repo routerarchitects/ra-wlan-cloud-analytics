@@ -156,6 +156,10 @@ configProperties:
   openwifi.kafka.ssl.certificate.location: ""
   openwifi.kafka.ssl.key.location: ""
   openwifi.kafka.ssl.key.password: ""
+  temperature.migration_cutover_time: ""
+  temperature.wifi_temp_zero_unavailable_device_types: ""
+  temperature.wifi_temp_zero_unavailable_platforms: ""
+  temperature.wifi_temp_zero_unavailable_firmware_prefixes: ""
   # Storage
   storage.type: sqlite # (sqlite|postgresql|mysql|odbc)
   ## SQLite

@@ -182,6 +182,64 @@ namespace OpenWifi {
 			return true;
 		}
 
+		inline bool ParseRFC3339Timestamp(const std::string &Value, uint64_t &EpochSeconds) {
+			if (Value.size() != 20 && Value.size() != 25)
+				return false;
+			if (Value[4] != '-' || Value[7] != '-' || Value[10] != 'T' ||
+				Value[13] != ':' || Value[16] != ':' ||
+				!DigitsAt(Value, 0, 4) || !DigitsAt(Value, 5, 2) ||
+				!DigitsAt(Value, 8, 2) || !DigitsAt(Value, 11, 2) ||
+				!DigitsAt(Value, 14, 2) || !DigitsAt(Value, 17, 2)) {
+				return false;
+			}
+
+			int OffsetSeconds = 0;
+			if (Value.size() == 20) {
+				if (Value[19] != 'Z')
+					return false;
+			} else {
+				if ((Value[19] != '+' && Value[19] != '-') || Value[22] != ':' ||
+					!DigitsAt(Value, 20, 2) || !DigitsAt(Value, 23, 2)) {
+					return false;
+				}
+				auto OffsetHours = ToInt(Value, 20, 2);
+				auto OffsetMinutes = ToInt(Value, 23, 2);
+				if (OffsetHours > 23 || OffsetMinutes > 59)
+					return false;
+				OffsetSeconds = (OffsetHours * 3600) + (OffsetMinutes * 60);
+				if (Value[19] == '-')
+					OffsetSeconds = -OffsetSeconds;
+			}
+
+			auto Year = ToInt(Value, 0, 4);
+			auto Month = ToInt(Value, 5, 2);
+			auto Day = ToInt(Value, 8, 2);
+			auto Hour = ToInt(Value, 11, 2);
+			auto Minute = ToInt(Value, 14, 2);
+			auto Second = ToInt(Value, 17, 2);
+			if (Month < 1 || Month > 12 || Day < 1 || Day > DaysInMonth(Year, Month) ||
+				Hour > 23 || Minute > 59 || Second > 59) {
+				return false;
+			}
+
+			std::tm Tm{};
+			Tm.tm_year = Year - 1900;
+			Tm.tm_mon = Month - 1;
+			Tm.tm_mday = Day;
+			Tm.tm_hour = Hour;
+			Tm.tm_min = Minute;
+			Tm.tm_sec = Second;
+			Tm.tm_isdst = 0;
+			auto LocalEpoch = timegm(&Tm);
+			if (LocalEpoch < 0)
+				return false;
+			auto UtcEpoch = static_cast<int64_t>(LocalEpoch) - OffsetSeconds;
+			if (UtcEpoch < 0)
+				return false;
+			EpochSeconds = static_cast<uint64_t>(UtcEpoch);
+			return true;
+		}
+
 		inline std::string FormatTimestamp(uint64_t EpochSeconds) {
 			std::time_t Time = static_cast<std::time_t>(EpochSeconds);
 			std::tm Tm{};
@@ -248,10 +306,10 @@ namespace OpenWifi {
 						 "lookbackHours must be a positive whole number");
 				return false;
 			}
-			if (Parsed.lookbackHours >
-				std::numeric_limits<uint64_t>::max() / static_cast<uint64_t>(3600)) {
+			constexpr uint64_t MaxApiLookbackHours = 87600; // 10 years maximum API limit
+			if (Parsed.lookbackHours > MaxApiLookbackHours) {
 				SetError(E, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST, "invalid_lookback_hours",
-						 "lookbackHours is too large");
+						 "lookbackHours exceeds maximum API limit of 87600 hours");
 				return false;
 			}
 			auto LookbackSeconds = Parsed.lookbackHours * static_cast<uint64_t>(3600);
@@ -357,8 +415,117 @@ namespace OpenWifi {
 			return Summary;
 		}
 
+		inline bool ValidateTemperatureCutover(const Window &Requested, uint64_t CutoverTime,
+											   Error &E) {
+			if (Requested.startTime < CutoverTime) {
+				SetError(E, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
+						 "temperature_range_before_cutover",
+						 "The requested summary interval starts before the temperature migration "
+						 "cutover timestamp.");
+				return false;
+			}
+			return true;
+		}
+
+		inline AnalyticsObjects::MCPGatewayWifiTemperatureSummary
+		CalculateRadioTemperatureSummary(
+			const std::vector<AnalyticsObjects::DeviceTimePoint> &Records,
+			const Window &Requested, uint64_t CutoverTime) {
+			struct BandStats {
+				std::optional<double> min;
+				std::optional<double> max;
+				std::optional<double> latest;
+				uint64_t latestTimestamp = 0;
+				long double sum = 0;
+				uint64_t count = 0;
+			};
+
+			auto AddSample = [](BandStats &Stats, double Value, uint64_t Timestamp) {
+				if (!Stats.min || Value < *Stats.min)
+					Stats.min = Value;
+				if (!Stats.max || Value > *Stats.max)
+					Stats.max = Value;
+				if (!Stats.latest || Timestamp >= Stats.latestTimestamp) {
+					Stats.latest = Value;
+					Stats.latestTimestamp = Timestamp;
+				}
+				Stats.sum += static_cast<long double>(Value);
+				++Stats.count;
+			};
+
+			AnalyticsObjects::MCPGatewayWifiTemperatureSummary Summary;
+			Summary.requestedWindow.startTime = FormatTimestamp(Requested.startTime);
+			Summary.requestedWindow.endTime = FormatTimestamp(Requested.endTime);
+
+			BandStats Band2G;
+			BandStats Band5G;
+			bool AnyValidSample = false;
+			uint64_t ObservedStartTimestamp = 0;
+			uint64_t ObservedEndTimestamp = 0;
+
+			for (const auto &Record : Records) {
+				if (Record.timestamp < CutoverTime ||
+					!TimestampInHalfOpenWindow(Record.timestamp, Requested)) {
+					continue;
+				}
+
+				bool RecordContributed = false;
+				for (const auto &Radio : Record.radio_data) {
+					if (Radio.band != 2 && Radio.band != 5)
+						continue;
+					if (!Radio.wifi_temp || !std::isfinite(*Radio.wifi_temp))
+						continue;
+					auto Value = *Radio.wifi_temp;
+					if (Value < -40.0 || Value > 125.0)
+						continue;
+					if (Value == 0.0 && Radio.wifi_temp_zero_is_unavailable)
+						continue;
+
+					if (Radio.band == 2)
+						AddSample(Band2G, Value, Record.timestamp);
+					else
+						AddSample(Band5G, Value, Record.timestamp);
+					RecordContributed = true;
+				}
+
+				if (RecordContributed) {
+					if (!AnyValidSample) {
+						ObservedStartTimestamp = Record.timestamp;
+						ObservedEndTimestamp = Record.timestamp;
+						AnyValidSample = true;
+					} else {
+						ObservedStartTimestamp = std::min(ObservedStartTimestamp, Record.timestamp);
+						ObservedEndTimestamp = std::max(ObservedEndTimestamp, Record.timestamp);
+					}
+				}
+			}
+
+			if (AnyValidSample) {
+				Summary.observedWindow.startTime = FormatTimestamp(ObservedStartTimestamp);
+				Summary.observedWindow.endTime = FormatTimestamp(ObservedEndTimestamp);
+			}
+
+			if (Band2G.count > 0) {
+				Summary.min_wifi_temp_2_4G = Band2G.min;
+				Summary.max_wifi_temp_2_4G = Band2G.max;
+				Summary.avg_wifi_temp_2_4G =
+					static_cast<double>(Band2G.sum / static_cast<long double>(Band2G.count));
+				Summary.latest_wifi_temp_2_4G = Band2G.latest;
+			}
+			if (Band5G.count > 0) {
+				Summary.min_wifi_temp_5G = Band5G.min;
+				Summary.max_wifi_temp_5G = Band5G.max;
+				Summary.avg_wifi_temp_5G =
+					static_cast<double>(Band5G.sum / static_cast<long double>(Band5G.count));
+				Summary.latest_wifi_temp_5G = Band5G.latest;
+			}
+
+			return Summary;
+		}
+
 		void SendError(RESTAPIHandler &Handler, const Error &E);
 		bool AuthenticateBearerToken(RESTAPIHandler &Handler, Error &E);
+		bool GetTemperatureMigrationCutoverTime(uint64_t &CutoverTime, Error &E);
 
 	} // namespace MCP
 } // namespace OpenWifi

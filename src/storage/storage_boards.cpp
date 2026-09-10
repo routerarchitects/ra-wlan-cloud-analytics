@@ -108,6 +108,41 @@ namespace OpenWifi {
 		}
 		return false;
 	}
+
+	bool BoardsDB::FindBoardVenueRecordsByVenue(const std::string &venueId,
+												std::vector<BoardVenueRecord> &records) {
+		records.clear();
+		if (venueId.empty())
+			return true;
+
+		try {
+			Poco::Data::Session Session = Pool_.get();
+			Poco::Data::Statement Select(Session);
+			typedef Poco::Tuple<std::string, std::string, uint64_t, uint64_t, bool> RecordTuple;
+			std::vector<RecordTuple> Records;
+			auto VenueId = venueId;
+
+			Select << ConvertParams("select id,venueid,retention,interval,monitorsubvenues "
+									"from boards where venueid=? limit 100"),
+				Poco::Data::Keywords::use(VenueId),
+				Poco::Data::Keywords::into(Records);
+			Select.execute();
+
+			for (const auto &Record : Records) {
+				BoardVenueRecord BVR;
+				BVR.boardId = Record.get<0>();
+				BVR.venueId = Record.get<1>();
+				BVR.retention = Record.get<2>();
+				BVR.interval = Record.get<3>();
+				BVR.monitorSubVenues = Record.get<4>();
+				records.emplace_back(BVR);
+			}
+			return true;
+		} catch (const Poco::Exception &E) {
+			Logger_.log(E);
+		}
+		return false;
+	}
 } // namespace OpenWifi
 
 template <>

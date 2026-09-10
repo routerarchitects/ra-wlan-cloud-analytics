@@ -50,6 +50,7 @@ namespace OpenWifi {
 			std::string type;
 			std::string serialNumber;
 			std::string deviceType;
+			std::string platform;
 			uint64_t lastContact = 0;
 			uint64_t lastPing = 0;
 			uint64_t lastState = 0;
@@ -187,6 +188,8 @@ namespace OpenWifi {
 			uint64_t active_ms = 0, busy_ms = 0, receive_ms = 0, transmit_ms = 0, tx_power = 0,
 					 channel = 0;
 			int64_t temperature = 0, noise = 0;
+			std::optional<double> wifi_temp;
+			bool wifi_temp_zero_is_unavailable = false;
 
 			double active_pct = 0.0, busy_pct = 0.0, receive_pct = 0.0, transmit_pct = 0.0;
 
@@ -392,6 +395,21 @@ namespace OpenWifi {
 		struct MCPGatewayMemorySummary {
 			MCPMemorySummaryData data;
 			MCPMemorySummaryMeta meta;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+		};
+
+		struct MCPGatewayWifiTemperatureSummary {
+			MCPRequestedWindow requestedWindow;
+			MCPObservedWindow observedWindow;
+			std::optional<double> min_wifi_temp_2_4G;
+			std::optional<double> max_wifi_temp_2_4G;
+			std::optional<double> avg_wifi_temp_2_4G;
+			std::optional<double> latest_wifi_temp_2_4G;
+			std::optional<double> min_wifi_temp_5G;
+			std::optional<double> max_wifi_temp_5G;
+			std::optional<double> avg_wifi_temp_5G;
+			std::optional<double> latest_wifi_temp_5G;
 
 			void to_json(Poco::JSON::Object &Obj) const;
 		};

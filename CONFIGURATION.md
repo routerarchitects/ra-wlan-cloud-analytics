@@ -143,6 +143,18 @@ openwifi.kafka.ssl.key.location =
 openwifi.kafka.ssl.key.password =
 ```
 
+### Temperature
+The radio temperature API requires an explicitly configured migration cutover timestamp (`temperature.migration_cutover_time` or `TEMPERATURE_MIGRATION_CUTOVER_TIME`). This must be set per deployment to the RFC3339 timestamp of when `wifi_temp` collection/persistence was activated (e.g. `2026-09-10T00:00:00Z`). Queries starting prior to this timestamp are rejected with `temperature_range_before_cutover`.
+
+Zero-temperature sentinel behavior is resolved during ingestion from either an explicit producer contract flag or the configured device metadata contract lists below.
+
+```properties
+temperature.migration_cutover_time = 2026-09-10T00:00:00Z
+temperature.wifi_temp_zero_unavailable_device_types =
+temperature.wifi_temp_zero_unavailable_platforms =
+temperature.wifi_temp_zero_unavailable_firmware_prefixes =
+```
+
 ### DB Type
 The controller supports 3 types of Database. SQLite should only be used for sites with less than 100 APs or for testing in the lab.
 In order to select which database to use, you must set the `storage.type` value to sqlite, postgresql, or mysql.

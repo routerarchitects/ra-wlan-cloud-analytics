@@ -1,4 +1,4 @@
-#include "RESTAPI_device_memory_summary_handler.h"
+#include "RESTAPI_device_radio_temperature_summary_handler.h"
 
 #include "RESTAPI_mcp_helpers.h"
 #include "RouterIdResolver.h"
@@ -17,7 +17,7 @@ namespace OpenWifi {
 		}
 	} // namespace
 
-	void RESTAPI_device_memory_summary_handler::DoGet() {
+	void RESTAPI_device_radio_temperature_summary_handler::DoGet() {
 		MCP::Error Error;
 		if (!MCP::AuthenticateBearerToken(*this, Error))
 			return MCP::SendError(*this, Error);
@@ -49,17 +49,28 @@ namespace OpenWifi {
 		if (!MCP::ValidateRetention(Window, Resolved.retention, Utils::Now(), ClockSkewSeconds, Error))
 			return MCP::SendError(*this, Error);
 
-		std::vector<AnalyticsObjects::DeviceTimePoint> Records;
-		if (!StorageService()->TimePointsDB().SelectResourceRecordsBySerial(
-				Resolved.resolvedBoardId, routerId, Window.startTime, Window.endTime, Records)) {
-			poco_error(Logger(), "Failed to query timepoints for memory summary");
+		uint64_t CutoverTime = 0;
+		if (!MCP::GetTemperatureMigrationCutoverTime(CutoverTime, Error)) {
+			poco_error(Logger(), Error.message);
 			MCP::SetError(Error, Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR,
-						  "memory_summary_query_failed",
-						  "Unable to retrieve gateway memory history");
+						  "radio_temperature_summary_query_failed",
+						  "Unable to retrieve gateway radio temperature history");
+			return MCP::SendError(*this, Error);
+		}
+		if (!MCP::ValidateTemperatureCutover(Window, CutoverTime, Error))
+			return MCP::SendError(*this, Error);
+
+		std::vector<AnalyticsObjects::DeviceTimePoint> Records;
+		if (!StorageService()->TimePointsDB().SelectRadioRecordsBySerial(
+				Resolved.resolvedBoardId, routerId, Window.startTime, Window.endTime, Records)) {
+			poco_error(Logger(), "Failed to query timepoints for radio temperature summary");
+			MCP::SetError(Error, Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR,
+						  "radio_temperature_summary_query_failed",
+						  "Unable to retrieve gateway radio temperature history");
 			return MCP::SendError(*this, Error);
 		}
 
-		auto Summary = MCP::CalculateMemorySummary(Records, Window);
+		auto Summary = MCP::CalculateRadioTemperatureSummary(Records, Window, CutoverTime);
 		return Object(Summary);
 	}
 
