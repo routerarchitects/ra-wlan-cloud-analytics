@@ -425,7 +425,7 @@ Resolution flow:
    `404 not_found`.
 4. Read inventoryTag.venue as venueId.
 5. If venueId is empty, return `404 not_found`.
-6. Call `BoardsDB.FindBoardsByVenue(venueId)`.
+6. Call `BoardsDB.FindBoardVenueRecordsByVenue(venueId)`.
 7. If no Analytics board matches the venue, return `404 not_found`.
 8. If more than one board matches the venue, return `409 multiple_boards`.
 9. Query Analytics storage with resolvedBoardId and serialNumber = routerId.
@@ -2913,7 +2913,7 @@ usage-summary
 rssi-summary
 ```
 
-The helper must resolve current ownership through a status-aware OWPROV inventory lookup using the requesting caller's token. If OWPROV returns not found, unauthorized, or forbidden, the helper must return `404 not_found`. After OWPROV returns the visible device, the helper must read `InventoryTag.venue`, call `BoardsDB.FindBoardsByVenue(Device.venue)`, require exactly one matching Analytics board, and return that `boardId` plus `venueId`.
+The helper must resolve current ownership through a status-aware OWPROV inventory lookup using the requesting caller's token. If OWPROV returns not found, unauthorized, or forbidden, the helper must return `404 not_found`. After OWPROV returns the visible device, the helper must read `InventoryTag.venue`, call `BoardsDB.FindBoardVenueRecordsByVenue(Device.venue)`, require exactly one matching Analytics board, and return that `boardId` plus `venueId`.
 
 `availability-summary` is the storage-query exception, not an authorization exception. It must authenticate the caller, resolve current router ownership via OWPROV using the caller's token, and verify the router is accessible before querying availability storage. After authorization succeeds, the historical count must query availability storage by durable `serialNumber`, not by mandatory current `resolvedBoardId`. Event-time `board_id` is historical context only and must not authorize the request by itself.
 
