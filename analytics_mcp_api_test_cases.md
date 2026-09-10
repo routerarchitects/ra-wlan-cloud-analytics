@@ -93,7 +93,7 @@ Local ownership resolution / cache lookup
     ↓
 OWPROV lookup if required
     ↓
-Caller visibility & permission authorization (evaluated against resolved scope)
+OWPROV caller visibility authorization
     ↓
 Retention / cutover validation (availabilityValidFrom)
     ↓
@@ -853,7 +853,7 @@ No `Authorization: Bearer ...` header is supplied.
 * Response body is `{"error": "not_found", "message": "Router was not found"}`.
 * Routers outside the caller's authorized scope in OWPROV are normalized to `404 Not Found` to prevent router existence disclosure.
 * The endpoint does not return `403 Forbidden`.
-* `analytics.gateway_metrics.read` permission is not required or evaluated.
+* No Analytics-specific metric permission is required or evaluated.
 * The same authorization behavior applies to all bearer-protected Analytics APIs.
 
 ---
@@ -1158,7 +1158,7 @@ OpenAPI also permits `internal_error` in each endpoint-specific 500 schema. Use 
 | Expired bearer token | `TC-COMMON-018C` | 401 | `unauthorized` |
 | Wrong authorization scheme | `TC-COMMON-018D` | 401 | `unauthorized` |
 | API-key-only authentication | `TC-COMMON-018E` | 401 | `unauthorized` |
-| Valid caller lacks analytics permission | `TC-COMMON-019` | 403 | `forbidden` |
+| Router unauthorized or forbidden in OWPROV | `TC-COMMON-019` | 404 | `not_found` |
 | Invalid router ID | `TC-COMMON-005` | 400 | `invalid_router_id` |
 | Repeated `timestampTill` | `TC-COMMON-012A` | 400 | `invalid_timestamp` |
 | Repeated `lookbackHours` | `TC-COMMON-017F` | 400 | `invalid_lookback_hours` |
