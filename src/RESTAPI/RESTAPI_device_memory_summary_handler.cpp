@@ -8,17 +8,6 @@
 namespace OpenWifi {
 
 	namespace {
-		bool FindVenueRetention(const AnalyticsObjects::BoardInfo &Board,
-								const std::string &VenueId, uint64_t &RetentionSeconds) {
-			for (const auto &Venue : Board.venueList) {
-				if (Venue.id == VenueId) {
-					RetentionSeconds = Venue.retention;
-					return RetentionSeconds > 0;
-				}
-			}
-			return false;
-		}
-
 		MCP::Error ConvertResolverError(const RouterIdResolver::Error &ResolverError) {
 			MCP::Error E;
 			E.status = ResolverError.status;
@@ -52,13 +41,12 @@ namespace OpenWifi {
 			return MCP::SendError(*this, ConvertResolverError(ResolverError));
 		}
 
-		uint64_t RetentionSeconds = 0;
-		if (!FindVenueRetention(Resolved.board, Resolved.resolvedVenueId, RetentionSeconds)) {
+		if (Resolved.retention == 0) {
 			MCP::SetError(Error, Poco::Net::HTTPResponse::HTTP_NOT_FOUND, "not_found",
 						  "Router was not found");
 			return MCP::SendError(*this, Error);
 		}
-		if (!MCP::ValidateRetention(Window, RetentionSeconds, Utils::Now(), ClockSkewSeconds, Error))
+		if (!MCP::ValidateRetention(Window, Resolved.retention, Utils::Now(), ClockSkewSeconds, Error))
 			return MCP::SendError(*this, Error);
 
 		std::vector<AnalyticsObjects::DeviceTimePoint> Records;

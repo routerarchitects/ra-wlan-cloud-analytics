@@ -443,8 +443,8 @@ OWPROV response field:
   InventoryTag.venue
 
 Analytics local source:
-  BoardInfo records for venue metadata, retention, and validation
-  BoardInfo.venueList[].id
+  BoardInfo / DB board records for venue metadata, retention, and validation
+  RouterIdResolver::Result normalized board fields (resolvedBoardId, retention, interval, monitorSubVenues)
 ```
 
 Primary ownership algorithm:
