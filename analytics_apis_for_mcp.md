@@ -353,28 +353,32 @@ The MCP analytics endpoints are bearer-token endpoints. Do not allow `X-API-KEY`
 authentication for these endpoints unless this specification is explicitly
 updated to define API-key semantics and error precedence.
 
-Required permission:
+Authorization Model:
+
+The effective router authorization model relies on caller-scoped OWPROV inventory resolution using the caller's Bearer token:
 
 ```text
-analytics.gateway_metrics.read
+Valid Bearer token
+        ↓
+OWPROV inventory lookup using caller token
+        ↓
+Caller allowed to access router?
+        ↓
+NO  → 404 not_found
+YES
+        ↓
+Resolve Analytics board
+        ↓
+Read telemetry
 ```
 
-The permission is evaluated against the resolved board first, then the resolved venue, then the parent entity. Child-venue access is allowed only when the caller's venue permission explicitly includes descendant venues according to the same venue hierarchy rules used by OWPROV and `VenueCoordinator`; otherwise access is limited to the exact resolved venue or board.
+Authorization must not rely on the caller-supplied `routerId` alone. A caller must not be able to request an arbitrary gateway serial number and retrieve metrics without proving access to the router's current ownership scope. OWPROV is the authoritative source for determining whether the caller can access the router.
 
-Authorization must not rely on the caller-supplied `routerId` alone. A caller must not be able to request an arbitrary gateway serial number and retrieve metrics without proving access to the router's current ownership scope. The external API intentionally returns `404 Not Found` for both nonexistent routers and routers outside the caller's authorized scope to avoid exposing router existence. Internal logs and metrics should preserve the exact reason.
+If OWPROV returns `404 Not Found`, `401 Unauthorized`, or `403 Forbidden` for the caller's token, Analytics normalizes the response to `404 Not Found` (`{"error": "not_found", "message": "Router was not found"}`). This prevents router existence disclosure.
 
-Reserve `403 Forbidden` for cases where the authenticated caller has visibility
-of the router's ownership scope, but lacks permission to perform the requested
-operation. Do not use `403 Forbidden` merely because OWPROV confirms the
-router exists outside the caller's accessible scope.
+Do not introduce Analytics-specific metric permissions such as `analytics.gateway_metrics.read`.
 
-For historical availability, authorize by current router ownership before querying `device_availability_events` by `serialNumber`. The event-time `board_id` field is historical context only and must not be the sole authorization source. If current ownership cannot be resolved for a non-operator caller, do not serve serial-number-only availability history. A privileged operator-level permission may bypass current ownership resolution only if explicitly implemented and audited.
-
-Privileged operator bypass, if implemented, must use a separate permission:
-
-```text
-analytics.gateway_metrics.read_any
-```
+For historical availability, authorize by current router ownership through OWPROV before querying `device_availability_events` by `serialNumber`. The event-time `board_id` field is historical context only and must not be the sole authorization source.
 
 ### Current Storage Model
 
@@ -2911,7 +2915,7 @@ rssi-summary
 
 The helper must resolve current ownership through a status-aware OWPROV inventory lookup using the requesting caller's token. If OWPROV returns not found, unauthorized, or forbidden, the helper must return `404 not_found`. After OWPROV returns the visible device, the helper must read `InventoryTag.venue`, call `BoardsDB.FindBoardsByVenue(Device.venue)`, require exactly one matching Analytics board, and return that `boardId` plus `venueId`.
 
-`availability-summary` is the storage-query exception, not an authorization exception. It must authenticate the caller, resolve current router ownership, and verify the caller has `analytics.gateway_metrics.read` on the resolved board, venue, or parent entity before querying availability storage. After authorization succeeds, the historical count must query availability storage by durable `serialNumber`, not by mandatory current `resolvedBoardId`. Event-time `board_id` is historical context only and must not authorize the request by itself.
+`availability-summary` is the storage-query exception, not an authorization exception. It must authenticate the caller, resolve current router ownership via OWPROV using the caller's token, and verify the router is accessible before querying availability storage. After authorization succeeds, the historical count must query availability storage by durable `serialNumber`, not by mandatory current `resolvedBoardId`. Event-time `board_id` is historical context only and must not authorize the request by itself.
 
 ---
 

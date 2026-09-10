@@ -37,6 +37,7 @@ pytestmark = pytest.mark.integration
 DEFAULT_ROUTER_ID = "60cf84f22290"
 UNKNOWN_ROUTER_ID = "60cf84f22291"
 UNAUTHORIZED_ROUTER_ID = "60cf84f22292"
+INVALID_RESPONSE_ROUTER_ID = "60cf84f22293"
 DEFAULT_BOARD_ID = "board-test-01"
 DEFAULT_VENUE_ID = "venue-test-01"
 OTHER_BOARD_ID = "temperature-other-board"
@@ -427,6 +428,55 @@ def test_radio_temperature_summary_invalid_query_rejects_after_auth() -> None:
     assert result.body["error"] == "invalid_query_parameter"
 
 
+def test_radio_temperature_summary_invalid_token_rejects_via_fake_owsec() -> None:
+    result = http_json(
+        temperature_summary_path(format_utc(utc_now() - timedelta(seconds=30))),
+        "bad-token",
+    )
+
+    assert result.status == 401
+    assert result.body["error"] == "unauthorized"
+
+
+def test_radio_temperature_summary_unknown_router_from_owprov_returns_not_found(seeded_board) -> None:
+    result = http_json(
+        temperature_summary_path(
+            format_utc(utc_now() - timedelta(seconds=30)),
+            selected_router_id=UNKNOWN_ROUTER_ID,
+        ),
+        valid_token(),
+    )
+
+    assert result.status == 404
+    assert result.body["error"] == "not_found"
+
+
+def test_radio_temperature_summary_forbidden_router_from_owprov_returns_not_found(seeded_board) -> None:
+    result = http_json(
+        temperature_summary_path(
+            format_utc(utc_now() - timedelta(seconds=30)),
+            selected_router_id=UNAUTHORIZED_ROUTER_ID,
+        ),
+        valid_token(),
+    )
+
+    assert result.status == 404
+    assert result.body["error"] == "not_found"
+
+
+def test_radio_temperature_summary_invalid_owprov_response_returns_bad_gateway() -> None:
+    result = http_json(
+        temperature_summary_path(
+            format_utc(utc_now() - timedelta(seconds=30)),
+            selected_router_id=INVALID_RESPONSE_ROUTER_ID,
+        ),
+        valid_token(),
+    )
+
+    assert result.status == 502
+    assert result.body["error"] == "owprov_invalid_response"
+
+
 def test_radio_temperature_summary_local_venue_cache_does_not_bypass_authorization(seeded_board) -> None:
     end_dt = utc_now() - timedelta(seconds=30)
     with db_connection() as connection:
@@ -446,3 +496,4 @@ def test_radio_temperature_summary_local_venue_cache_does_not_bypass_authorizati
 
     assert result.status == 404
     assert result.body["error"] == "not_found"
+
