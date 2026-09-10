@@ -68,6 +68,12 @@ namespace OpenWifi {
 		Resolved.board = Matches.front();
 		Resolved.resolvedBoardId = Matches.front().info.id;
 		Resolved.resolvedVenueId = Device.venue;
+		if (!Matches.front().venueList.empty()) {
+			const auto &V = Matches.front().venueList[0];
+			Resolved.retention = V.retention;
+			Resolved.interval = V.interval;
+			Resolved.monitorSubVenues = V.monitorSubVenues;
+		}
 		return true;
 	}
 

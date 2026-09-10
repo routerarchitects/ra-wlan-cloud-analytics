@@ -16,6 +16,9 @@ namespace OpenWifi {
 			std::string routerId;
 			std::string resolvedBoardId;
 			std::string resolvedVenueId;
+			uint64_t retention = 0;
+			uint64_t interval = 0;
+			bool monitorSubVenues = false;
 			AnalyticsObjects::BoardInfo board;
 		};
 
@@ -108,6 +111,12 @@ namespace OpenWifi {
 		Resolved.resolvedVenueId = venueId;
 		Resolved.board = MatchingBoards.front();
 		Resolved.resolvedBoardId = Resolved.board.info.id;
+		if (!Resolved.board.venueList.empty()) {
+			const auto &V = Resolved.board.venueList[0];
+			Resolved.retention = V.retention;
+			Resolved.interval = V.interval;
+			Resolved.monitorSubVenues = V.monitorSubVenues;
+		}
 		return true;
 	}
 
