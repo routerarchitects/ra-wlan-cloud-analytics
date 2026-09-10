@@ -196,6 +196,27 @@ namespace {
 		assert(!Summary.latest_wifi_temp_5G);
 	}
 
+	void TestTelemetryJsonParsingToRadioTimePoint() {
+		nlohmann::json RadioDoc = nlohmann::json::parse(R"({
+			"band": ["5G"],
+			"channel": 36,
+			"temperature": 54.5,
+			"wifi_temp_zero_is_unavailable": true
+		})");
+
+		AnalyticsObjects::RadioTimePoint RTP;
+		if (RadioDoc.contains("temperature") && !RadioDoc["temperature"].is_null()) {
+			RTP.wifi_temp = RadioDoc["temperature"].get<double>();
+		}
+		if (RadioDoc.contains("wifi_temp_zero_is_unavailable")) {
+			RTP.wifi_temp_zero_is_unavailable = RadioDoc["wifi_temp_zero_is_unavailable"].get<bool>();
+		}
+
+		assert(RTP.wifi_temp.has_value());
+		assert(*RTP.wifi_temp == 54.5);
+		assert(RTP.wifi_temp_zero_is_unavailable == true);
+	}
+
 } // namespace
 
 int main() {
@@ -208,6 +229,7 @@ int main() {
 	TestOnlyOneBand();
 	TestHalfOpenWindowAndCutoverBoundary();
 	TestZeroSentinelFlag();
+	TestTelemetryJsonParsingToRadioTimePoint();
 	std::cout << "test_mcp_radio_temperature_summary passed\n";
 	return 0;
 }

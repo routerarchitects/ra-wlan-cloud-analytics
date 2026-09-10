@@ -43,8 +43,8 @@ namespace OpenWifi {
 		MCP::Error Error;
 		uint64_t CutoverTime = 0;
 		if (!MCP::GetTemperatureMigrationCutoverTime(CutoverTime, Error)) {
-			Log().fatal("FATAL: " + Error.message);
-			throw Poco::InvalidArgumentException(Error.message);
+			Log().warning("Temperature cutover configuration missing or invalid: " + Error.message +
+						  ". Radio temperature summary requests will return 500 internal_server_error.");
 		}
 	}
 
