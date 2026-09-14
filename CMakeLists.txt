@@ -168,11 +168,13 @@ target_link_libraries(owanalytics PUBLIC
 if(BUILD_TESTING)
     add_executable(test_mcp_memory_summary
             tests/test_mcp_memory_summary.cpp
-            src/RESTObjects/RESTAPI_MCPAnalyticsObjects.cpp)
+            src/RESTObjects/RESTAPI_MCPAnalyticsObjects.cpp
+            src/framework/utils.cpp)
     target_include_directories(test_mcp_memory_summary PRIVATE src)
     target_link_libraries(test_mcp_memory_summary PUBLIC
             ${Poco_LIBRARIES}
-            fmt::fmt)
+            fmt::fmt
+            resolv)
     add_test(NAME test_mcp_memory_summary COMMAND test_mcp_memory_summary)
 
     add_executable(test_mcp_radio_temperature_summary

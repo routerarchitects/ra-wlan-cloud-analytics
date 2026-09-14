@@ -589,4 +589,43 @@ def test_radio_temperature_summary_raw_telemetry_json_payload(seeded_board) -> N
     assert result.body["latest_wifi_temp_5G"] is None
 
 
+def test_radio_temperature_summary_exceeds_max_samples_with_malformed_records(seeded_board) -> None:
+    end_dt = utc_now() - timedelta(seconds=30)
+    t_base = end_dt - timedelta(minutes=50)
+    base_ts = utc_epoch(format_utc(t_base))
+
+    # Bulk insert 10,005 raw timepoint rows with malformed JSON payloads interspersed.
+    # Estimated sample count for 1h query window @ 60s interval is 61 expected samples (61 <= 10000 limit).
+    # But actual DB row count (10,005) genuinely exceeds the default 10,000 max_samples limit.
+    with db_connection() as connection:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                insert into timepoints (
+                    id, boardid, timestamp, ap_data, ssid_data, radio_data,
+                    device_info, serialnumber, resource_data, venueid
+                )
+                select
+                    'temp-exceed-' || s,
+                    %s,
+                    %s + mod(s, 3000),
+                    '{}',
+                    '[]',
+                    case when mod(s, 3) = 0 then '{' else '[{"band": 2, "wifi_temp": 50.0}]' end,
+                    '{}',
+                    %s,
+                    '{}',
+                    %s
+                from generate_series(1, 10005) as s
+                """,
+                (board_id(), base_ts, router_id(), venue_id()),
+            )
+
+    result = http_json(temperature_summary_path(format_utc(end_dt)), valid_token())
+    assert result.status == 400
+    assert result.body["error"] == "exceeds_max_samples"
+    assert result.body["message"] == "Requested query window exceeds maximum allowed telemetry sample count"
+
+
+
 

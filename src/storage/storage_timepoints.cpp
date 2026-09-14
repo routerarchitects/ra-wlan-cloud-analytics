@@ -134,7 +134,9 @@ namespace OpenWifi {
 											const std::string &serialNumber, uint64_t startTime,
 											uint64_t endTime,
 											std::vector<AnalyticsObjects::DeviceTimePoint> &Recs,
-											uint64_t maxRecords) {
+											uint64_t maxRecords, bool *limitExceeded) {
+		if (limitExceeded)
+			*limitExceeded = false;
 		Recs.clear();
 		if (endTime <= startTime)
 			return true;
@@ -142,12 +144,16 @@ namespace OpenWifi {
 		auto WhereClause = fmt::format(
 			" boardId='{}' and serialNumber='{}' and (timestamp >= {}) and (timestamp < {}) ",
 			ORM::Escape(boardId), ORM::Escape(serialNumber), startTime, endTime);
-		const auto RangeClause = (maxRecords > 0) ? ComputeRange(0, maxRecords) : "";
+		const auto RangeClause = (maxRecords > 0) ? ComputeRange(0, maxRecords + 1) : "";
 		const auto Sql = fmt::format("select {} from {} where {} order by timestamp, id ASC{}",
 									 SelectFields(), TableName_, WhereClause, RangeClause);
 		std::vector<TimePointDBRecordType> RawRecords;
 		if (!Join(Sql, RawRecords))
 			return false;
+		if (maxRecords > 0 && RawRecords.size() > static_cast<size_t>(maxRecords)) {
+			if (limitExceeded)
+				*limitExceeded = true;
+		}
 		Recs.reserve(RawRecords.size());
 		for (const auto &Row : RawRecords) {
 			AnalyticsObjects::DeviceTimePoint Point;
@@ -160,7 +166,9 @@ namespace OpenWifi {
 	bool TimePointDB::SelectResourceRecordsBySerial(
 		const std::string &boardId, const std::string &serialNumber, uint64_t startTime,
 		uint64_t endTime, std::vector<AnalyticsObjects::DeviceTimePoint> &Recs,
-		uint64_t maxRecords) {
+		uint64_t maxRecords, bool *limitExceeded) {
+		if (limitExceeded)
+			*limitExceeded = false;
 		Recs.clear();
 		if (endTime <= startTime)
 			return true;
@@ -168,13 +176,17 @@ namespace OpenWifi {
 		auto WhereClause = fmt::format(
 			" boardId='{}' and serialNumber='{}' and (timestamp >= {}) and (timestamp < {}) ",
 			ORM::Escape(boardId), ORM::Escape(serialNumber), startTime, endTime);
-		const auto RangeClause = (maxRecords > 0) ? ComputeRange(0, maxRecords) : "";
+		const auto RangeClause = (maxRecords > 0) ? ComputeRange(0, maxRecords + 1) : "";
 		const auto Sql = fmt::format(
 			"select id, timestamp, resource_data from {} where {} order by timestamp, id ASC{}",
 			TableName_, WhereClause, RangeClause);
 		std::vector<TimePointResourceDBRecordType> RawRecords;
 		if (!Join(Sql, RawRecords))
 			return false;
+		if (maxRecords > 0 && RawRecords.size() > static_cast<size_t>(maxRecords)) {
+			if (limitExceeded)
+				*limitExceeded = true;
+		}
 		Recs.reserve(RawRecords.size());
 		for (const auto &Row : RawRecords) {
 			AnalyticsObjects::DeviceTimePoint Point;
@@ -192,7 +204,9 @@ namespace OpenWifi {
 												 uint64_t startTime, uint64_t endTime,
 												 std::vector<AnalyticsObjects::DeviceTimePoint>
 													 &Recs,
-												 uint64_t maxRecords) {
+												 uint64_t maxRecords, bool *limitExceeded) {
+		if (limitExceeded)
+			*limitExceeded = false;
 		Recs.clear();
 		if (endTime <= startTime)
 			return true;
@@ -200,13 +214,17 @@ namespace OpenWifi {
 		auto WhereClause = fmt::format(
 			" boardId='{}' and serialNumber='{}' and (timestamp >= {}) and (timestamp < {}) ",
 			ORM::Escape(boardId), ORM::Escape(serialNumber), startTime, endTime);
-		const auto RangeClause = (maxRecords > 0) ? ComputeRange(0, maxRecords) : "";
+		const auto RangeClause = (maxRecords > 0) ? ComputeRange(0, maxRecords + 1) : "";
 		const auto Sql = fmt::format(
 			"select id, timestamp, radio_data from {} where {} order by timestamp, id ASC{}",
 			TableName_, WhereClause, RangeClause);
 		std::vector<TimePointRadioDBRecordType> RawRecords;
 		if (!Join(Sql, RawRecords))
 			return false;
+		if (maxRecords > 0 && RawRecords.size() > static_cast<size_t>(maxRecords)) {
+			if (limitExceeded)
+				*limitExceeded = true;
+		}
 		Recs.reserve(RawRecords.size());
 		for (const auto &Row : RawRecords) {
 			AnalyticsObjects::DeviceTimePoint Point;
