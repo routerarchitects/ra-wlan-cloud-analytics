@@ -502,20 +502,22 @@ def test_radio_temperature_summary_local_venue_cache_does_not_bypass_authorizati
 def test_radio_temperature_summary_reassigned_router_ignores_old_board_samples(seeded_board) -> None:
     end_dt = utc_now() - timedelta(seconds=30)
     old_board_id = REASSIGNED_BOARD_ID
+    old_venue_id = "old-venue-reassigned"
     
     with db_connection() as connection:
         with connection.cursor() as cursor:
             # Increase current board retention to support 6-hour lookback query
             cursor.execute("update boards set retention = 86400 where id = %s", (board_id(),))
             # Seed old board with old venue and 24h retention
-            seed_board(cursor, board=old_board_id, venue="old-venue-reassigned", retention=86400)
+            seed_board(cursor, board=old_board_id, venue=old_venue_id, retention=86400)
             
-            # Historical samples on old Board A
+            # Historical samples on old Board A and old venue
             insert_timepoint(
                 cursor,
                 format_utc(end_dt - timedelta(hours=5)),
                 [{"band": 2, "wifi_temp": 40.0}],
                 board=old_board_id,
+                venue=old_venue_id,
                 suffix="old-board-sample-1",
             )
             insert_timepoint(
@@ -523,6 +525,7 @@ def test_radio_temperature_summary_reassigned_router_ignores_old_board_samples(s
                 format_utc(end_dt - timedelta(hours=4)),
                 [{"band": 2, "wifi_temp": 45.0}],
                 board=old_board_id,
+                venue=old_venue_id,
                 suffix="old-board-sample-2",
             )
 
@@ -558,5 +561,32 @@ def test_radio_temperature_summary_reassigned_router_ignores_old_board_samples(s
     assert result.body["max_wifi_temp_2.4G"] == 78.0
     assert result.body["avg_wifi_temp_2.4G"] == 75.0
     assert result.body["latest_wifi_temp_2.4G"] == 78.0
+
+
+def test_radio_temperature_summary_raw_telemetry_json_payload(seeded_board) -> None:
+    end_dt = utc_now() - timedelta(seconds=30)
+    t_sample = end_dt - timedelta(minutes=20)
+
+    # Test raw radio telemetry payload structure as ingested from device state messages
+    raw_radios = [
+        {"band": 2, "channel": 6, "wifi_temp": 52.5, "wifi_temp_zero_is_unavailable": True},
+        {"band": 5, "channel": 36, "wifi_temp": 0.0, "wifi_temp_zero_is_unavailable": True},
+    ]
+
+    with db_connection() as connection:
+        with connection.cursor() as cursor:
+            insert_timepoint(cursor, format_utc(t_sample), raw_radios, suffix="raw-telemetry")
+
+    result = http_json(temperature_summary_path(format_utc(end_dt)), valid_token())
+
+    assert result.status == 200
+    assert result.body["min_wifi_temp_2.4G"] == 52.5
+    assert result.body["max_wifi_temp_2.4G"] == 52.5
+    assert result.body["avg_wifi_temp_2.4G"] == 52.5
+    assert result.body["latest_wifi_temp_2.4G"] == 52.5
+    # 5G 0.0 reading with zero-is-unavailable=True sentinel contract flag should be ignored
+    assert result.body["min_wifi_temp_5G"] is None
+    assert result.body["latest_wifi_temp_5G"] is None
+
 
 

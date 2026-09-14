@@ -133,7 +133,8 @@ namespace OpenWifi {
 	bool TimePointDB::SelectRecordsBySerial(const std::string &boardId,
 											const std::string &serialNumber, uint64_t startTime,
 											uint64_t endTime,
-											std::vector<AnalyticsObjects::DeviceTimePoint> &Recs) {
+											std::vector<AnalyticsObjects::DeviceTimePoint> &Recs,
+											uint64_t maxRecords) {
 		Recs.clear();
 		if (endTime <= startTime)
 			return true;
@@ -141,8 +142,9 @@ namespace OpenWifi {
 		auto WhereClause = fmt::format(
 			" boardId='{}' and serialNumber='{}' and (timestamp >= {}) and (timestamp < {}) ",
 			ORM::Escape(boardId), ORM::Escape(serialNumber), startTime, endTime);
-		const auto Sql = fmt::format("select {} from {} where {} order by timestamp, id ASC",
-									 SelectFields(), TableName_, WhereClause);
+		const auto RangeClause = (maxRecords > 0) ? ComputeRange(0, maxRecords) : "";
+		const auto Sql = fmt::format("select {} from {} where {} order by timestamp, id ASC{}",
+									 SelectFields(), TableName_, WhereClause, RangeClause);
 		std::vector<TimePointDBRecordType> RawRecords;
 		if (!Join(Sql, RawRecords))
 			return false;
@@ -157,7 +159,8 @@ namespace OpenWifi {
 
 	bool TimePointDB::SelectResourceRecordsBySerial(
 		const std::string &boardId, const std::string &serialNumber, uint64_t startTime,
-		uint64_t endTime, std::vector<AnalyticsObjects::DeviceTimePoint> &Recs) {
+		uint64_t endTime, std::vector<AnalyticsObjects::DeviceTimePoint> &Recs,
+		uint64_t maxRecords) {
 		Recs.clear();
 		if (endTime <= startTime)
 			return true;
@@ -165,9 +168,10 @@ namespace OpenWifi {
 		auto WhereClause = fmt::format(
 			" boardId='{}' and serialNumber='{}' and (timestamp >= {}) and (timestamp < {}) ",
 			ORM::Escape(boardId), ORM::Escape(serialNumber), startTime, endTime);
+		const auto RangeClause = (maxRecords > 0) ? ComputeRange(0, maxRecords) : "";
 		const auto Sql = fmt::format(
-			"select id, timestamp, resource_data from {} where {} order by timestamp, id ASC",
-			TableName_, WhereClause);
+			"select id, timestamp, resource_data from {} where {} order by timestamp, id ASC{}",
+			TableName_, WhereClause, RangeClause);
 		std::vector<TimePointResourceDBRecordType> RawRecords;
 		if (!Join(Sql, RawRecords))
 			return false;
@@ -187,7 +191,8 @@ namespace OpenWifi {
 												 const std::string &serialNumber,
 												 uint64_t startTime, uint64_t endTime,
 												 std::vector<AnalyticsObjects::DeviceTimePoint>
-													 &Recs) {
+													 &Recs,
+												 uint64_t maxRecords) {
 		Recs.clear();
 		if (endTime <= startTime)
 			return true;
@@ -195,9 +200,10 @@ namespace OpenWifi {
 		auto WhereClause = fmt::format(
 			" boardId='{}' and serialNumber='{}' and (timestamp >= {}) and (timestamp < {}) ",
 			ORM::Escape(boardId), ORM::Escape(serialNumber), startTime, endTime);
+		const auto RangeClause = (maxRecords > 0) ? ComputeRange(0, maxRecords) : "";
 		const auto Sql = fmt::format(
-			"select id, timestamp, radio_data from {} where {} order by timestamp, id ASC",
-			TableName_, WhereClause);
+			"select id, timestamp, radio_data from {} where {} order by timestamp, id ASC{}",
+			TableName_, WhereClause, RangeClause);
 		std::vector<TimePointRadioDBRecordType> RawRecords;
 		if (!Join(Sql, RawRecords))
 			return false;

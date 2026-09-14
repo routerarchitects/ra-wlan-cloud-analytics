@@ -55,11 +55,17 @@ namespace OpenWifi {
 
 		std::vector<AnalyticsObjects::DeviceTimePoint> Records;
 		if (!StorageService()->TimePointsDB().SelectResourceRecordsBySerial(
-				Resolved.resolvedBoardId, routerId, Window.startTime, Window.endTime, Records)) {
+				Resolved.resolvedBoardId, routerId, Window.startTime, Window.endTime, Records,
+				MaxSamples > 0 ? MaxSamples + 1 : 0)) {
 			poco_error(Logger(), "Failed to query timepoints for memory summary");
 			MCP::SetError(Error, Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR,
 						  "memory_summary_query_failed",
 						  "Unable to retrieve gateway memory history");
+			return MCP::SendError(*this, Error);
+		}
+		if (MaxSamples > 0 && Records.size() > static_cast<size_t>(MaxSamples)) {
+			MCP::SetError(Error, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST, "exceeds_max_samples",
+						  "Requested query window exceeds maximum allowed telemetry sample count");
 			return MCP::SendError(*this, Error);
 		}
 

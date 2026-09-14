@@ -7,7 +7,21 @@
 #include <optional>
 #include <vector>
 
-using namespace OpenWifi;
+namespace OpenWifi {
+	static std::map<std::string, std::string> g_TestConfigMap;
+
+	std::string MicroServiceConfigGetString(const std::string &Key,
+											const std::string &DefaultValue) {
+		auto it = g_TestConfigMap.find(Key);
+		if (it != g_TestConfigMap.end())
+			return it->second;
+		return DefaultValue;
+	}
+
+	std::string MicroServiceDataDirectory() {
+		return "/tmp";
+	}
+} // namespace OpenWifi
 
 namespace {
 
@@ -239,6 +253,18 @@ namespace {
 		APStats::ParseRadioTimePoint(Doc3, Device, RTP3);
 		assert(!RTP3.wifi_temp.has_value());
 		assert(RTP3.wifi_temp_zero_is_unavailable == false);
+
+		// 4. Config-driven zero-temperature contract matches (when explicit flag is absent)
+		g_TestConfigMap["temperature.wifi_temp_zero_unavailable_device_types"] = "ap-model-x,ap-model-z";
+		nlohmann::json Doc4 = nlohmann::json::parse(R"({
+			"band": ["2G"],
+			"channel": 1,
+			"temperature": 0.0
+		})");
+		AnalyticsObjects::RadioTimePoint RTP4;
+		APStats::ParseRadioTimePoint(Doc4, Device, RTP4);
+		assert(RTP4.wifi_temp_zero_is_unavailable == true);
+		g_TestConfigMap.clear();
 	}
 
 	void TestValidateExpectedSampleCount() {
