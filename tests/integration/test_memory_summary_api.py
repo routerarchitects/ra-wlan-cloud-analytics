@@ -34,6 +34,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
@@ -299,7 +300,7 @@ def insert_timepoint(
     board = board or board_id()
     venue = venue or venue_id()
     serial = serial or router_id()
-    row_id = f"mem-int-{board}-{serial}-{utc_epoch(timestamp)}-{suffix}".replace(":", "-")
+    row_id = f"mem-{uuid.uuid4().hex}"
     cursor.execute(
         """
         insert into timepoints (

@@ -46,13 +46,6 @@ namespace OpenWifi {
 						  "Router was not found");
 			return MCP::SendError(*this, Error);
 		}
-		if (!MCP::ValidateRetention(Window, Resolved.retention, Utils::Now(), ClockSkewSeconds, Error))
-			return MCP::SendError(*this, Error);
-
-		auto MaxSamples = MicroServiceConfigGetInt("mcp.max_samples", 10000);
-		if (!MCP::ValidateExpectedSampleCount(Window, Resolved.interval, MaxSamples, Error))
-			return MCP::SendError(*this, Error);
-
 		uint64_t CutoverTime = 0;
 		if (!MCP::GetTemperatureMigrationCutoverTime(CutoverTime, Error)) {
 			poco_error(Logger(), Error.message);
@@ -62,6 +55,13 @@ namespace OpenWifi {
 			return MCP::SendError(*this, Error);
 		}
 		if (!MCP::ValidateTemperatureCutover(Window, CutoverTime, Error))
+			return MCP::SendError(*this, Error);
+
+		if (!MCP::ValidateRetention(Window, Resolved.retention, Utils::Now(), ClockSkewSeconds, Error))
+			return MCP::SendError(*this, Error);
+
+		auto MaxSamples = MicroServiceConfigGetInt("mcp.max_samples", 10000);
+		if (!MCP::ValidateExpectedSampleCount(Window, Resolved.interval, MaxSamples, Error))
 			return MCP::SendError(*this, Error);
 
 		std::vector<AnalyticsObjects::DeviceTimePoint> Records;
