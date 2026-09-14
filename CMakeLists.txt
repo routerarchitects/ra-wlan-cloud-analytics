@@ -182,6 +182,7 @@ if(BUILD_TESTING)
     target_include_directories(test_mcp_radio_temperature_summary PRIVATE src)
     target_link_libraries(test_mcp_radio_temperature_summary PUBLIC
             ${Poco_LIBRARIES}
-            fmt::fmt)
+            fmt::fmt
+            resolv)
     add_test(NAME test_mcp_radio_temperature_summary COMMAND test_mcp_radio_temperature_summary)
 endif()
