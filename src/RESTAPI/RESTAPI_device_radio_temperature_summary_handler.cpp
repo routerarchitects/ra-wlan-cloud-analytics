@@ -49,6 +49,10 @@ namespace OpenWifi {
 		if (!MCP::ValidateRetention(Window, Resolved.retention, Utils::Now(), ClockSkewSeconds, Error))
 			return MCP::SendError(*this, Error);
 
+		auto MaxSamples = MicroServiceConfigGetInt("mcp.max_samples", 10000);
+		if (!MCP::ValidateExpectedSampleCount(Window, Resolved.interval, MaxSamples, Error))
+			return MCP::SendError(*this, Error);
+
 		uint64_t CutoverTime = 0;
 		if (!MCP::GetTemperatureMigrationCutoverTime(CutoverTime, Error)) {
 			poco_error(Logger(), Error.message);

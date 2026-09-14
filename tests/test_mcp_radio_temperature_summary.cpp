@@ -1,3 +1,4 @@
+#include "APStats.h"
 #include "RESTAPI/RESTAPI_mcp_helpers.h"
 
 #include <cassert>
@@ -197,24 +198,67 @@ namespace {
 	}
 
 	void TestTelemetryJsonParsingToRadioTimePoint() {
-		nlohmann::json RadioDoc = nlohmann::json::parse(R"({
+		AnalyticsObjects::DeviceInfo Device;
+		Device.deviceType = "ap-model-x";
+		Device.platform = "platform-y";
+		Device.lastFirmware = "v2.1.0-beta";
+
+		// 1. Valid temperature with explicit snake_case flag
+		nlohmann::json Doc1 = nlohmann::json::parse(R"({
 			"band": ["5G"],
 			"channel": 36,
 			"temperature": 54.5,
 			"wifi_temp_zero_is_unavailable": true
 		})");
+		AnalyticsObjects::RadioTimePoint RTP1;
+		APStats::ParseRadioTimePoint(Doc1, Device, RTP1);
+		assert(RTP1.wifi_temp.has_value());
+		assert(*RTP1.wifi_temp == 54.5);
+		assert(RTP1.wifi_temp_zero_is_unavailable == true);
 
-		AnalyticsObjects::RadioTimePoint RTP;
-		if (RadioDoc.contains("temperature") && !RadioDoc["temperature"].is_null()) {
-			RTP.wifi_temp = RadioDoc["temperature"].get<double>();
-		}
-		if (RadioDoc.contains("wifi_temp_zero_is_unavailable")) {
-			RTP.wifi_temp_zero_is_unavailable = RadioDoc["wifi_temp_zero_is_unavailable"].get<bool>();
-		}
+		// 2. Valid temperature with camelCase flag
+		nlohmann::json Doc2 = nlohmann::json::parse(R"({
+			"band": ["2G"],
+			"channel": 6,
+			"temperature": 42.0,
+			"wifiTempZeroIsUnavailable": false
+		})");
+		AnalyticsObjects::RadioTimePoint RTP2;
+		APStats::ParseRadioTimePoint(Doc2, Device, RTP2);
+		assert(RTP2.wifi_temp.has_value());
+		assert(*RTP2.wifi_temp == 42.0);
+		assert(RTP2.wifi_temp_zero_is_unavailable == false);
 
-		assert(RTP.wifi_temp.has_value());
-		assert(*RTP.wifi_temp == 54.5);
-		assert(RTP.wifi_temp_zero_is_unavailable == true);
+		// 3. Null / missing temperature
+		nlohmann::json Doc3 = nlohmann::json::parse(R"({
+			"band": ["5G"],
+			"channel": 149,
+			"temperature": null
+		})");
+		AnalyticsObjects::RadioTimePoint RTP3;
+		APStats::ParseRadioTimePoint(Doc3, Device, RTP3);
+		assert(!RTP3.wifi_temp.has_value());
+		assert(RTP3.wifi_temp_zero_is_unavailable == false);
+	}
+
+	void TestValidateExpectedSampleCount() {
+		MCP::Error E;
+		MCP::Window W;
+		W.startTime = 1000;
+		W.endTime = 4600; // 3600 seconds = 1 hour window
+
+		// Interval 60s -> 3600 / 60 + 1 = 61 estimated samples
+		assert(MCP::ValidateExpectedSampleCount(W, 60, 100, E));
+		assert(MCP::ValidateExpectedSampleCount(W, 60, 61, E));
+
+		// Exceeds limit
+		assert(!MCP::ValidateExpectedSampleCount(W, 60, 60, E));
+		assert(E.status == Poco::Net::HTTPResponse::HTTP_BAD_REQUEST);
+		assert(E.error == "exceeds_max_samples");
+
+		// Interval 0 -> fallback to 60s
+		assert(MCP::ValidateExpectedSampleCount(W, 0, 100, E));
+		assert(!MCP::ValidateExpectedSampleCount(W, 0, 50, E));
 	}
 
 } // namespace
@@ -230,6 +274,7 @@ int main() {
 	TestHalfOpenWindowAndCutoverBoundary();
 	TestZeroSentinelFlag();
 	TestTelemetryJsonParsingToRadioTimePoint();
+	TestValidateExpectedSampleCount();
 	std::cout << "test_mcp_radio_temperature_summary passed\n";
 	return 0;
 }

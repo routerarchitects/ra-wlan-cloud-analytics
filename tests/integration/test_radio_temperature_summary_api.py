@@ -41,6 +41,7 @@ INVALID_RESPONSE_ROUTER_ID = "60cf84f22293"
 DEFAULT_BOARD_ID = "board-test-01"
 DEFAULT_VENUE_ID = "venue-test-01"
 OTHER_BOARD_ID = "temperature-other-board"
+REASSIGNED_BOARD_ID = "old-board-reassigned"
 DEFAULT_VALID_TOKEN = "root-token"
 
 
@@ -154,12 +155,12 @@ def cleanup_test_rows(cursor) -> None:
         (router_id(), "temp-other-router"),
     )
     cursor.execute(
-        "delete from timepoints where boardid in (%s, %s)",
-        (board_id(), OTHER_BOARD_ID),
+        "delete from timepoints where boardid in (%s, %s, %s)",
+        (board_id(), OTHER_BOARD_ID, REASSIGNED_BOARD_ID),
     )
     cursor.execute(
-        "delete from boards where id in (%s, %s)",
-        (board_id(), OTHER_BOARD_ID),
+        "delete from boards where id in (%s, %s, %s)",
+        (board_id(), OTHER_BOARD_ID, REASSIGNED_BOARD_ID),
     )
 
 
@@ -500,26 +501,28 @@ def test_radio_temperature_summary_local_venue_cache_does_not_bypass_authorizati
 
 def test_radio_temperature_summary_reassigned_router_ignores_old_board_samples(seeded_board) -> None:
     end_dt = utc_now() - timedelta(seconds=30)
-    old_board_id = "old-board-reassigned"
+    old_board_id = REASSIGNED_BOARD_ID
     
     with db_connection() as connection:
         with connection.cursor() as cursor:
-            # Seed old board with old venue
-            seed_board(cursor, board=old_board_id, venue="old-venue-reassigned")
+            # Increase current board retention to support 6-hour lookback query
+            cursor.execute("update boards set retention = 86400 where id = %s", (board_id(),))
+            # Seed old board with old venue and 24h retention
+            seed_board(cursor, board=old_board_id, venue="old-venue-reassigned", retention=86400)
             
             # Historical samples on old Board A
             insert_timepoint(
                 cursor,
                 format_utc(end_dt - timedelta(hours=5)),
                 [{"band": 2, "wifi_temp": 40.0}],
-                board_id=old_board_id,
+                board=old_board_id,
                 suffix="old-board-sample-1",
             )
             insert_timepoint(
                 cursor,
                 format_utc(end_dt - timedelta(hours=4)),
                 [{"band": 2, "wifi_temp": 45.0}],
-                board_id=old_board_id,
+                board=old_board_id,
                 suffix="old-board-sample-2",
             )
 

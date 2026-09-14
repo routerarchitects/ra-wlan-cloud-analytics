@@ -62,74 +62,7 @@ namespace OpenWifi {
 		return std::nullopt;
 	}
 
-	static std::optional<double> GetOptionalDoubleJSON(const char *field,
-													   const nlohmann::json &doc) {
-		try {
-			if (!doc.contains(field) || doc[field].is_null())
-				return std::nullopt;
-			if (doc[field].is_number())
-				return doc[field].get<double>();
-		} catch (...) {
-		}
-		return std::nullopt;
-	}
 
-	static bool GetOptionalBoolJSON(const char *field, const nlohmann::json &doc, bool &value) {
-		try {
-			if (!doc.contains(field) || doc[field].is_null() || !doc[field].is_boolean())
-				return false;
-			value = doc[field].get<bool>();
-			return true;
-		} catch (...) {
-		}
-		return false;
-	}
-
-	static bool ConfigListContains(const std::string &ConfigKey, const std::string &Value) {
-		if (Value.empty())
-			return false;
-
-		Poco::StringTokenizer Tokens(MicroServiceConfigGetString(ConfigKey, ""), ",",
-									 Poco::StringTokenizer::TOK_TRIM |
-										 Poco::StringTokenizer::TOK_IGNORE_EMPTY);
-		for (const auto &Token : Tokens) {
-			if (!Poco::icompare(Token, Value))
-				return true;
-		}
-		return false;
-	}
-
-	static bool ConfigListContainsPrefix(const std::string &ConfigKey,
-										 const std::string &Value) {
-		if (Value.empty())
-			return false;
-
-		Poco::StringTokenizer Tokens(MicroServiceConfigGetString(ConfigKey, ""), ",",
-									 Poco::StringTokenizer::TOK_TRIM |
-										 Poco::StringTokenizer::TOK_IGNORE_EMPTY);
-		for (const auto &Token : Tokens) {
-			if (Value.size() >= Token.size() &&
-				!Poco::icompare(Value.substr(0, Token.size()), Token))
-				return true;
-		}
-		return false;
-	}
-
-	static bool ResolveWifiTempZeroIsUnavailableContract(
-		const nlohmann::json &radio, const AnalyticsObjects::DeviceInfo &Device) {
-		bool ExplicitContract = false;
-		if (GetOptionalBoolJSON("wifi_temp_zero_is_unavailable", radio, ExplicitContract) ||
-			GetOptionalBoolJSON("wifiTempZeroIsUnavailable", radio, ExplicitContract))
-			return ExplicitContract;
-
-		return ConfigListContains("temperature.wifi_temp_zero_unavailable_device_types",
-								  Device.deviceType) ||
-			   ConfigListContains("temperature.wifi_temp_zero_unavailable_platforms",
-								  Device.platform) ||
-			   ConfigListContainsPrefix(
-				   "temperature.wifi_temp_zero_unavailable_firmware_prefixes",
-				   Device.lastFirmware);
-	}
 
 	inline double safe_div(uint64_t a, uint64_t b) {
 		if (b == 0)
@@ -253,9 +186,7 @@ namespace OpenWifi {
 						GetJSON("tx_power", radio, RTP.tx_power, (uint64_t)0);
 						GetJSON("active_ms", radio, RTP.active_ms, (uint64_t)0);
 						GetJSON("channel", radio, RTP.channel, (uint64_t)0);
-						RTP.wifi_temp = GetOptionalDoubleJSON("temperature", radio);
-						RTP.wifi_temp_zero_is_unavailable =
-							ResolveWifiTempZeroIsUnavailableContract(radio, DI_);
+						APStats::ParseRadioTimePoint(radio, DI_, RTP);
 						GetJSON("temperature", radio, RTP.temperature, (int64_t)20);
 						if (radio.contains("channel_width") && !radio["channel_width"].is_null()) {
 							if (radio["channel_width"].is_string()) {

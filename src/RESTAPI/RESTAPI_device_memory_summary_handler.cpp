@@ -49,6 +49,10 @@ namespace OpenWifi {
 		if (!MCP::ValidateRetention(Window, Resolved.retention, Utils::Now(), ClockSkewSeconds, Error))
 			return MCP::SendError(*this, Error);
 
+		auto MaxSamples = MicroServiceConfigGetInt("mcp.max_samples", 10000);
+		if (!MCP::ValidateExpectedSampleCount(Window, Resolved.interval, MaxSamples, Error))
+			return MCP::SendError(*this, Error);
+
 		std::vector<AnalyticsObjects::DeviceTimePoint> Records;
 		if (!StorageService()->TimePointsDB().SelectResourceRecordsBySerial(
 				Resolved.resolvedBoardId, routerId, Window.startTime, Window.endTime, Records)) {

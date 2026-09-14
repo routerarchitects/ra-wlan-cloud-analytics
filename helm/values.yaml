@@ -160,6 +160,7 @@ configProperties:
   temperature.wifi_temp_zero_unavailable_device_types: ""
   temperature.wifi_temp_zero_unavailable_platforms: ""
   temperature.wifi_temp_zero_unavailable_firmware_prefixes: ""
+  mcp.max_samples: 10000
   # Storage
   storage.type: sqlite # (sqlite|postgresql|mysql|odbc)
   ## SQLite
