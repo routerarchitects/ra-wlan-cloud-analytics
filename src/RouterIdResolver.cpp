@@ -43,7 +43,7 @@ namespace OpenWifi {
 			return false;
 		}
 
-		std::vector<BoardsDB::BoardVenueRecord> Matches;
+		std::vector<BoardVenueRecord> Matches;
 		if (!StorageService()->BoardsDB().FindBoardVenueRecordsByVenue(Device.venue, Matches)) {
 			poco_error(Client.Logger(),
 					   "Failed to read Analytics boards while resolving routerId=" +

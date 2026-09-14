@@ -7,6 +7,13 @@
 #include <utility>
 #include <vector>
 
+namespace OpenWifi {
+	const std::string &MicroServiceDataDirectory() {
+		static const std::string DataDirectory = "/tmp";
+		return DataDirectory;
+	}
+} // namespace OpenWifi
+
 using namespace OpenWifi;
 
 namespace {
@@ -35,8 +42,8 @@ namespace {
 		return URI.getQueryParameters();
 	}
 
-	BoardsDB::BoardVenueRecord Board(const std::string &BoardId, const std::string &VenueId) {
-		BoardsDB::BoardVenueRecord B;
+	BoardVenueRecord Board(const std::string &BoardId, const std::string &VenueId) {
+		BoardVenueRecord B;
 		B.boardId = BoardId;
 		B.venueId = VenueId;
 		B.retention = 86400;

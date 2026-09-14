@@ -18,10 +18,13 @@ namespace OpenWifi {
 		return DefaultValue;
 	}
 
-	std::string MicroServiceDataDirectory() {
-		return "/tmp";
+	const std::string &MicroServiceDataDirectory() {
+		static const std::string DataDirectory = "/tmp";
+		return DataDirectory;
 	}
 } // namespace OpenWifi
+
+using namespace OpenWifi;
 
 namespace {
 

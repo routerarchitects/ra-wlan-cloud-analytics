@@ -6,6 +6,7 @@
 
 #include "Poco/String.h"
 #include "Poco/StringTokenizer.h"
+#include "Poco/Logger.h"
 #include "RESTObjects/RESTAPI_AnalyticsObjects.h"
 #include "framework/MicroServiceFuncs.h"
 #include "framework/utils.h"

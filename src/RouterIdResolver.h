@@ -40,7 +40,7 @@ namespace OpenWifi {
 		static bool AnalyticsBoardStorageFailure(Error &E);
 		static bool InvalidProvisioningResponse(Error &E);
 		static bool ResolveBoardForVenue(const std::string &venueId,
-										 const std::vector<BoardsDB::BoardVenueRecord> &Boards,
+										 const std::vector<BoardVenueRecord> &Boards,
 										 Result &Resolved, Error &E);
 	};
 
@@ -85,9 +85,9 @@ namespace OpenWifi {
 	}
 
 	inline bool RouterIdResolver::ResolveBoardForVenue(
-		const std::string &venueId, const std::vector<BoardsDB::BoardVenueRecord> &Boards,
+		const std::string &venueId, const std::vector<BoardVenueRecord> &Boards,
 		Result &Resolved, Error &E) {
-		std::vector<BoardsDB::BoardVenueRecord> MatchingBoards;
+		std::vector<BoardVenueRecord> MatchingBoards;
 		for (const auto &Board : Boards) {
 			if (!Board.venueId.empty() && Board.venueId == venueId) {
 				MatchingBoards.emplace_back(Board);
