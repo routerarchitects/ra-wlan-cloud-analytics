@@ -3161,7 +3161,7 @@ Expected response:
 ```json
 {
   "band": 5,
-  "wifi_temp": null
+  "temperature": null
 }
 ```
 
@@ -3171,21 +3171,19 @@ Expected response:
 
 ---
 
-## TC-TEMP-007: Pre-cutover temperature record
+## TC-TEMP-007: Sample before requested window
 
 ### Test data
 
 ```text
-temperatureMigrationCutoverTime = 2026-07-29T10:00:00Z
 API requested startTime = 2026-07-29T10:00:00Z
-Database contains historical row: sample time = 2026-07-29T09:59:59Z, wifi_temp = 62
+Database contains historical row: sample time = 2026-07-29T09:59:59Z, temperature = 62
 ```
 
 ### Expected result
 
-* The pre-cutover database sample is excluded by the database query filter `timestamp >= startTime`.
+* The before-window database sample is excluded by the database query filter `timestamp >= startTime`.
 * It does not affect minimum, maximum or average.
-* Note: If API requested `startTime` were before `temperatureMigrationCutoverTime` (e.g. `09:55:00Z`), the request would return `400 Bad Request` per `TC-TEMP-017`.
 
 ---
 
@@ -3193,16 +3191,16 @@ Database contains historical row: sample time = 2026-07-29T09:59:59Z, wifi_temp 
 
 ### Preconditions
 
-The post-cutover sample contains:
+The sample contains:
 
 ```text
-wifi_temp = 0
+temperature = 0
 ```
 
 ### Expected result
 
-* If the persisted/resolved telemetry contract for that sample has `wifiTempZeroIsUnavailable = true`, the sample is excluded from temperature aggregation and does not contribute to min, max, or average calculations.
-* If the persisted/resolved telemetry contract has `wifiTempZeroIsUnavailable = false` or no contract can be resolved, `0°C` is a valid in-range measurement and contributes to min, max, and average calculations.
+* If the persisted/resolved telemetry contract for that sample has `temperatureZeroIsUnavailable = true`, the sample is excluded from temperature aggregation and does not contribute to min, max, or average calculations.
+* If the persisted/resolved telemetry contract has `temperatureZeroIsUnavailable = false` or no contract can be resolved, `0°C` is a valid in-range measurement and contributes to min, max, and average calculations.
 
 ---
 
@@ -3210,12 +3208,12 @@ wifi_temp = 0
 
 ### Objective
 
-Verify that zero-sentinel interpretation (`wifiTempZeroIsUnavailable = true`) is resolved and persisted at ingestion time so that later telemetry/device contract changes do not reinterpret historical telemetry at query time.
+Verify that zero-sentinel interpretation (`temperatureZeroIsUnavailable = true`) is resolved and persisted at ingestion time so that later telemetry/device contract changes do not reinterpret historical telemetry at query time.
 
 ### Steps
 
-1. Ingest a telemetry sample containing `wifi_temp = 0` at timestamp `10:00:00Z` while the active producer/device contract has `wifiTempZeroIsUnavailable = true`.
-2. Change the active producer/device telemetry contract to `wifiTempZeroIsUnavailable = false`.
+1. Ingest a telemetry sample containing `temperature = 0` at timestamp `10:00:00Z` while the active producer/device contract has `temperatureZeroIsUnavailable = true`.
+2. Change the active producer/device telemetry contract to `temperatureZeroIsUnavailable = false`.
 3. Call the `radio-temperature-summary` API for a time window containing `10:00:00Z`.
 
 ### Expected result
@@ -3229,12 +3227,12 @@ Verify that zero-sentinel interpretation (`wifiTempZeroIsUnavailable = true`) is
 
 ### Objective
 
-Verify that a valid 0°C measurement (`wifiTempZeroIsUnavailable = false`) resolved and persisted at ingestion time remains included in aggregation despite subsequent contract changes.
+Verify that a valid 0°C measurement (`temperatureZeroIsUnavailable = false`) resolved and persisted at ingestion time remains included in aggregation despite subsequent contract changes.
 
 ### Steps
 
-1. Ingest a telemetry sample containing `wifi_temp = 0` at timestamp `10:00:00Z` while the active producer/device contract has `wifiTempZeroIsUnavailable = false`.
-2. Change the active producer/device telemetry contract to `wifiTempZeroIsUnavailable = true`.
+1. Ingest a telemetry sample containing `temperature = 0` at timestamp `10:00:00Z` while the active producer/device contract has `temperatureZeroIsUnavailable = false`.
+2. Change the active producer/device telemetry contract to `temperatureZeroIsUnavailable = true`.
 3. Call the `radio-temperature-summary` API for a time window containing `10:00:00Z`.
 
 ### Expected result
@@ -3244,76 +3242,73 @@ Verify that a valid 0°C measurement (`wifiTempZeroIsUnavailable = false`) resol
 
 ---
 
-## TC-TEMP-009: Post-cutover missing `wifi_temp`
+## TC-TEMP-009: Missing `temperature`
 
 ### Expected result
 
-* Temperature is excluded when `wifi_temp` is missing or `null`.
+* Temperature is excluded when `temperature` is missing or `null`.
 * No synthetic fallback value is generated.
 
 ---
 
-## TC-TEMP-010: Post-cutover valid numeric `wifi_temp`
+## TC-TEMP-010: Valid numeric `temperature`
 
 ### Preconditions
 
-A post-cutover sample contains a numeric `wifi_temp` value.
+A sample contains a numeric `temperature` value.
 
 ### Expected result
 
-* A post-cutover numeric `wifi_temp` is included only when all of the following hold:
-  * `-40 <= wifi_temp <= 125`
-  * `wifi_temp != 255`
-  * `wifi_temp != 0` only when the persisted/resolved telemetry contract has `wifiTempZeroIsUnavailable = true`
+* A numeric `temperature` is included only when all of the following hold:
+  * `-40 <= temperature <= 125`
+  * `temperature != 255`
+  * `temperature != 0` only when the persisted/resolved telemetry contract has `temperatureZeroIsUnavailable = true`
 * Explicit boundary values `-40` and `125` are valid inclusive measurements and are included in aggregation.
 * Sentinel and out-of-range values (`255`, `< -40`, and `> 125`) are excluded. `0°C` is excluded only under a telemetry contract that marks zero as unavailable.
 
 ---
 
-## TC-TEMP-011: Pre-cutover temperature equal to 20
+## TC-TEMP-011: Temperature equal to 20
 
 ### Preconditions
 
-* `temperatureMigrationCutoverTime = 2026-07-29T10:00:00Z`.
-* API requested `startTime = 2026-07-29T10:00:00Z`.
-* Database contains pre-cutover record timestamp `2026-07-29T09:59:00Z` with `wifi_temp = 20`.
+* API requested window includes the sample timestamp.
+* Database contains a record with `temperature = 20`.
 
 ### Expected result
 
-* The pre-cutover database row is excluded by `timestamp >= startTime` filtering because historical temperature values cannot reliably distinguish measured values from synthetic fallback values.
-* It does not affect minimum, maximum or average.
+* The sample is included.
+* The value `20` is not treated as a synthetic fallback or missing value.
 
 ---
 
-## TC-TEMP-012: Pre-cutover temperature other than 20
+## TC-TEMP-012: Temperature other than 20
 
 ### Test data
 
 ```text
-temperatureMigrationCutoverTime = 2026-07-29T10:00:00Z
-API requested startTime = 2026-07-29T10:00:00Z
-Database contains pre-cutover record timestamp 2026-07-29T09:55:00Z with wifi_temp = 62
-```
-
-### Expected result
-
-* The sample is excluded by `timestamp >= startTime` filtering because all pre-cutover temperature records are ignored.
-
----
-
-## TC-TEMP-013: Post-cutover temperature equal to 20
-
-### Test data
-
-```text
-Record timestamp is at or after temperature_migration_cutover_time
-wifi_temp = 20
+API requested window includes the sample timestamp.
+Database contains record with temperature = 62.
 ```
 
 ### Expected result
 
 * The sample is included.
-* Post-cutover samples are not rejected only because the measured value is `20`.
+
+---
+
+## TC-TEMP-013: Temperature equal to 20 with other valid samples
+
+### Test data
+
+```text
+temperature = 20
+```
+
+### Expected result
+
+* The sample is included.
+* Samples are not rejected only because the measured value is `20`.
 
 ---
 
@@ -3321,16 +3316,15 @@ wifi_temp = 20
 
 ### Test data
 
-`temperatureMigrationCutoverTime` = `2026-07-29T10:00:00Z`
 API requested window: `startTime = 2026-07-29T10:00:00Z`, `endTime = 2026-07-29T10:05:00Z`
 
 ```text
 2.4 GHz database samples:
-09:59:00Z  wifi_temp = 20   (pre-cutover DB row -> excluded by timestamp >= startTime)
-10:01:00Z  wifi_temp = 60   (post-cutover valid sample -> included)
-10:02:00Z  wifi_temp = 65   (post-cutover valid sample -> included)
-10:03:00Z  wifi_temp = null (missing sample -> excluded)
-10:04:00Z  wifi_temp = 70   (post-cutover valid sample -> included)
+09:59:00Z  temperature = 20   (before requested window -> excluded by timestamp >= startTime)
+10:01:00Z  temperature = 60   (valid sample -> included)
+10:02:00Z  temperature = 65   (valid sample -> included)
+10:03:00Z  temperature = null (missing sample -> excluded)
+10:04:00Z  temperature = 70   (valid sample -> included)
 ```
 
 ### Expected result
@@ -3341,7 +3335,7 @@ max = 70
 avg = 65
 ```
 
-Only post-cutover valid samples `60`, `65`, and `70` are included. Pre-cutover DB row (`09:59:00Z`) and `null` are excluded.
+Only valid in-window samples `60`, `65`, and `70` are included. The before-window row (`09:59:00Z`) and `null` are excluded.
 
 ---
 
@@ -3351,7 +3345,7 @@ Only post-cutover valid samples `60`, `65`, and `70` are included. Pre-cutover D
 
 ```text
 band = 6
-wifi_temp = 58
+temperature = 58
 ```
 
 ### Expected result
@@ -3374,24 +3368,20 @@ Two 5 GHz radios publish valid temperatures.
 
 ---
 
-## TC-TEMP-017: Requested range starts before temperature migration cutover
+## TC-TEMP-017: Historical range with only null temperatures
 
 ### Test data
 
-Query requested `startTime` is strictly before `temperatureMigrationCutoverTime` (`startTime < temperatureMigrationCutoverTime`).
+Query requested window contains only records where radio `temperature` is missing or `null`.
 
 ### Expected result
 
-* HTTP `400 Bad Request`.
-* Response JSON envelope:
+* HTTP `200 OK`.
+* The requested window is echoed.
+* `observedWindow.startTime` and `observedWindow.endTime` are `null`.
+* All temperature aggregate fields are `null`.
 
-```json
-{
-  "error": "temperature_range_before_cutover",
-  "message": "The requested summary interval starts before the temperature migration cutover timestamp."
-}
-```
-* No truncated or partial temperature summary is returned for pre-cutover intervals.
+---
 
 ---
 
@@ -3428,84 +3418,68 @@ A timepoint contains invalid JSON in `radio_data`.
 
 ---
 
-## TC-CONFIG-TEMP-001: Valid file configuration starts service
+## TC-CONFIG-TEMP-001: Zero-sentinel file configuration starts service
 
 ### Preconditions
 
-`temperature.migration_cutover_time = "2026-07-01T00:00:00Z"` in configuration file. `TEMPERATURE_MIGRATION_CUTOVER_TIME` environment variable is unset.
+The configuration file may define comma-separated lists:
+
+```properties
+temperature.zero_unavailable_device_types = ap-model-a,ap-model-b
+temperature.zero_unavailable_platforms = platform-a
+temperature.zero_unavailable_firmware_prefixes = v1.,v2.
+```
 
 ### Expected result
 
 * Service initializes successfully.
-* `temperatureMigrationCutoverTime` is set to `2026-07-01T00:00:00Z`.
+* Matching telemetry samples resolve `temperatureZeroIsUnavailable = true` during ingestion when no explicit producer flag is present.
 
 ---
 
-## TC-CONFIG-TEMP-002: Valid environment configuration starts service
+## TC-CONFIG-TEMP-002: Zero-sentinel environment configuration starts service
 
 ### Preconditions
 
-`TEMPERATURE_MIGRATION_CUTOVER_TIME = "2026-07-01T00:00:00Z"` in environment. `temperature.migration_cutover_time` configuration file key is unset.
+The templated deployment sets:
+
+```text
+TEMPERATURE_ZERO_UNAVAILABLE_DEVICE_TYPES = ap-model-a,ap-model-b
+TEMPERATURE_ZERO_UNAVAILABLE_PLATFORMS = platform-a
+TEMPERATURE_ZERO_UNAVAILABLE_FIRMWARE_PREFIXES = v1.,v2.
+```
 
 ### Expected result
 
 * Service initializes successfully.
-* `temperatureMigrationCutoverTime` is set to `2026-07-01T00:00:00Z`.
+* The rendered config contains the corresponding `temperature.zero_unavailable_*` keys.
 
 ---
 
-## TC-CONFIG-TEMP-003: Environment configuration takes precedence over file configuration
+## TC-CONFIG-TEMP-003: Explicit telemetry flag takes precedence over config lists
 
 ### Preconditions
 
-* Configuration file: `temperature.migration_cutover_time = "2026-06-01T00:00:00Z"`.
-* Environment variable: `TEMPERATURE_MIGRATION_CUTOVER_TIME = "2026-07-01T00:00:00Z"`.
+* Device metadata matches a configured `temperature.zero_unavailable_device_types` entry.
+* The radio telemetry sample includes `temperatureZeroIsUnavailable = false`.
 
 ### Expected result
 
-* Service initializes successfully.
-* `temperatureMigrationCutoverTime` evaluates to `"2026-07-01T00:00:00Z"` (environment variable takes precedence).
+* The explicit telemetry flag wins.
+* `temperature = 0` is included as a valid measurement for that sample.
 
 ---
 
-## TC-CONFIG-TEMP-004: Missing configuration causes fatal startup failure
+## TC-CONFIG-TEMP-004: Missing migration is a deployment ordering failure
 
 ### Preconditions
 
-Both `temperature.migration_cutover_time` file key and `TEMPERATURE_MIGRATION_CUTOVER_TIME` environment variable are absent or empty.
+The external Flyway migration from `routerarchitects/mango-cloud-migrations` has not run before deploying this Analytics version.
 
 ### Expected result
 
-* Service fails startup immediately.
-* Logs a `FATAL` error: `FATAL: Missing required configuration 'temperature.migration_cutover_time'`.
-* Service process terminates with a non-zero exit code.
-
----
-
-## TC-CONFIG-TEMP-005: Malformed timestamp causes fatal startup failure
-
-### Preconditions
-
-`temperature.migration_cutover_time = "invalid-date-string"`.
-
-### Expected result
-
-* Service fails startup immediately.
-* Logs a `FATAL` error: `FATAL: Unparseable configuration 'temperature.migration_cutover_time'`.
-* Service process terminates with a non-zero exit code.
-
----
-
-## TC-CONFIG-TEMP-006: Timezone offset handling
-
-### Preconditions
-
-`temperature.migration_cutover_time = "2026-07-01T05:30:00+05:30"`.
-
-### Expected result
-
-* Timestamp is parsed and normalized to UTC `2026-07-01T00:00:00Z`.
-* Service initializes successfully with canonical UTC timestamp.
+* The deployment is rejected or rolled back by release orchestration.
+* Analytics code is not modified to recreate or bypass the external migration.
 
 ---
 
@@ -4571,8 +4545,8 @@ lookbackHours
 ### Expected result
 
 * Every API calculates the same requested `startTime` and `endTime` from `timestampTill` and `lookbackHours`.
-* Memory, usage, and RSSI apply the requested half-open aggregation window: `startTime <= sample_time < endTime`.
-* Temperature requires `startTime >= temperatureMigrationCutoverTime`; if requested `startTime < temperatureMigrationCutoverTime`, the temperature request is rejected with HTTP `400 Bad Request` (`error: "temperature_range_before_cutover"`) matching TC-TEMP-017 rather than clipping the requested range.
+* Memory, usage, RSSI, and temperature apply the requested half-open aggregation window: `startTime <= sample_time < endTime`.
+* Temperature returns `200 OK` with null aggregates when no valid migrated nullable `temperature` samples exist in the requested window.
 * Availability applies the requested event window only when `startTime >= availabilityValidFrom`; otherwise the availability request is rejected according to the API contract.
 
 ---

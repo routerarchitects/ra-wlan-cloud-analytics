@@ -84,13 +84,12 @@ All REST handlers must enforce request validation in four distinct sequential ph
    - Do not return HTTP `403 Forbidden` for the "existing router outside caller scope" case because it would disclose that the router serial exists.
    - Load router scope monitoring configuration (`monitoringDuration`) to derive `maxLookbackHours = floor(monitoringDuration / 3600)`.
 
-3. **Phase 3: Duration, Retention & Endpoint Cutover Validation**
+3. **Phase 3: Duration, Retention & Endpoint Domain Validation**
    - Validate duration against scope maximum (all endpoints): `lookbackHours > maxLookbackHours` -> HTTP `400 invalid_lookback_hours`.
    - Validate requested range against data retention window (all endpoints): requested window outside retention -> HTTP `400 lookback_outside_retention`.
    - Validate endpoint-specific domain cutover thresholds:
-     - `radio-temperature-summary` endpoint only: `start_time < temperatureMigrationCutoverTime` -> HTTP `400 temperature_range_before_cutover`.
      - `availability-summary` endpoint only: `start_time < availabilityValidFrom` -> HTTP `400 availability_range_before_cutover`.
-     - `memory-summary`, `rssi-summary`, and `bandwidth-consumption` endpoints: no domain cutover validation unless explicitly defined by that endpoint.
+     - `memory-summary`, `radio-temperature-summary`, `rssi-summary`, and `bandwidth-consumption` endpoints: no domain cutover validation unless explicitly defined by that endpoint.
 
 Example:
 
@@ -822,42 +821,42 @@ Analytics should store a nullable Wi-Fi temperature value per radio:
 
 ```text
 radios[].band
-radios[].wifi_temp
+radios[].temperature
 ```
 
-`radios[].wifi_temp` and all `*_wifi_temp_*` response fields use degrees Celsius.
+`radios[].temperature` and all `*_wifi_temp_*` response fields use degrees Celsius.
 
 Required ingestion rule:
 
 ```text
 If the source radio temperature is present and non-null:
-  store radios[].wifi_temp = source temperature
+  store radios[].temperature = source temperature
 
 If the source radio temperature is missing or null:
-  omit radios[].wifi_temp or store radios[].wifi_temp = null
+  omit radios[].temperature or store radios[].temperature = null
 
 Do not synthesize a numeric fallback temperature for missing data.
-Do not store a placeholder in wifi_temp for a missing temperature.
+Do not store a placeholder in temperature for a missing temperature.
 ```
 
 Zero-temperature sentinel source of truth:
 
 ```text
-The source of truth for whether wifi_temp = 0 means unavailable is an explicit
+The source of truth for whether temperature = 0 means unavailable is an explicit
 TelemetryTemperatureContract resolved at ingestion time from stable producer
 metadata, such as OWPROV inventory deviceType, gateway capabilities platform,
 firmware family, or an equivalent service-level contract registry.
 
 The resolved contract must expose:
-  wifiTempZeroIsUnavailable: boolean
+  temperatureZeroIsUnavailable: boolean
 
 Persist either the resolved boolean on the radio temperature sample, for example
-radio_data[].wifi_temp_zero_is_unavailable, or persist a stable contract id that
+radio_data[].temperature_zero_is_unavailable, or persist a stable contract id that
 can be resolved later to the same boolean. Do not infer zero-sentinel behavior
 from the observed temperature value itself.
 
 If no producer/device contract can be resolved for a sample, the default is:
-  wifiTempZeroIsUnavailable = false
+  temperatureZeroIsUnavailable = false
 
 ### Venue Reassignment & Observed Window Rules
 
@@ -869,34 +868,21 @@ When a gateway moves from an old venue (Board A) to a new venue (Board B):
 5. Temperature aggregates (`min`, `max`, `avg`, `latest`) are calculated exclusively from valid samples on `Board B`.
 ```
 
-Migration boundary configuration & rule:
+Migration dependency:
 
 ```text
-temperatureMigrationCutoverTime:
-  source: Analytics service configuration (file key 'temperature.migration_cutover_time' or ENV 'TEMPERATURE_MIGRATION_CUTOVER_TIME')
-  scope: global per deployment
-  format: ISO 8601 / RFC 3339 UTC string (e.g. "2026-07-01T00:00:00Z")
-  required: true (Analytics service fails startup with a FATAL log if missing or unparseable)
+Deploy the external Flyway migration from routerarchitects/mango-cloud-migrations
+before deploying this Analytics version. The Analytics API expects persisted
+radio_data samples to expose the migrated nullable temperature field.
+```
 
-Only use temperature records created at or after temperatureMigrationCutoverTime.
-Ignore all earlier records because historical temperature values cannot reliably
-distinguish measured values from synthetic fallback values.
-
-If the requested range starts before temperatureMigrationCutoverTime (startTime < temperatureMigrationCutoverTime):
-  return 400 Bad Request with JSON error envelope:
-  {
-    "error": "temperature_range_before_cutover",
-    "message": "The requested summary interval starts before the temperature migration cutover timestamp."
-  }
-
-Do not filter out post-cutover samples only because the measured value is 20°C.
-After the cutover, a present wifi_temp value is treated as a legitimate measurement.
-Reject `wifi_temp = 0` only when the corresponding telemetry producer or device
+Do not filter out samples only because the measured value is 20°C.
+A present temperature value is treated as a legitimate measurement.
+Reject `temperature = 0` only when the corresponding telemetry producer or device
 contract defines `0` as an unavailable or uninitialized sensor sentinel.
 Otherwise, treat `0°C` as a valid in-range measurement. A sample with
-`wifi_temp = null`, `255`, or a value outside the valid range `[-40, 125]` is
+`temperature = null`, `255`, or a value outside the valid range `[-40, 125]` is
 treated as a missing sensor reading and MUST be excluded from aggregation.
-```
 
 The current radio-band mapping is:
 
@@ -915,7 +901,7 @@ band = 5 → fields ending in _5G
 
 ### Aggregation Logic
 
-After validating `startTime >= temperatureMigrationCutoverTime`, query the `timepoints.radio_data` JSON array:
+Query the `timepoints.radio_data` JSON array:
 
 ```text
 Load TimePointDB records where:
@@ -928,9 +914,9 @@ For each record:
   parse radio_data
   for each radio in radio_data:
     if radio.band is 2 or 5:
-      if radio.wifi_temp is present, non-null, -40 <= radio.wifi_temp <= 125,
-         and (radio.wifi_temp != 0 or radio.wifi_temp_zero_is_unavailable is not true):
-        add radio.wifi_temp to that band's sample list
+      if radio.temperature is present, non-null, -40 <= radio.temperature <= 125,
+         and (radio.temperature != 0 or radio.temperature_zero_is_unavailable is not true):
+        add radio.temperature to that band's sample list
 
 For each band:
   min_temperature = min(samples)
@@ -948,9 +934,9 @@ observedWindow.endTime =
 A valid temperature sample is:
 
 ```text
-record timestamp is at or after temperatureMigrationCutoverTime
-radio.wifi_temp is present, non-null, and within range [-40, 125]
-radio.wifi_temp = 0 is excluded only when the persisted/resolved temperature contract has wifiTempZeroIsUnavailable = true
+record timestamp is in the requested half-open window
+radio.temperature is present, non-null, and within range [-40, 125]
+radio.temperature = 0 is excluded only when the persisted/resolved temperature contract has temperatureZeroIsUnavailable = true
 ```
 
 If all samples for a band are invalid or missing, return `null` for that band's min, max, average, and latest fields.
@@ -3002,7 +2988,7 @@ bool GetGatewayAvailabilitySummary(...);
 | MCP Tool | Analytics API | Data Source | Implementation Status |
 |---|---|---|---|
 | `get_gateway_free_memory` | `GET /devices/{routerId}/memory-summary` | `timepoints.resource_data.memory_free` | Resolve routerId to venueId and boardId, then aggregate `timepoints` |
-| `get_gateway_wifi_temp` | `GET /devices/{routerId}/radio-temperature-summary` | `timepoints.radio_data[].wifi_temp` | Resolve routerId to venueId and boardId, then aggregate present Wi-Fi temperature samples from `timepoints` |
+| `get_gateway_wifi_temp` | `GET /devices/{routerId}/radio-temperature-summary` | `timepoints.radio_data[].temperature` | Resolve routerId to venueId and boardId, then aggregate present Wi-Fi temperature samples from `timepoints` |
 | `get_device_bandwidth_consumption` | `GET /devices/{routerId}/wifi-clients/usage-summary` | `timepoints.ssid_data[].associations[]` | Resolve routerId to venueId and boardId, then calculate reset-safe cumulative-counter differentials from available persisted samples |
 | `get_device_rssi_quality` | `GET /devices/{routerId}/wifi-clients/rssi-summary` | `timepoints.ssid_data[].associations[].rssi` | Resolve routerId to venueId and boardId, then classify RSSI samples |
 | `get_gateway_offline_count` | `GET /devices/{routerId}/availability-summary` | Existing gateway `connection` topic plus `device_availability_events` and `device_availability_state` | Use routerId as durable serialNumber, use `device_availability_state.current_state` and `last_event_time` for restart-safe transition detection, then count offline events by serialNumber |

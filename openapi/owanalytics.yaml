@@ -62,7 +62,7 @@ components:
                 error: lookback_outside_retention
                 message: Requested range is outside the configured monitoring retention window
     TemperatureAnalyticsBadRequest:
-      description: Invalid request or temperature range before the supported migration cutover.
+      description: Invalid request for radio temperature analytics.
       content:
         application/json:
           schema:
@@ -88,10 +88,6 @@ components:
               value:
                 error: lookback_outside_retention
                 message: Requested range is outside the configured monitoring retention window
-            temperatureBeforeCutover:
-              value:
-                error: temperature_range_before_cutover
-                message: The requested summary interval starts before the temperature migration cutover timestamp.
     AvailabilityAnalyticsBadRequest:
       description: Invalid request or availability range before the supported cutover.
       content:
@@ -770,14 +766,13 @@ components:
           type: integer
           format: int64
         temperature:
-          type: integer
-          format: int64
-          description: Legacy Wi-Fi radio temperature telemetry in degrees Celsius. This field MUST NOT be used as the source for radio-temperature-summary; that endpoint aggregates wifi_temp according to the post-cutover telemetry contract.
-        wifi_temp:
-          type: integer
-          format: int64
+          type: number
+          format: double
           nullable: true
-          description: Wi-Fi radio temperature in degrees Celsius. A reported 0°C value is valid unless the persisted/resolved telemetry contract has wifiTempZeroIsUnavailable = true; when no contract is available, the default is false.
+          description: Wi-Fi radio temperature in degrees Celsius. Null or missing values are ignored by radio-temperature-summary aggregation. A reported 0°C value is valid unless the persisted/resolved telemetry contract has temperatureZeroIsUnavailable = true; when no contract is available, the default is false.
+        temperature_zero_is_unavailable:
+          type: boolean
+          description: Indicates that a 0°C temperature value from this radio is an unavailable sentinel instead of a valid measurement.
         noise:
           type: integer
           format: int64
@@ -1074,7 +1069,6 @@ components:
             - invalid_lookback_hours
             - invalid_query_parameter
             - lookback_outside_retention
-            - temperature_range_before_cutover
         message:
           type: string
 
@@ -1273,7 +1267,7 @@ components:
         null min, max, average, and latest values when that band has no valid temperature samples,
         even if another band has samples. A valid radio temperature sample is a present,
         finite Celsius value where -40 <= temperature <= 125. A reported 0°C value is valid
-        unless the persisted/resolved telemetry contract has wifiTempZeroIsUnavailable = true;
+        unless the persisted/resolved telemetry contract has temperatureZeroIsUnavailable = true;
         when no contract is available, the default is false. Missing, null, non-numeric, NaN,
         infinite, conditionally unavailable 0°C values, 255, and out-of-range values are
         excluded from aggregation.

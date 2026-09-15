@@ -46,16 +46,6 @@ namespace OpenWifi {
 						  "Router was not found");
 			return MCP::SendError(*this, Error);
 		}
-		uint64_t CutoverTime = 0;
-		if (!MCP::GetTemperatureMigrationCutoverTime(CutoverTime, Error)) {
-			poco_error(Logger(), Error.message);
-			MCP::SetError(Error, Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR,
-						  "radio_temperature_summary_query_failed",
-						  "Unable to retrieve gateway radio temperature history");
-			return MCP::SendError(*this, Error);
-		}
-		if (!MCP::ValidateTemperatureCutover(Window, CutoverTime, Error))
-			return MCP::SendError(*this, Error);
 
 		if (!MCP::ValidateRetention(Window, Resolved.retention, Utils::Now(), ClockSkewSeconds, Error))
 			return MCP::SendError(*this, Error);
@@ -81,7 +71,7 @@ namespace OpenWifi {
 			return MCP::SendError(*this, Error);
 		}
 
-		auto Summary = MCP::CalculateRadioTemperatureSummary(Records, Window, CutoverTime);
+		auto Summary = MCP::CalculateRadioTemperatureSummary(Records, Window);
 		return Object(Summary);
 	}
 

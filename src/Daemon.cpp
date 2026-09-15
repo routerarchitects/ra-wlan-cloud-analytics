@@ -17,7 +17,6 @@
 
 #include "DeviceStatusReceiver.h"
 #include "HealthReceiver.h"
-#include "RESTAPI/RESTAPI_mcp_helpers.h"
 #include "StateReceiver.h"
 #include "StorageService.h"
 #include "VenueCoordinator.h"
@@ -39,14 +38,7 @@ namespace OpenWifi {
 		return instance_;
 	}
 
-	void Daemon::PostInitialization([[maybe_unused]] Poco::Util::Application &self) {
-		MCP::Error Error;
-		uint64_t CutoverTime = 0;
-		if (!MCP::GetTemperatureMigrationCutoverTime(CutoverTime, Error)) {
-			Log().warning("Temperature cutover configuration missing or invalid: " + Error.message +
-						  ". Radio temperature summary requests will return 500 internal_server_error.");
-		}
-	}
+	void Daemon::PostInitialization([[maybe_unused]] Poco::Util::Application &self) {}
 
 	void DaemonPostInitialization(Poco::Util::Application &self) {
 		Daemon()->PostInitialization(self);

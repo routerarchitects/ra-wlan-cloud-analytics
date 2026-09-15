@@ -70,28 +70,28 @@ namespace OpenWifi {
 			return false;
 		}
 
-		inline bool ResolveWifiTempZeroIsUnavailableContract(
+		inline bool ResolveTemperatureZeroIsUnavailableContract(
 			const nlohmann::json &radio, const AnalyticsObjects::DeviceInfo &Device) {
 			bool ExplicitContract = false;
-			if (GetOptionalBoolJSON("wifi_temp_zero_is_unavailable", radio, ExplicitContract) ||
-				GetOptionalBoolJSON("wifiTempZeroIsUnavailable", radio, ExplicitContract))
+			if (GetOptionalBoolJSON("temperature_zero_is_unavailable", radio, ExplicitContract) ||
+				GetOptionalBoolJSON("temperatureZeroIsUnavailable", radio, ExplicitContract))
 				return ExplicitContract;
 
-			return ConfigListContains("temperature.wifi_temp_zero_unavailable_device_types",
+			return ConfigListContains("temperature.zero_unavailable_device_types",
 									  Device.deviceType) ||
-				   ConfigListContains("temperature.wifi_temp_zero_unavailable_platforms",
+				   ConfigListContains("temperature.zero_unavailable_platforms",
 									  Device.platform) ||
 				   ConfigListContainsPrefix(
-					   "temperature.wifi_temp_zero_unavailable_firmware_prefixes",
+					   "temperature.zero_unavailable_firmware_prefixes",
 					   Device.lastFirmware);
 		}
 
 		inline bool ParseRadioTimePoint(const nlohmann::json &radio,
 										const AnalyticsObjects::DeviceInfo &Device,
 										AnalyticsObjects::RadioTimePoint &RTP) {
-			RTP.wifi_temp = GetOptionalDoubleJSON("temperature", radio);
-			RTP.wifi_temp_zero_is_unavailable =
-				ResolveWifiTempZeroIsUnavailableContract(radio, Device);
+			RTP.temperature = GetOptionalDoubleJSON("temperature", radio);
+			RTP.temperature_zero_is_unavailable =
+				ResolveTemperatureZeroIsUnavailableContract(radio, Device);
 			return true;
 		}
 	} // namespace APStats

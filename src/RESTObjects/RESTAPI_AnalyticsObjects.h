@@ -187,9 +187,9 @@ namespace OpenWifi {
 			uint64_t band = 0, channel_width = 0;
 			uint64_t active_ms = 0, busy_ms = 0, receive_ms = 0, transmit_ms = 0, tx_power = 0,
 					 channel = 0;
-			int64_t temperature = 0, noise = 0;
-			std::optional<double> wifi_temp;
-			bool wifi_temp_zero_is_unavailable = false;
+			std::optional<double> temperature;
+			int64_t noise = 0;
+			bool temperature_zero_is_unavailable = false;
 
 			double active_pct = 0.0, busy_pct = 0.0, receive_pct = 0.0, transmit_pct = 0.0;
 

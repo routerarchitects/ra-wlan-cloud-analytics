@@ -187,7 +187,6 @@ namespace OpenWifi {
 						GetJSON("active_ms", radio, RTP.active_ms, (uint64_t)0);
 						GetJSON("channel", radio, RTP.channel, (uint64_t)0);
 						APStats::ParseRadioTimePoint(radio, DI_, RTP);
-						GetJSON("temperature", radio, RTP.temperature, (int64_t)20);
 						if (radio.contains("channel_width") && !radio["channel_width"].is_null()) {
 							if (radio["channel_width"].is_string()) {
 								std::string C = radio["channel_width"];
@@ -198,8 +197,6 @@ namespace OpenWifi {
 								RTP.channel_width = 20;
 							}
 						}
-						if (RTP.temperature == 0)
-							RTP.temperature = 20;
 						GetJSON("noise", radio, RTP.noise, (int64_t)-90);
 						if (RTP.noise == 0)
 							RTP.noise = -90;

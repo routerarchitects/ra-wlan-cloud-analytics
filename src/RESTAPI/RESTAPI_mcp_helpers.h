@@ -433,22 +433,10 @@ namespace OpenWifi {
 			return Summary;
 		}
 
-		inline bool ValidateTemperatureCutover(const Window &Requested, uint64_t CutoverTime,
-											   Error &E) {
-			if (Requested.startTime < CutoverTime) {
-				SetError(E, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST,
-						 "temperature_range_before_cutover",
-						 "The requested summary interval starts before the temperature migration "
-						 "cutover timestamp.");
-				return false;
-			}
-			return true;
-		}
-
 		inline AnalyticsObjects::MCPGatewayWifiTemperatureSummary
 		CalculateRadioTemperatureSummary(
 			const std::vector<AnalyticsObjects::DeviceTimePoint> &Records,
-			const Window &Requested, uint64_t CutoverTime) {
+			const Window &Requested) {
 			struct BandStats {
 				std::optional<double> min;
 				std::optional<double> max;
@@ -482,8 +470,7 @@ namespace OpenWifi {
 			uint64_t ObservedEndTimestamp = 0;
 
 			for (const auto &Record : Records) {
-				if (Record.timestamp < CutoverTime ||
-					!TimestampInHalfOpenWindow(Record.timestamp, Requested)) {
+				if (!TimestampInHalfOpenWindow(Record.timestamp, Requested)) {
 					continue;
 				}
 
@@ -491,12 +478,12 @@ namespace OpenWifi {
 				for (const auto &Radio : Record.radio_data) {
 					if (Radio.band != 2 && Radio.band != 5)
 						continue;
-					if (!Radio.wifi_temp || !std::isfinite(*Radio.wifi_temp))
+					if (!Radio.temperature || !std::isfinite(*Radio.temperature))
 						continue;
-					auto Value = *Radio.wifi_temp;
+					auto Value = *Radio.temperature;
 					if (Value < -40.0 || Value > 125.0)
 						continue;
-					if (Value == 0.0 && Radio.wifi_temp_zero_is_unavailable)
+					if (Value == 0.0 && Radio.temperature_zero_is_unavailable)
 						continue;
 
 					if (Radio.band == 2)
@@ -543,7 +530,6 @@ namespace OpenWifi {
 
 		void SendError(RESTAPIHandler &Handler, const Error &E);
 		bool AuthenticateBearerToken(RESTAPIHandler &Handler, Error &E);
-		bool GetTemperatureMigrationCutoverTime(uint64_t &CutoverTime, Error &E);
 
 	} // namespace MCP
 } // namespace OpenWifi

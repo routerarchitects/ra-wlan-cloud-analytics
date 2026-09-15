@@ -257,7 +257,7 @@ def assert_empty_temperature_summary(body: dict[str, Any], expected_start: str, 
     assert body["latest_wifi_temp_5G"] is None
 
 
-def test_radio_temperature_summary_aggregates_persisted_wifi_temp_samples(seeded_board) -> None:
+def test_radio_temperature_summary_aggregates_persisted_temperature_samples(seeded_board) -> None:
     end_dt = utc_now() - timedelta(seconds=30)
     start_dt = end_dt - timedelta(hours=1)
     t_a = end_dt - timedelta(minutes=50)
@@ -266,9 +266,9 @@ def test_radio_temperature_summary_aggregates_persisted_wifi_temp_samples(seeded
 
     with db_connection() as connection:
         with connection.cursor() as cursor:
-            insert_timepoint(cursor, format_utc(t_a), [{"band": 2, "wifi_temp": 62}, {"band": 5, "wifi_temp": 56}], suffix="a")
-            insert_timepoint(cursor, format_utc(t_b), [{"band": 2, "wifi_temp": 70}, {"band": 5, "wifi_temp": 65}], suffix="b")
-            insert_timepoint(cursor, format_utc(t_c), [{"band": 2, "wifi_temp": 68}, {"band": 5, "wifi_temp": 60}], suffix="c")
+            insert_timepoint(cursor, format_utc(t_a), [{"band": 2, "temperature": 62}, {"band": 5, "temperature": 56}], suffix="a")
+            insert_timepoint(cursor, format_utc(t_b), [{"band": 2, "temperature": 70}, {"band": 5, "temperature": 65}], suffix="b")
+            insert_timepoint(cursor, format_utc(t_c), [{"band": 2, "temperature": 68}, {"band": 5, "temperature": 60}], suffix="c")
 
     result = http_json(temperature_summary_path(format_utc(end_dt)), valid_token())
 
@@ -314,12 +314,12 @@ def test_radio_temperature_summary_filters_window_board_serial_and_band(seeded_b
 
     with db_connection() as connection:
         with connection.cursor() as cursor:
-            insert_timepoint(cursor, format_utc(before_dt), [{"band": 2, "wifi_temp": 1}], suffix="before")
-            insert_timepoint(cursor, format_utc(start_sample_dt), [{"band": 2, "wifi_temp": 20}], suffix="start")
-            insert_timepoint(cursor, format_utc(inside_dt), [{"band": 2, "wifi_temp": 30}, {"band": 6, "wifi_temp": 99}], suffix="inside")
-            insert_timepoint(cursor, format_utc(end_sample_dt), [{"band": 2, "wifi_temp": 100}], suffix="end")
-            insert_timepoint(cursor, format_utc(mid_dt), [{"band": 2, "wifi_temp": 2}], serial="temp-other-router", suffix="oth")
-            insert_timepoint(cursor, format_utc(mid_dt), [{"band": 2, "wifi_temp": 3}], board=OTHER_BOARD_ID, suffix="other-board")
+            insert_timepoint(cursor, format_utc(before_dt), [{"band": 2, "temperature": 1}], suffix="before")
+            insert_timepoint(cursor, format_utc(start_sample_dt), [{"band": 2, "temperature": 20}], suffix="start")
+            insert_timepoint(cursor, format_utc(inside_dt), [{"band": 2, "temperature": 30}, {"band": 6, "temperature": 99}], suffix="inside")
+            insert_timepoint(cursor, format_utc(end_sample_dt), [{"band": 2, "temperature": 100}], suffix="end")
+            insert_timepoint(cursor, format_utc(mid_dt), [{"band": 2, "temperature": 2}], serial="temp-other-router", suffix="oth")
+            insert_timepoint(cursor, format_utc(mid_dt), [{"band": 2, "temperature": 3}], board=OTHER_BOARD_ID, suffix="other-board")
 
     result = http_json(temperature_summary_path(format_utc(end_dt)), valid_token())
 
@@ -346,7 +346,27 @@ def test_radio_temperature_summary_no_samples_returns_empty_success(seeded_board
     assert_empty_temperature_summary(result.body, format_utc(start_dt), format_utc(end_dt))
 
 
-def test_radio_temperature_summary_ignores_invalid_missing_and_legacy_temperature(seeded_board) -> None:
+def test_radio_temperature_summary_historical_null_temperatures_return_empty_success(seeded_board) -> None:
+    end_dt = utc_now() - timedelta(seconds=30)
+    start_dt = end_dt - timedelta(hours=1)
+    t_sample = end_dt - timedelta(minutes=30)
+
+    with db_connection() as connection:
+        with connection.cursor() as cursor:
+            insert_timepoint(
+                cursor,
+                format_utc(t_sample),
+                [{"band": 2, "temperature": None}, {"band": 5, "temperature": None}],
+                suffix="null-only",
+            )
+
+    result = http_json(temperature_summary_path(format_utc(end_dt)), valid_token())
+
+    assert result.status == 200
+    assert_empty_temperature_summary(result.body, format_utc(start_dt), format_utc(end_dt))
+
+
+def test_radio_temperature_summary_ignores_invalid_missing_and_null_temperature(seeded_board) -> None:
     end_dt = utc_now() - timedelta(seconds=30)
     t_invalid_a = end_dt - timedelta(minutes=50)
     t_invalid_b = end_dt - timedelta(minutes=45)
@@ -358,13 +378,13 @@ def test_radio_temperature_summary_ignores_invalid_missing_and_legacy_temperatur
 
     with db_connection() as connection:
         with connection.cursor() as cursor:
-            insert_timepoint(cursor, format_utc(t_invalid_a), [{"band": 2, "temperature": 20}], suffix="legacy-only")
-            insert_timepoint(cursor, format_utc(t_invalid_b), [{"band": 2, "wifi_temp": None}], suffix="null")
-            insert_timepoint(cursor, format_utc(t_invalid_c), [{"band": 2, "wifi_temp": -41}, {"band": 5, "wifi_temp": 126}], suffix="range")
-            insert_timepoint(cursor, format_utc(t_invalid_d), [{"band": 2, "wifi_temp": 255}, {"band": 5, "wifi_temp": 0, "wifi_temp_zero_is_unavailable": True}], suffix="sentinel")
+            insert_timepoint(cursor, format_utc(t_invalid_a), [{"band": 2}], suffix="missing")
+            insert_timepoint(cursor, format_utc(t_invalid_b), [{"band": 2, "temperature": None}], suffix="null")
+            insert_timepoint(cursor, format_utc(t_invalid_c), [{"band": 2, "temperature": -41}, {"band": 5, "temperature": 126}], suffix="range")
+            insert_timepoint(cursor, format_utc(t_invalid_d), [{"band": 2, "temperature": 255}, {"band": 5, "temperature": 0, "temperature_zero_is_unavailable": True}], suffix="sentinel")
             insert_timepoint(cursor, format_utc(t_malformed), "[", suffix="malformed")
-            insert_timepoint(cursor, format_utc(t_valid_a), [{"band": 2, "wifi_temp": 20}, {"band": 5, "wifi_temp": 0}], suffix="valid-a")
-            insert_timepoint(cursor, format_utc(t_valid_b), [{"band": 2, "wifi_temp": 30}, {"band": 5, "wifi_temp": 10}], suffix="valid-b")
+            insert_timepoint(cursor, format_utc(t_valid_a), [{"band": 2, "temperature": 20}, {"band": 5, "temperature": 0}], suffix="valid-a")
+            insert_timepoint(cursor, format_utc(t_valid_b), [{"band": 2, "temperature": 30}, {"band": 5, "temperature": 10}], suffix="valid-b")
 
     result = http_json(temperature_summary_path(format_utc(end_dt)), valid_token())
 
@@ -383,21 +403,8 @@ def test_radio_temperature_summary_ignores_invalid_missing_and_legacy_temperatur
     }
 
 
-def test_radio_temperature_summary_rejects_range_before_cutover(seeded_board) -> None:
-    result = http_json(
-        temperature_summary_path("2026-07-01T00:30:00Z", lookback_hours="1"),
-        valid_token(),
-    )
-
-    assert result.status == 400
-    assert result.body["error"] == "temperature_range_before_cutover"
-    assert result.body["message"] == (
-        "The requested summary interval starts before the temperature migration cutover timestamp."
-    )
-
-
 @pytest.mark.parametrize("selected_router_id", [UNKNOWN_ROUTER_ID, UNAUTHORIZED_ROUTER_ID])
-def test_radio_temperature_summary_resolves_router_before_cutover_validation(
+def test_radio_temperature_summary_resolves_router_before_retention_validation(
     selected_router_id: str,
 ) -> None:
     result = http_json(
@@ -486,7 +493,7 @@ def test_radio_temperature_summary_local_venue_cache_does_not_bypass_authorizati
             insert_timepoint(
                 cursor,
                 format_utc(end_dt - timedelta(minutes=10)),
-                [{"band": 2, "wifi_temp": 65}],
+                [{"band": 2, "temperature": 65}],
                 serial=UNAUTHORIZED_ROUTER_ID,
                 suffix="unauth-cache-test",
             )
@@ -516,7 +523,7 @@ def test_radio_temperature_summary_reassigned_router_ignores_old_board_samples(s
             insert_timepoint(
                 cursor,
                 format_utc(end_dt - timedelta(hours=5)),
-                [{"band": 2, "wifi_temp": 40.0}],
+                [{"band": 2, "temperature": 40.0}],
                 board=old_board_id,
                 venue=old_venue_id,
                 suffix="old-board-sample-1",
@@ -524,7 +531,7 @@ def test_radio_temperature_summary_reassigned_router_ignores_old_board_samples(s
             insert_timepoint(
                 cursor,
                 format_utc(end_dt - timedelta(hours=4)),
-                [{"band": 2, "wifi_temp": 45.0}],
+                [{"band": 2, "temperature": 45.0}],
                 board=old_board_id,
                 venue=old_venue_id,
                 suffix="old-board-sample-2",
@@ -536,13 +543,13 @@ def test_radio_temperature_summary_reassigned_router_ignores_old_board_samples(s
             insert_timepoint(
                 cursor,
                 format_utc(t1),
-                [{"band": 2, "wifi_temp": 72.0}],
+                [{"band": 2, "temperature": 72.0}],
                 suffix="current-board-sample-1",
             )
             insert_timepoint(
                 cursor,
                 format_utc(t2),
-                [{"band": 2, "wifi_temp": 78.0}],
+                [{"band": 2, "temperature": 78.0}],
                 suffix="current-board-sample-2",
             )
 
@@ -570,8 +577,8 @@ def test_radio_temperature_summary_raw_telemetry_json_payload(seeded_board) -> N
 
     # Test raw radio telemetry payload structure as ingested from device state messages
     raw_radios = [
-        {"band": 2, "channel": 6, "wifi_temp": 52.5, "wifi_temp_zero_is_unavailable": True},
-        {"band": 5, "channel": 36, "wifi_temp": 0.0, "wifi_temp_zero_is_unavailable": True},
+        {"band": 2, "channel": 6, "temperature": 52.5, "temperature_zero_is_unavailable": True},
+        {"band": 5, "channel": 36, "temperature": 0.0, "temperature_zero_is_unavailable": True},
     ]
 
     with db_connection() as connection:
@@ -612,7 +619,7 @@ def test_radio_temperature_summary_exceeds_max_samples_with_malformed_records(se
                     %s + mod(s, 3000),
                     '{}',
                     '[]',
-                    case when mod(s, 3) = 0 then '{' else '[{"band": 2, "wifi_temp": 50.0}]' end,
+                    case when mod(s, 3) = 0 then '{' else '[{"band": 2, "temperature": 50.0}]' end,
                     '{}',
                     %s,
                     '{}',
@@ -626,7 +633,5 @@ def test_radio_temperature_summary_exceeds_max_samples_with_malformed_records(se
     assert result.status == 400
     assert result.body["error"] == "exceeds_max_samples"
     assert result.body["message"] == "Requested query window exceeds maximum allowed telemetry sample count"
-
-
 
 

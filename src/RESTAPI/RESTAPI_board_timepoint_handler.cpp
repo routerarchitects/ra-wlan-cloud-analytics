@@ -6,6 +6,7 @@
 #include "StorageService.h"
 
 #include <algorithm>
+#include <optional>
 
 namespace OpenWifi {
 	typedef std::vector<std::pair<std::uint64_t, std::uint64_t>> bucket_timespans;
@@ -40,6 +41,38 @@ namespace OpenWifi {
 					P.min = std::min((double)P.min, (double)(radio.*T));
 				}
 				P.max = std::max((double)P.max, (double)(radio.*T));
+			}
+		}
+		if (num_values)
+			P.avg = sum / (double)num_values;
+		else
+			P.avg = 0.0;
+	}
+
+	template <typename M>
+	void AverageOptionalRadioData(std::optional<double> AnalyticsObjects::RadioTimePoint::*T,
+								  const std::vector<M> &Values,
+								  AnalyticsObjects::AveragePoint &P) {
+		if (Values.empty())
+			return;
+		double sum = 0.0;
+		uint32_t num_values = 0;
+		bool HasValue = false;
+		for (const auto &value : Values) {
+			for (const auto &radio : value.radio_data) {
+				const auto &MaybeValue = radio.*T;
+				if (!MaybeValue)
+					continue;
+				num_values++;
+				sum += *MaybeValue;
+				if (!HasValue) {
+					P.min = *MaybeValue;
+					P.max = *MaybeValue;
+					HasValue = true;
+				} else {
+					P.min = std::min(P.min, *MaybeValue);
+					P.max = std::max(P.max, *MaybeValue);
+				}
 			}
 		}
 		if (num_values)
@@ -217,8 +250,8 @@ namespace OpenWifi {
 							  DTPA.tx_errors_pct);
 
 				AverageRadioData(&AnalyticsObjects::RadioTimePoint::noise, point_list, DTPA.noise);
-				AverageRadioData(&AnalyticsObjects::RadioTimePoint::temperature, point_list,
-								 DTPA.temperature);
+				AverageOptionalRadioData(&AnalyticsObjects::RadioTimePoint::temperature,
+										 point_list, DTPA.temperature);
 				AverageRadioData(&AnalyticsObjects::RadioTimePoint::tx_power, point_list,
 								 DTPA.tx_power);
 				AverageRadioData(&AnalyticsObjects::RadioTimePoint::active_pct, point_list,

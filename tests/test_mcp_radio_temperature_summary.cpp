@@ -1,6 +1,7 @@
 #include "APStats.h"
 #include "RESTAPI/RESTAPI_mcp_helpers.h"
 
+#include <Poco/JSON/Parser.h>
 #include <cassert>
 #include <cmath>
 #include <iostream>
@@ -40,8 +41,8 @@ namespace {
 										   bool ZeroUnavailable = false) {
 		AnalyticsObjects::RadioTimePoint R;
 		R.band = Band;
-		R.wifi_temp = Temperature;
-		R.wifi_temp_zero_is_unavailable = ZeroUnavailable;
+		R.temperature = Temperature;
+		R.temperature_zero_is_unavailable = ZeroUnavailable;
 		return R;
 	}
 
@@ -62,7 +63,7 @@ namespace {
 			{Point(1100, {Radio(2, 62), Radio(5, 56)}),
 			 Point(1300, {Radio(2, 70), Radio(5, 65)}),
 			 Point(1200, {Radio(2, 68), Radio(5, 60)})},
-			TestWindow(), 1000);
+			TestWindow());
 
 		assert(Summary.requestedWindow.startTime == "1970-01-01T00:16:40Z");
 		assert(Summary.requestedWindow.endTime == "1970-01-01T00:33:20Z");
@@ -86,7 +87,7 @@ namespace {
 			 Point(1200, {Radio(2, 0, true), Radio(5, 0, false)}),
 			 Point(1300, {Radio(6, 44), Radio(5, 10)}),
 			 Point(2000, {Radio(2, 55)})},
-			TestWindow(), 1000);
+			TestWindow());
 
 		assert(!Summary.min_wifi_temp_2_4G);
 		assert(!Summary.max_wifi_temp_2_4G);
@@ -102,7 +103,7 @@ namespace {
 
 	void TestNoSamplesReturnsNulls() {
 		auto Summary = MCP::CalculateRadioTemperatureSummary(
-			{Point(1100, {Radio(2, std::nullopt), Radio(5, 255)})}, TestWindow(), 1000);
+			{Point(1100, {Radio(2, std::nullopt), Radio(5, 255)})}, TestWindow());
 
 		assert(!Summary.min_wifi_temp_2_4G);
 		assert(!Summary.max_wifi_temp_2_4G);
@@ -118,8 +119,7 @@ namespace {
 
 	void TestSerializationShape() {
 		auto Summary =
-			MCP::CalculateRadioTemperatureSummary({Point(1100, {Radio(2, 62)})}, TestWindow(),
-												  1000);
+			MCP::CalculateRadioTemperatureSummary({Point(1100, {Radio(2, 62)})}, TestWindow());
 
 		Poco::JSON::Object Obj;
 		Summary.to_json(Obj);
@@ -137,30 +137,9 @@ namespace {
 		assert(!Obj.has("meta"));
 	}
 
-	void TestCutoverValidation() {
-		MCP::Error E;
-		auto W = TestWindow();
-		assert(MCP::ValidateTemperatureCutover(W, 1000, E));
-		assert(!MCP::ValidateTemperatureCutover(W, 1001, E));
-		assert(E.status == Poco::Net::HTTPResponse::HTTP_BAD_REQUEST);
-		assert(E.error == "temperature_range_before_cutover");
-	}
-
-	void TestRFC3339CutoverParsing() {
-		uint64_t Epoch = 0;
-		assert(MCP::ParseRFC3339Timestamp("2026-07-01T00:00:00Z", Epoch));
-		assert(Epoch == 1782864000);
-		assert(MCP::ParseRFC3339Timestamp("2026-07-01T05:30:00+05:30", Epoch));
-		assert(Epoch == 1782864000);
-		assert(MCP::ParseRFC3339Timestamp("2026-06-30T20:00:00-04:00", Epoch));
-		assert(Epoch == 1782864000);
-		assert(!MCP::ParseRFC3339Timestamp("invalid-date-string", Epoch));
-		assert(!MCP::ParseRFC3339Timestamp("2026-07-01T00:00:00+25:00", Epoch));
-	}
-
 	void TestOnlyOneBand() {
 		auto Summary2G = MCP::CalculateRadioTemperatureSummary(
-			{Point(1100, {Radio(2, 62)})}, TestWindow(), 1000);
+			{Point(1100, {Radio(2, 62)})}, TestWindow());
 		assert(Summary2G.min_wifi_temp_2_4G == 62);
 		assert(Summary2G.max_wifi_temp_2_4G == 62);
 		assert(Summary2G.avg_wifi_temp_2_4G == 62);
@@ -171,7 +150,7 @@ namespace {
 		assert(!Summary2G.latest_wifi_temp_5G);
 
 		auto Summary5G = MCP::CalculateRadioTemperatureSummary(
-			{Point(1100, {Radio(5, 55)})}, TestWindow(), 1000);
+			{Point(1100, {Radio(5, 55)})}, TestWindow());
 		assert(!Summary5G.min_wifi_temp_2_4G);
 		assert(!Summary5G.max_wifi_temp_2_4G);
 		assert(!Summary5G.avg_wifi_temp_2_4G);
@@ -182,13 +161,13 @@ namespace {
 		assert(Summary5G.latest_wifi_temp_5G == 55);
 	}
 
-	void TestHalfOpenWindowAndCutoverBoundary() {
+	void TestHalfOpenWindowBoundary() {
 		auto W = TestWindow(); // startTime=1000, endTime=2000
 		auto Summary = MCP::CalculateRadioTemperatureSummary(
-			{Point(1000, {Radio(2, 40)}), // exactly on startTime boundary & cutover boundary
+			{Point(1000, {Radio(2, 40)}), // exactly on startTime boundary
 			 Point(1500, {Radio(2, 50)}),
 			 Point(2000, {Radio(2, 60)})}, // on endTime boundary (exclusive, should be excluded)
-			W, 1000); // CutoverTime=1000
+			W);
 
 		assert(Summary.min_wifi_temp_2_4G == 40);
 		assert(Summary.max_wifi_temp_2_4G == 50);
@@ -202,7 +181,7 @@ namespace {
 		auto Summary = MCP::CalculateRadioTemperatureSummary(
 			{Point(1100, {Radio(2, 0, false)}), // 0 is valid measurement when flag is false
 			 Point(1200, {Radio(5, 0, true)})}, // 0 is sentinel when flag is true
-			TestWindow(), 1000);
+			TestWindow());
 
 		assert(Summary.min_wifi_temp_2_4G == 0);
 		assert(Summary.max_wifi_temp_2_4G == 0);
@@ -225,26 +204,26 @@ namespace {
 			"band": ["5G"],
 			"channel": 36,
 			"temperature": 54.5,
-			"wifi_temp_zero_is_unavailable": true
+			"temperature_zero_is_unavailable": true
 		})");
 		AnalyticsObjects::RadioTimePoint RTP1;
 		APStats::ParseRadioTimePoint(Doc1, Device, RTP1);
-		assert(RTP1.wifi_temp.has_value());
-		assert(*RTP1.wifi_temp == 54.5);
-		assert(RTP1.wifi_temp_zero_is_unavailable == true);
+		assert(RTP1.temperature.has_value());
+		assert(*RTP1.temperature == 54.5);
+		assert(RTP1.temperature_zero_is_unavailable == true);
 
 		// 2. Valid temperature with camelCase flag
 		nlohmann::json Doc2 = nlohmann::json::parse(R"({
 			"band": ["2G"],
 			"channel": 6,
 			"temperature": 42.0,
-			"wifiTempZeroIsUnavailable": false
+			"temperatureZeroIsUnavailable": false
 		})");
 		AnalyticsObjects::RadioTimePoint RTP2;
 		APStats::ParseRadioTimePoint(Doc2, Device, RTP2);
-		assert(RTP2.wifi_temp.has_value());
-		assert(*RTP2.wifi_temp == 42.0);
-		assert(RTP2.wifi_temp_zero_is_unavailable == false);
+		assert(RTP2.temperature.has_value());
+		assert(*RTP2.temperature == 42.0);
+		assert(RTP2.temperature_zero_is_unavailable == false);
 
 		// 3. Null / missing temperature
 		nlohmann::json Doc3 = nlohmann::json::parse(R"({
@@ -254,11 +233,11 @@ namespace {
 		})");
 		AnalyticsObjects::RadioTimePoint RTP3;
 		APStats::ParseRadioTimePoint(Doc3, Device, RTP3);
-		assert(!RTP3.wifi_temp.has_value());
-		assert(RTP3.wifi_temp_zero_is_unavailable == false);
+		assert(!RTP3.temperature.has_value());
+		assert(RTP3.temperature_zero_is_unavailable == false);
 
 		// 4. Config-driven zero-temperature contract matches (when explicit flag is absent)
-		g_TestConfigMap["temperature.wifi_temp_zero_unavailable_device_types"] = "ap-model-x,ap-model-z";
+		g_TestConfigMap["temperature.zero_unavailable_device_types"] = "ap-model-x,ap-model-z";
 		nlohmann::json Doc4 = nlohmann::json::parse(R"({
 			"band": ["2G"],
 			"channel": 1,
@@ -266,8 +245,44 @@ namespace {
 		})");
 		AnalyticsObjects::RadioTimePoint RTP4;
 		APStats::ParseRadioTimePoint(Doc4, Device, RTP4);
-		assert(RTP4.wifi_temp_zero_is_unavailable == true);
+		assert(RTP4.temperature_zero_is_unavailable == true);
 		g_TestConfigMap.clear();
+	}
+
+	void TestPersistedRadioJsonNullableTemperature() {
+		Poco::JSON::Parser Parser;
+		auto NullObj =
+			Parser.parse(R"({"band":2,"temperature":null})").extract<Poco::JSON::Object::Ptr>();
+		AnalyticsObjects::RadioTimePoint NullRTP;
+		assert(NullRTP.from_json(NullObj));
+		assert(!NullRTP.temperature.has_value());
+
+		auto MissingObj =
+			Parser.parse(R"({"band":5})").extract<Poco::JSON::Object::Ptr>();
+		AnalyticsObjects::RadioTimePoint MissingRTP;
+		assert(MissingRTP.from_json(MissingObj));
+		assert(!MissingRTP.temperature.has_value());
+
+		auto ValidObj =
+			Parser.parse(R"({"band":2,"temperature":62.5})").extract<Poco::JSON::Object::Ptr>();
+		AnalyticsObjects::RadioTimePoint ValidRTP;
+		assert(ValidRTP.from_json(ValidObj));
+		assert(ValidRTP.temperature.has_value());
+		assert(*ValidRTP.temperature == 62.5);
+	}
+
+	void TestValidTwentyIsPreserved() {
+		auto Summary = MCP::CalculateRadioTemperatureSummary(
+			{Point(1100, {Radio(2, 20), Radio(5, 20)})}, TestWindow());
+
+		assert(Summary.min_wifi_temp_2_4G == 20);
+		assert(Summary.max_wifi_temp_2_4G == 20);
+		assert(Summary.avg_wifi_temp_2_4G == 20);
+		assert(Summary.latest_wifi_temp_2_4G == 20);
+		assert(Summary.min_wifi_temp_5G == 20);
+		assert(Summary.max_wifi_temp_5G == 20);
+		assert(Summary.avg_wifi_temp_5G == 20);
+		assert(Summary.latest_wifi_temp_5G == 20);
 	}
 
 	void TestValidateExpectedSampleCount() {
@@ -297,12 +312,12 @@ int main() {
 	TestFiltersInvalidSamples();
 	TestNoSamplesReturnsNulls();
 	TestSerializationShape();
-	TestCutoverValidation();
-	TestRFC3339CutoverParsing();
 	TestOnlyOneBand();
-	TestHalfOpenWindowAndCutoverBoundary();
+	TestHalfOpenWindowBoundary();
 	TestZeroSentinelFlag();
 	TestTelemetryJsonParsingToRadioTimePoint();
+	TestPersistedRadioJsonNullableTemperature();
+	TestValidTwentyIsPreserved();
 	TestValidateExpectedSampleCount();
 	std::cout << "test_mcp_radio_temperature_summary passed\n";
 	return 0;

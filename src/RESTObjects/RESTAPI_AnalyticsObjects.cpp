@@ -377,10 +377,12 @@ bool Fingerprint::from_json(const Poco::JSON::Object::Ptr &Obj) {
 		field_to_json(Obj, "transmit_ms", transmit_ms);
 		field_to_json(Obj, "tx_power", tx_power);
 		field_to_json(Obj, "channel", channel);
-		field_to_json(Obj, "temperature", temperature);
-		if (wifi_temp)
-			field_to_json(Obj, "wifi_temp", *wifi_temp);
-		field_to_json(Obj, "wifi_temp_zero_is_unavailable", wifi_temp_zero_is_unavailable);
+		if (temperature)
+			field_to_json(Obj, "temperature", *temperature);
+		else
+			Obj.set("temperature", Poco::Dynamic::Var());
+		field_to_json(Obj, "temperature_zero_is_unavailable",
+					  temperature_zero_is_unavailable);
 		field_to_json(Obj, "noise", noise);
 		field_to_json(Obj, "active_pct", active_pct);
 		field_to_json(Obj, "busy_pct", busy_pct);
@@ -398,12 +400,11 @@ bool Fingerprint::from_json(const Poco::JSON::Object::Ptr &Obj) {
 			field_from_json(Obj, "transmit_ms", transmit_ms);
 			field_from_json(Obj, "tx_power", tx_power);
 			field_from_json(Obj, "channel", channel);
-			field_from_json(Obj, "temperature", temperature);
-			wifi_temp = OptionalDoubleFromJson(Obj, "wifi_temp");
-			field_from_json(Obj, "wifi_temp_zero_is_unavailable",
-							wifi_temp_zero_is_unavailable);
-			field_from_json(Obj, "wifiTempZeroIsUnavailable",
-							wifi_temp_zero_is_unavailable);
+			temperature = OptionalDoubleFromJson(Obj, "temperature");
+			field_from_json(Obj, "temperature_zero_is_unavailable",
+							temperature_zero_is_unavailable);
+			field_from_json(Obj, "temperatureZeroIsUnavailable",
+							temperature_zero_is_unavailable);
 			field_from_json(Obj, "noise", noise);
 			field_from_json(Obj, "active_pct", active_pct);
 			field_from_json(Obj, "busy_pct", busy_pct);
