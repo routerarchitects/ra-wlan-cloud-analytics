@@ -102,20 +102,17 @@ jobs:
         run: |
           docker build \
             --pull \
-            --build-arg DEBIAN_VERSION=12-slim \
             --target owanalytics-build \
             --tag "$OWANALYTICS_TEST_BUILD_IMAGE" \
             .
 
 
-      # Enable this once all C++ test targets in the image are expected to run.
-      #
-      # - name: Run C++ unit tests
-      #   run: |
-      #     docker run --rm "$OWANALYTICS_TEST_BUILD_IMAGE" \
-      #       ctest \
-      #       --test-dir /owanalytics/cmake-build \
-      #       --output-on-failure
+      - name: Run C++ unit tests
+        run: |
+          docker run --rm "$OWANALYTICS_TEST_BUILD_IMAGE" \
+            ctest \
+            --test-dir /owanalytics/cmake-build \
+            --output-on-failure
 
 
       # -----------------------------------------------------------------------
@@ -125,7 +122,6 @@ jobs:
         run: |
           docker build \
             --pull \
-            --build-arg DEBIAN_VERSION=12-slim \
             --tag "$OWANALYTICS_TEST_IMAGE" \
             .
 

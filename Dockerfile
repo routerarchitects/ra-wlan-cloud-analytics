@@ -1,19 +1,9 @@
 ARG DEBIAN_VERSION=13-slim
-ARG DEBIAN_SNAPSHOT=20260901T000000Z
 ARG POCO_VERSION=poco-tip-v2
 ARG CPPKAFKA_VERSION=tip-v1
 ARG VALIJASON_VERSION=tip-v1
 
 FROM debian:$DEBIAN_VERSION AS build-base
-ARG DEBIAN_SNAPSHOT
-
-RUN printf '%s\n' \
-    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT} trixie main" \
-    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT} trixie-security main" \
-    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT} trixie-updates main" \
-    > /etc/apt/sources.list
-
-RUN rm -f /etc/apt/sources.list.d/debian.sources
 
 RUN apt-get -o Acquire::Retries=5 update && \
     apt-get -o Acquire::Retries=5 install --no-install-recommends -y \
@@ -88,7 +78,6 @@ RUN cmake ..
 RUN cmake --build . --config Release -j8
 
 FROM debian:$DEBIAN_VERSION
-ARG DEBIAN_SNAPSHOT
 
 ENV OWANALYTICS_USER=owanalytics \
     OWANALYTICS_ROOT=/owanalytics-data \
@@ -99,14 +88,6 @@ RUN useradd "$OWANALYTICS_USER"
 RUN mkdir /openwifi
 RUN mkdir -p "$OWANALYTICS_ROOT" "$OWANALYTICS_CONFIG" && \
     chown "$OWANALYTICS_USER": "$OWANALYTICS_ROOT" "$OWANALYTICS_CONFIG"
-
-RUN printf '%s\n' \
-    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT} trixie main" \
-    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT} trixie-security main" \
-    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT} trixie-updates main" \
-    > /etc/apt/sources.list
-
-RUN rm -f /etc/apt/sources.list.d/debian.sources
 
 RUN apt-get -o Acquire::Retries=5 update && \
     apt-get -o Acquire::Retries=5 install --no-install-recommends -y \
