@@ -125,6 +125,13 @@ jobs:
             --tag "$OWANALYTICS_TEST_IMAGE" \
             .
 
+      - name: Verify runtime shared-library dependencies
+        run: |
+          docker run --rm \
+            --entrypoint /bin/bash \
+            "$OWANALYTICS_TEST_IMAGE" \
+            -c 'ldd /openwifi/owanalytics && ! ldd /openwifi/owanalytics | grep -q "not found"'
+
 
       # -----------------------------------------------------------------------
       # Python dependencies
