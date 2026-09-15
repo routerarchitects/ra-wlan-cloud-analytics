@@ -1,15 +1,27 @@
-ARG DEBIAN_VERSION=11.5-slim
+ARG DEBIAN_VERSION=13-slim
+ARG DEBIAN_SNAPSHOT=20260901T000000Z
 ARG POCO_VERSION=poco-tip-v2
 ARG CPPKAFKA_VERSION=tip-v1
 ARG VALIJASON_VERSION=tip-v1
 
 FROM debian:$DEBIAN_VERSION AS build-base
+ARG DEBIAN_SNAPSHOT
 
-RUN apt-get update && apt-get install --no-install-recommends -y \
+RUN printf '%s\n' \
+    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT} trixie main" \
+    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT} trixie-security main" \
+    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT} trixie-updates main" \
+    > /etc/apt/sources.list
+
+RUN rm -f /etc/apt/sources.list.d/debian.sources
+
+RUN apt-get -o Acquire::Retries=5 update && \
+    apt-get -o Acquire::Retries=5 install --no-install-recommends -y \
     make cmake g++ git \
-    libpq-dev libmariadb-dev libmariadbclient-dev-compat \
+    libpq-dev libmariadb-dev libmariadb-dev-compat \
     librdkafka-dev libboost-all-dev libssl-dev \
-    zlib1g-dev nlohmann-json3-dev ca-certificates libcurl4-openssl-dev libfmt-dev
+    zlib1g-dev nlohmann-json3-dev ca-certificates libcurl4-openssl-dev libfmt-dev && \
+    rm -rf /var/lib/apt/lists/*
 
 FROM build-base AS poco-build
 
@@ -67,6 +79,8 @@ COPY --from=cppkafka-build /usr/local/include /usr/local/include
 COPY --from=cppkafka-build /usr/local/lib /usr/local/lib
 COPY --from=valijson-build /usr/local/include /usr/local/include
 
+RUN ldconfig
+
 WORKDIR /owanalytics
 RUN mkdir cmake-build
 WORKDIR /owanalytics/cmake-build
@@ -74,6 +88,7 @@ RUN cmake ..
 RUN cmake --build . --config Release -j8
 
 FROM debian:$DEBIAN_VERSION
+ARG DEBIAN_SNAPSHOT
 
 ENV OWANALYTICS_USER=owanalytics \
     OWANALYTICS_ROOT=/owanalytics-data \
@@ -85,9 +100,19 @@ RUN mkdir /openwifi
 RUN mkdir -p "$OWANALYTICS_ROOT" "$OWANALYTICS_CONFIG" && \
     chown "$OWANALYTICS_USER": "$OWANALYTICS_ROOT" "$OWANALYTICS_CONFIG"
 
-RUN apt-get update && apt-get install --no-install-recommends -y \
+RUN printf '%s\n' \
+    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT} trixie main" \
+    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian-security/${DEBIAN_SNAPSHOT} trixie-security main" \
+    "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${DEBIAN_SNAPSHOT} trixie-updates main" \
+    > /etc/apt/sources.list
+
+RUN rm -f /etc/apt/sources.list.d/debian.sources
+
+RUN apt-get -o Acquire::Retries=5 update && \
+    apt-get -o Acquire::Retries=5 install --no-install-recommends -y \
     librdkafka++1 gosu gettext ca-certificates bash jq curl wget \
-    libmariadb-dev-compat libpq5 postgresql-client libfmt-dev
+    libmariadb3 libpq5 postgresql-client libfmt10 && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY readiness_check /readiness_check
 COPY test_scripts/curl/cli /cli
