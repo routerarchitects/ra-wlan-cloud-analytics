@@ -9,19 +9,13 @@
 #include <vector>
 
 namespace OpenWifi {
-	static std::map<std::string, std::string> g_TestConfigMap;
-
-	std::string MicroServiceConfigGetString(const std::string &Key,
-											const std::string &DefaultValue) {
-		auto it = g_TestConfigMap.find(Key);
-		if (it != g_TestConfigMap.end())
-			return it->second;
-		return DefaultValue;
-	}
-
 	const std::string &MicroServiceDataDirectory() {
 		static const std::string DataDirectory = "/tmp";
 		return DataDirectory;
+	}
+
+	std::string MicroServiceCreateUUID() {
+		return "test-uuid";
 	}
 } // namespace OpenWifi
 
@@ -38,11 +32,11 @@ namespace {
 	}
 
 	AnalyticsObjects::RadioTimePoint Radio(uint64_t Band, std::optional<double> Temperature,
-										   bool ZeroUnavailable = false) {
+										   uint64_t Channel = 0) {
 		AnalyticsObjects::RadioTimePoint R;
 		R.band = Band;
 		R.temperature = Temperature;
-		R.temperature_zero_is_unavailable = ZeroUnavailable;
+		R.channel = Channel;
 		return R;
 	}
 
@@ -65,18 +59,18 @@ namespace {
 			 Point(1200, {Radio(2, 68), Radio(5, 60)})},
 			TestWindow());
 
-		assert(Summary.requestedWindow.startTime == "1970-01-01T00:16:40Z");
-		assert(Summary.requestedWindow.endTime == "1970-01-01T00:33:20Z");
-		assert(Summary.observedWindow.startTime == "1970-01-01T00:18:20Z");
-		assert(Summary.observedWindow.endTime == "1970-01-01T00:21:40Z");
-		assert(Summary.min_wifi_temp_2_4G == 62);
-		assert(Summary.max_wifi_temp_2_4G == 70);
-		assert(NearlyEqual(*Summary.avg_wifi_temp_2_4G, 200.0 / 3.0));
-		assert(Summary.latest_wifi_temp_2_4G == 70);
-		assert(Summary.min_wifi_temp_5G == 56);
-		assert(Summary.max_wifi_temp_5G == 65);
-		assert(NearlyEqual(*Summary.avg_wifi_temp_5G, 181.0 / 3.0));
-		assert(Summary.latest_wifi_temp_5G == 65);
+		assert(Summary.meta.requestedWindow.startTime == "1970-01-01T00:16:40Z");
+		assert(Summary.meta.requestedWindow.endTime == "1970-01-01T00:33:20Z");
+		assert(Summary.meta.observedWindow.startTime == "1970-01-01T00:18:20Z");
+		assert(Summary.meta.observedWindow.endTime == "1970-01-01T00:21:40Z");
+		assert(Summary.data.min_wifi_temp_2_4G == 62);
+		assert(Summary.data.max_wifi_temp_2_4G == 70);
+		assert(NearlyEqual(*Summary.data.avg_wifi_temp_2_4G, 200.0 / 3.0));
+		assert(Summary.data.latest_wifi_temp_2_4G == 70);
+		assert(Summary.data.min_wifi_temp_5G == 56);
+		assert(Summary.data.max_wifi_temp_5G == 65);
+		assert(NearlyEqual(*Summary.data.avg_wifi_temp_5G, 181.0 / 3.0));
+		assert(Summary.data.latest_wifi_temp_5G == 65);
 	}
 
 	void TestFiltersInvalidSamples() {
@@ -84,37 +78,37 @@ namespace {
 			{Point(900, {Radio(2, 50)}),
 			 Point(1000, {Radio(2, std::nullopt), Radio(5, 255)}),
 			 Point(1100, {Radio(2, -41), Radio(5, 126)}),
-			 Point(1200, {Radio(2, 0, true), Radio(5, 0, false)}),
+			 Point(1200, {Radio(2, 0), Radio(5, 0)}),
 			 Point(1300, {Radio(6, 44), Radio(5, 10)}),
 			 Point(2000, {Radio(2, 55)})},
 			TestWindow());
 
-		assert(!Summary.min_wifi_temp_2_4G);
-		assert(!Summary.max_wifi_temp_2_4G);
-		assert(!Summary.avg_wifi_temp_2_4G);
-		assert(!Summary.latest_wifi_temp_2_4G);
-		assert(Summary.min_wifi_temp_5G == 0);
-		assert(Summary.max_wifi_temp_5G == 10);
-		assert(Summary.avg_wifi_temp_5G == 5);
-		assert(Summary.latest_wifi_temp_5G == 10);
-		assert(Summary.observedWindow.startTime == "1970-01-01T00:20:00Z");
-		assert(Summary.observedWindow.endTime == "1970-01-01T00:21:40Z");
+		assert(Summary.data.min_wifi_temp_2_4G == 0);
+		assert(Summary.data.max_wifi_temp_2_4G == 0);
+		assert(Summary.data.avg_wifi_temp_2_4G == 0);
+		assert(Summary.data.latest_wifi_temp_2_4G == 0);
+		assert(Summary.data.min_wifi_temp_5G == 0);
+		assert(Summary.data.max_wifi_temp_5G == 10);
+		assert(Summary.data.avg_wifi_temp_5G == 5);
+		assert(Summary.data.latest_wifi_temp_5G == 10);
+		assert(Summary.meta.observedWindow.startTime == "1970-01-01T00:20:00Z");
+		assert(Summary.meta.observedWindow.endTime == "1970-01-01T00:21:40Z");
 	}
 
 	void TestNoSamplesReturnsNulls() {
 		auto Summary = MCP::CalculateRadioTemperatureSummary(
 			{Point(1100, {Radio(2, std::nullopt), Radio(5, 255)})}, TestWindow());
 
-		assert(!Summary.min_wifi_temp_2_4G);
-		assert(!Summary.max_wifi_temp_2_4G);
-		assert(!Summary.avg_wifi_temp_2_4G);
-		assert(!Summary.latest_wifi_temp_2_4G);
-		assert(!Summary.min_wifi_temp_5G);
-		assert(!Summary.max_wifi_temp_5G);
-		assert(!Summary.avg_wifi_temp_5G);
-		assert(!Summary.latest_wifi_temp_5G);
-		assert(!Summary.observedWindow.startTime);
-		assert(!Summary.observedWindow.endTime);
+		assert(!Summary.data.min_wifi_temp_2_4G);
+		assert(!Summary.data.max_wifi_temp_2_4G);
+		assert(!Summary.data.avg_wifi_temp_2_4G);
+		assert(!Summary.data.latest_wifi_temp_2_4G);
+		assert(!Summary.data.min_wifi_temp_5G);
+		assert(!Summary.data.max_wifi_temp_5G);
+		assert(!Summary.data.avg_wifi_temp_5G);
+		assert(!Summary.data.latest_wifi_temp_5G);
+		assert(!Summary.meta.observedWindow.startTime);
+		assert(!Summary.meta.observedWindow.endTime);
 	}
 
 	void TestSerializationShape() {
@@ -123,42 +117,49 @@ namespace {
 
 		Poco::JSON::Object Obj;
 		Summary.to_json(Obj);
-		assert(Obj.has("requestedWindow"));
-		assert(Obj.has("observedWindow"));
-		assert(Obj.has("min_wifi_temp_2.4G"));
-		assert(Obj.has("max_wifi_temp_2.4G"));
-		assert(Obj.has("avg_wifi_temp_2.4G"));
-		assert(Obj.has("latest_wifi_temp_2.4G"));
-		assert(Obj.has("min_wifi_temp_5G"));
-		assert(Obj.has("max_wifi_temp_5G"));
-		assert(Obj.has("avg_wifi_temp_5G"));
-		assert(Obj.has("latest_wifi_temp_5G"));
-		assert(!Obj.has("data"));
-		assert(!Obj.has("meta"));
+		assert(Obj.has("data"));
+		assert(Obj.has("meta"));
+		assert(!Obj.has("requestedWindow"));
+		assert(!Obj.has("observedWindow"));
+		assert(!Obj.has("min_wifi_temp_2.4G"));
+
+		auto DataObj = Obj.getObject("data");
+		assert(DataObj->has("min_wifi_temp_2.4G"));
+		assert(DataObj->has("max_wifi_temp_2.4G"));
+		assert(DataObj->has("avg_wifi_temp_2.4G"));
+		assert(DataObj->has("latest_wifi_temp_2.4G"));
+		assert(DataObj->has("min_wifi_temp_5G"));
+		assert(DataObj->has("max_wifi_temp_5G"));
+		assert(DataObj->has("avg_wifi_temp_5G"));
+		assert(DataObj->has("latest_wifi_temp_5G"));
+
+		auto MetaObj = Obj.getObject("meta");
+		assert(MetaObj->has("requestedWindow"));
+		assert(MetaObj->has("observedWindow"));
 	}
 
 	void TestOnlyOneBand() {
 		auto Summary2G = MCP::CalculateRadioTemperatureSummary(
 			{Point(1100, {Radio(2, 62)})}, TestWindow());
-		assert(Summary2G.min_wifi_temp_2_4G == 62);
-		assert(Summary2G.max_wifi_temp_2_4G == 62);
-		assert(Summary2G.avg_wifi_temp_2_4G == 62);
-		assert(Summary2G.latest_wifi_temp_2_4G == 62);
-		assert(!Summary2G.min_wifi_temp_5G);
-		assert(!Summary2G.max_wifi_temp_5G);
-		assert(!Summary2G.avg_wifi_temp_5G);
-		assert(!Summary2G.latest_wifi_temp_5G);
+		assert(Summary2G.data.min_wifi_temp_2_4G == 62);
+		assert(Summary2G.data.max_wifi_temp_2_4G == 62);
+		assert(Summary2G.data.avg_wifi_temp_2_4G == 62);
+		assert(Summary2G.data.latest_wifi_temp_2_4G == 62);
+		assert(!Summary2G.data.min_wifi_temp_5G);
+		assert(!Summary2G.data.max_wifi_temp_5G);
+		assert(!Summary2G.data.avg_wifi_temp_5G);
+		assert(!Summary2G.data.latest_wifi_temp_5G);
 
 		auto Summary5G = MCP::CalculateRadioTemperatureSummary(
 			{Point(1100, {Radio(5, 55)})}, TestWindow());
-		assert(!Summary5G.min_wifi_temp_2_4G);
-		assert(!Summary5G.max_wifi_temp_2_4G);
-		assert(!Summary5G.avg_wifi_temp_2_4G);
-		assert(!Summary5G.latest_wifi_temp_2_4G);
-		assert(Summary5G.min_wifi_temp_5G == 55);
-		assert(Summary5G.max_wifi_temp_5G == 55);
-		assert(Summary5G.avg_wifi_temp_5G == 55);
-		assert(Summary5G.latest_wifi_temp_5G == 55);
+		assert(!Summary5G.data.min_wifi_temp_2_4G);
+		assert(!Summary5G.data.max_wifi_temp_2_4G);
+		assert(!Summary5G.data.avg_wifi_temp_2_4G);
+		assert(!Summary5G.data.latest_wifi_temp_2_4G);
+		assert(Summary5G.data.min_wifi_temp_5G == 55);
+		assert(Summary5G.data.max_wifi_temp_5G == 55);
+		assert(Summary5G.data.avg_wifi_temp_5G == 55);
+		assert(Summary5G.data.latest_wifi_temp_5G == 55);
 	}
 
 	void TestHalfOpenWindowBoundary() {
@@ -169,28 +170,42 @@ namespace {
 			 Point(2000, {Radio(2, 60)})}, // on endTime boundary (exclusive, should be excluded)
 			W);
 
-		assert(Summary.min_wifi_temp_2_4G == 40);
-		assert(Summary.max_wifi_temp_2_4G == 50);
-		assert(Summary.avg_wifi_temp_2_4G == 45);
-		assert(Summary.latest_wifi_temp_2_4G == 50);
-		assert(Summary.observedWindow.startTime == "1970-01-01T00:16:40Z");
-		assert(Summary.observedWindow.endTime == "1970-01-01T00:25:00Z");
+		assert(Summary.data.min_wifi_temp_2_4G == 40);
+		assert(Summary.data.max_wifi_temp_2_4G == 50);
+		assert(Summary.data.avg_wifi_temp_2_4G == 45);
+		assert(Summary.data.latest_wifi_temp_2_4G == 50);
+		assert(Summary.meta.observedWindow.startTime == "1970-01-01T00:16:40Z");
+		assert(Summary.meta.observedWindow.endTime == "1970-01-01T00:25:00Z");
 	}
 
-	void TestZeroSentinelFlag() {
+	void TestZeroTemperatureIsValid() {
 		auto Summary = MCP::CalculateRadioTemperatureSummary(
-			{Point(1100, {Radio(2, 0, false)}), // 0 is valid measurement when flag is false
-			 Point(1200, {Radio(5, 0, true)})}, // 0 is sentinel when flag is true
+			{Point(1100, {Radio(2, 0), Radio(5, 0)}),
+			 Point(1200, {Radio(2, 10), Radio(5, 10)}),
+			 Point(1300, {Radio(2, 20), Radio(5, 20)})},
 			TestWindow());
 
-		assert(Summary.min_wifi_temp_2_4G == 0);
-		assert(Summary.max_wifi_temp_2_4G == 0);
-		assert(Summary.avg_wifi_temp_2_4G == 0);
-		assert(Summary.latest_wifi_temp_2_4G == 0);
-		assert(!Summary.min_wifi_temp_5G);
-		assert(!Summary.max_wifi_temp_5G);
-		assert(!Summary.avg_wifi_temp_5G);
-		assert(!Summary.latest_wifi_temp_5G);
+		assert(Summary.data.min_wifi_temp_2_4G == 0);
+		assert(Summary.data.max_wifi_temp_2_4G == 20);
+		assert(Summary.data.avg_wifi_temp_2_4G == 10);
+		assert(Summary.data.latest_wifi_temp_2_4G == 20);
+		assert(Summary.data.min_wifi_temp_5G == 0);
+		assert(Summary.data.max_wifi_temp_5G == 20);
+		assert(Summary.data.avg_wifi_temp_5G == 10);
+		assert(Summary.data.latest_wifi_temp_5G == 20);
+	}
+
+	void TestLatestTemperatureCanBeZero() {
+		auto Summary = MCP::CalculateRadioTemperatureSummary(
+			{Point(1100, {Radio(2, 10)}),
+			 Point(1200, {Radio(2, 20)}),
+			 Point(1300, {Radio(2, 0)})},
+			TestWindow());
+
+		assert(Summary.data.min_wifi_temp_2_4G == 0);
+		assert(Summary.data.max_wifi_temp_2_4G == 20);
+		assert(Summary.data.avg_wifi_temp_2_4G == 10);
+		assert(Summary.data.latest_wifi_temp_2_4G == 0);
 	}
 
 	void TestTelemetryJsonParsingToRadioTimePoint() {
@@ -199,33 +214,26 @@ namespace {
 		Device.platform = "platform-y";
 		Device.lastFirmware = "v2.1.0-beta";
 
-		// 1. Valid temperature with explicit snake_case flag
 		nlohmann::json Doc1 = nlohmann::json::parse(R"({
 			"band": ["5G"],
 			"channel": 36,
-			"temperature": 54.5,
-			"temperature_zero_is_unavailable": true
+			"temperature": 0
 		})");
 		AnalyticsObjects::RadioTimePoint RTP1;
 		APStats::ParseRadioTimePoint(Doc1, Device, RTP1);
 		assert(RTP1.temperature.has_value());
-		assert(*RTP1.temperature == 54.5);
-		assert(RTP1.temperature_zero_is_unavailable == true);
+		assert(NearlyEqual(*RTP1.temperature, 0.0));
 
-		// 2. Valid temperature with camelCase flag
 		nlohmann::json Doc2 = nlohmann::json::parse(R"({
 			"band": ["2G"],
 			"channel": 6,
-			"temperature": 42.0,
-			"temperatureZeroIsUnavailable": false
+			"temperature": 42.0
 		})");
 		AnalyticsObjects::RadioTimePoint RTP2;
 		APStats::ParseRadioTimePoint(Doc2, Device, RTP2);
 		assert(RTP2.temperature.has_value());
 		assert(*RTP2.temperature == 42.0);
-		assert(RTP2.temperature_zero_is_unavailable == false);
 
-		// 3. Null / missing temperature
 		nlohmann::json Doc3 = nlohmann::json::parse(R"({
 			"band": ["5G"],
 			"channel": 149,
@@ -234,19 +242,14 @@ namespace {
 		AnalyticsObjects::RadioTimePoint RTP3;
 		APStats::ParseRadioTimePoint(Doc3, Device, RTP3);
 		assert(!RTP3.temperature.has_value());
-		assert(RTP3.temperature_zero_is_unavailable == false);
 
-		// 4. Config-driven zero-temperature contract matches (when explicit flag is absent)
-		g_TestConfigMap["temperature.zero_unavailable_device_types"] = "ap-model-x,ap-model-z";
 		nlohmann::json Doc4 = nlohmann::json::parse(R"({
-			"band": ["2G"],
-			"channel": 1,
-			"temperature": 0.0
+			"band": ["5G"],
+			"channel": 149
 		})");
 		AnalyticsObjects::RadioTimePoint RTP4;
 		APStats::ParseRadioTimePoint(Doc4, Device, RTP4);
-		assert(RTP4.temperature_zero_is_unavailable == true);
-		g_TestConfigMap.clear();
+		assert(!RTP4.temperature.has_value());
 	}
 
 	void TestPersistedRadioJsonNullableTemperature() {
@@ -269,20 +272,32 @@ namespace {
 		assert(ValidRTP.from_json(ValidObj));
 		assert(ValidRTP.temperature.has_value());
 		assert(*ValidRTP.temperature == 62.5);
+
+		auto ZeroObj =
+			Parser.parse(R"({"band":2,"temperature":0})").extract<Poco::JSON::Object::Ptr>();
+		AnalyticsObjects::RadioTimePoint ZeroRTP;
+		assert(ZeroRTP.from_json(ZeroObj));
+		assert(ZeroRTP.temperature.has_value());
+		assert(NearlyEqual(*ZeroRTP.temperature, 0.0));
+
+		Poco::JSON::Object Serialized;
+		ZeroRTP.to_json(Serialized);
+		assert(Serialized.has("temperature"));
+		assert(Serialized.getValue<double>("temperature") == 0);
 	}
 
 	void TestValidTwentyIsPreserved() {
 		auto Summary = MCP::CalculateRadioTemperatureSummary(
 			{Point(1100, {Radio(2, 20), Radio(5, 20)})}, TestWindow());
 
-		assert(Summary.min_wifi_temp_2_4G == 20);
-		assert(Summary.max_wifi_temp_2_4G == 20);
-		assert(Summary.avg_wifi_temp_2_4G == 20);
-		assert(Summary.latest_wifi_temp_2_4G == 20);
-		assert(Summary.min_wifi_temp_5G == 20);
-		assert(Summary.max_wifi_temp_5G == 20);
-		assert(Summary.avg_wifi_temp_5G == 20);
-		assert(Summary.latest_wifi_temp_5G == 20);
+		assert(Summary.data.min_wifi_temp_2_4G == 20);
+		assert(Summary.data.max_wifi_temp_2_4G == 20);
+		assert(Summary.data.avg_wifi_temp_2_4G == 20);
+		assert(Summary.data.latest_wifi_temp_2_4G == 20);
+		assert(Summary.data.min_wifi_temp_5G == 20);
+		assert(Summary.data.max_wifi_temp_5G == 20);
+		assert(Summary.data.avg_wifi_temp_5G == 20);
+		assert(Summary.data.latest_wifi_temp_5G == 20);
 	}
 
 	void TestValidateExpectedSampleCount() {
@@ -314,7 +329,8 @@ int main() {
 	TestSerializationShape();
 	TestOnlyOneBand();
 	TestHalfOpenWindowBoundary();
-	TestZeroSentinelFlag();
+	TestZeroTemperatureIsValid();
+	TestLatestTemperatureCanBeZero();
 	TestTelemetryJsonParsingToRadioTimePoint();
 	TestPersistedRadioJsonNullableTemperature();
 	TestValidTwentyIsPreserved();

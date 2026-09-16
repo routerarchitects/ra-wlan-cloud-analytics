@@ -61,9 +61,7 @@ namespace OpenWifi::AnalyticsObjects {
 		field_to_json(Obj, "meta", meta);
 	}
 
-	void MCPGatewayWifiTemperatureSummary::to_json(Poco::JSON::Object &Obj) const {
-		field_to_json(Obj, "requestedWindow", requestedWindow);
-		field_to_json(Obj, "observedWindow", observedWindow);
+	void MCPGatewayWifiTemperatureSummaryData::to_json(Poco::JSON::Object &Obj) const {
 		nullable_double_to_json(Obj, "min_wifi_temp_2.4G", min_wifi_temp_2_4G);
 		nullable_double_to_json(Obj, "max_wifi_temp_2.4G", max_wifi_temp_2_4G);
 		nullable_double_to_json(Obj, "avg_wifi_temp_2.4G", avg_wifi_temp_2_4G);
@@ -72,6 +70,11 @@ namespace OpenWifi::AnalyticsObjects {
 		nullable_double_to_json(Obj, "max_wifi_temp_5G", max_wifi_temp_5G);
 		nullable_double_to_json(Obj, "avg_wifi_temp_5G", avg_wifi_temp_5G);
 		nullable_double_to_json(Obj, "latest_wifi_temp_5G", latest_wifi_temp_5G);
+	}
+
+	void MCPGatewayWifiTemperatureSummary::to_json(Poco::JSON::Object &Obj) const {
+		field_to_json(Obj, "data", data);
+		field_to_json(Obj, "meta", meta);
 	}
 
 } // namespace OpenWifi::AnalyticsObjects

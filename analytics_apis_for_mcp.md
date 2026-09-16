@@ -796,22 +796,26 @@ None
 
 ```json
 {
-  "requestedWindow": {
-    "startTime": "2026-07-26T12:00:00Z",
-    "endTime": "2026-07-27T12:00:00Z"
+  "meta": {
+    "requestedWindow": {
+      "startTime": "2026-07-26T12:00:00Z",
+      "endTime": "2026-07-27T12:00:00Z"
+    },
+    "observedWindow": {
+      "startTime": "2026-07-26T12:04:00Z",
+      "endTime": "2026-07-27T11:55:00Z"
+    }
   },
-  "observedWindow": {
-    "startTime": "2026-07-26T12:04:00Z",
-    "endTime": "2026-07-27T11:55:00Z"
-  },
-  "min_wifi_temp_2.4G": 62,
-  "max_wifi_temp_2.4G": 70,
-  "avg_wifi_temp_2.4G": 66.64,
-  "latest_wifi_temp_2.4G": 68,
-  "min_wifi_temp_5G": 56,
-  "max_wifi_temp_5G": 65,
-  "avg_wifi_temp_5G": 60.38,
-  "latest_wifi_temp_5G": 60
+  "data": {
+    "min_wifi_temp_2.4G": 62,
+    "max_wifi_temp_2.4G": 70,
+    "avg_wifi_temp_2.4G": 66.64,
+    "latest_wifi_temp_2.4G": 68,
+    "min_wifi_temp_5G": 56,
+    "max_wifi_temp_5G": 65,
+    "avg_wifi_temp_5G": 60.38,
+    "latest_wifi_temp_5G": 60
+  }
 }
 ```
 
@@ -839,35 +843,6 @@ Do not synthesize a numeric fallback temperature for missing data.
 Do not store a placeholder in temperature for a missing temperature.
 ```
 
-Zero-temperature sentinel source of truth:
-
-```text
-The source of truth for whether temperature = 0 means unavailable is an explicit
-TelemetryTemperatureContract resolved at ingestion time from stable producer
-metadata, such as OWPROV inventory deviceType, gateway capabilities platform,
-firmware family, or an equivalent service-level contract registry.
-
-The resolved contract must expose:
-  temperatureZeroIsUnavailable: boolean
-
-Persist either the resolved boolean on the radio temperature sample, for example
-radio_data[].temperature_zero_is_unavailable, or persist a stable contract id that
-can be resolved later to the same boolean. Do not infer zero-sentinel behavior
-from the observed temperature value itself.
-
-If no producer/device contract can be resolved for a sample, the default is:
-  temperatureZeroIsUnavailable = false
-
-### Venue Reassignment & Observed Window Rules
-
-When a gateway moves from an old venue (Board A) to a new venue (Board B):
-1. `routerId` resolves via OWPROV to the current venue (`Board B`).
-2. Analytics queries timepoints filtered by `boardId == Board B` and `serialNumber == routerId`. Historical samples associated with `Board A` are not queried or included.
-3. `requestedWindow` reflects the full requested interval (`startTime` to `endTime`).
-4. `observedWindow` reflects the first and last valid sample timestamps found for `Board B` within `[startTime, endTime)`.
-5. Temperature aggregates (`min`, `max`, `avg`, `latest`) are calculated exclusively from valid samples on `Board B`.
-```
-
 Migration dependency:
 
 ```text
@@ -878,11 +853,19 @@ radio_data samples to expose the migrated nullable temperature field.
 
 Do not filter out samples only because the measured value is 20°C.
 A present temperature value is treated as a legitimate measurement.
-Reject `temperature = 0` only when the corresponding telemetry producer or device
-contract defines `0` as an unavailable or uninitialized sensor sentinel.
-Otherwise, treat `0°C` as a valid in-range measurement. A sample with
+A reported `0°C` value is a valid numeric temperature reading and participates in
+persistence, aggregation, sample counts, and API responses. A sample with
 `temperature = null`, `255`, or a value outside the valid range `[-40, 125]` is
 treated as a missing sensor reading and MUST be excluded from aggregation.
+
+### Venue Reassignment & Observed Window Rules
+
+When a gateway moves from an old venue (Board A) to a new venue (Board B):
+1. `routerId` resolves via OWPROV to the current venue (`Board B`).
+2. Analytics queries timepoints filtered by `boardId == Board B` and `serialNumber == routerId`. Historical samples associated with `Board A` are not queried or included.
+3. `requestedWindow` reflects the full requested interval (`startTime` to `endTime`).
+4. `observedWindow` reflects the first and last valid sample timestamps found for `Board B` within `[startTime, endTime)`.
+5. Temperature aggregates (`min`, `max`, `avg`, `latest`) are calculated exclusively from valid samples on `Board B`.
 
 The current radio-band mapping is:
 
@@ -914,8 +897,7 @@ For each record:
   parse radio_data
   for each radio in radio_data:
     if radio.band is 2 or 5:
-      if radio.temperature is present, non-null, -40 <= radio.temperature <= 125,
-         and (radio.temperature != 0 or radio.temperature_zero_is_unavailable is not true):
+      if radio.temperature is present, non-null, and -40 <= radio.temperature <= 125:
         add radio.temperature to that band's sample list
 
 For each band:
@@ -936,7 +918,7 @@ A valid temperature sample is:
 ```text
 record timestamp is in the requested half-open window
 radio.temperature is present, non-null, and within range [-40, 125]
-radio.temperature = 0 is excluded only when the persisted/resolved temperature contract has temperatureZeroIsUnavailable = true
+radio.temperature = 0 is included as a valid sample
 ```
 
 If all samples for a band are invalid or missing, return `null` for that band's min, max, average, and latest fields.
@@ -947,17 +929,17 @@ Do not query `radio_timepoints` unless a separate normalized table and migration
 
 ```cpp
 if (radio.band == 2) {
-    response.min_wifi_temp_2_4G = summary.min;
-    response.max_wifi_temp_2_4G = summary.max;
-    response.avg_wifi_temp_2_4G = summary.avg;
-    response.latest_wifi_temp_2_4G = summary.latest;
+    response.data.min_wifi_temp_2_4G = summary.min;
+    response.data.max_wifi_temp_2_4G = summary.max;
+    response.data.avg_wifi_temp_2_4G = summary.avg;
+    response.data.latest_wifi_temp_2_4G = summary.latest;
 }
 
 if (radio.band == 5) {
-    response.min_wifi_temp_5G = summary.min;
-    response.max_wifi_temp_5G = summary.max;
-    response.avg_wifi_temp_5G = summary.avg;
-    response.latest_wifi_temp_5G = summary.latest;
+    response.data.min_wifi_temp_5G = summary.min;
+    response.data.max_wifi_temp_5G = summary.max;
+    response.data.avg_wifi_temp_5G = summary.avg;
+    response.data.latest_wifi_temp_5G = summary.latest;
 }
 ```
 
@@ -965,22 +947,26 @@ if (radio.band == 5) {
 
 ```json
 {
-  "requestedWindow": {
-    "startTime": "2026-07-26T12:00:00Z",
-    "endTime": "2026-07-27T12:00:00Z"
+  "meta": {
+    "requestedWindow": {
+      "startTime": "2026-07-26T12:00:00Z",
+      "endTime": "2026-07-27T12:00:00Z"
+    },
+    "observedWindow": {
+      "startTime": "2026-07-26T12:04:00Z",
+      "endTime": "2026-07-27T11:55:00Z"
+    }
   },
-  "observedWindow": {
-    "startTime": "2026-07-26T12:04:00Z",
-    "endTime": "2026-07-27T11:55:00Z"
-  },
-  "min_wifi_temp_2.4G": 62,
-  "max_wifi_temp_2.4G": 70,
-  "avg_wifi_temp_2.4G": 66.64,
-  "latest_wifi_temp_2.4G": 68,
-  "min_wifi_temp_5G": null,
-  "max_wifi_temp_5G": null,
-  "avg_wifi_temp_5G": null,
-  "latest_wifi_temp_5G": null
+  "data": {
+    "min_wifi_temp_2.4G": 62,
+    "max_wifi_temp_2.4G": 70,
+    "avg_wifi_temp_2.4G": 66.64,
+    "latest_wifi_temp_2.4G": 68,
+    "min_wifi_temp_5G": null,
+    "max_wifi_temp_5G": null,
+    "avg_wifi_temp_5G": null,
+    "latest_wifi_temp_5G": null
+  }
 }
 ```
 

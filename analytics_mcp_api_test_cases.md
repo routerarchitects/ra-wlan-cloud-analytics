@@ -3016,22 +3016,26 @@ Expected response:
 
 ```json
 {
-  "requestedWindow": {
-    "startTime": "2026-07-29T10:00:00Z",
-    "endTime": "2026-07-29T11:00:00Z"
+  "meta": {
+    "requestedWindow": {
+      "startTime": "2026-07-29T10:00:00Z",
+      "endTime": "2026-07-29T11:00:00Z"
+    },
+    "observedWindow": {
+      "startTime": "2026-07-29T10:00:00Z",
+      "endTime": "2026-07-29T10:55:00Z"
+    }
   },
-  "observedWindow": {
-    "startTime": "2026-07-29T10:00:00Z",
-    "endTime": "2026-07-29T10:55:00Z"
-  },
-  "min_wifi_temp_2.4G": 62,
-  "max_wifi_temp_2.4G": 70,
-  "avg_wifi_temp_2.4G": 66.64,
-  "latest_wifi_temp_2.4G": 68,
-  "min_wifi_temp_5G": 56,
-  "max_wifi_temp_5G": 65,
-  "avg_wifi_temp_5G": 60.38,
-  "latest_wifi_temp_5G": 60
+  "data": {
+    "min_wifi_temp_2.4G": 62,
+    "max_wifi_temp_2.4G": 70,
+    "avg_wifi_temp_2.4G": 66.64,
+    "latest_wifi_temp_2.4G": 68,
+    "min_wifi_temp_5G": 56,
+    "max_wifi_temp_5G": 65,
+    "avg_wifi_temp_5G": 60.38,
+    "latest_wifi_temp_5G": 60
+  }
 }
 ```
 
@@ -3050,22 +3054,26 @@ Expected response:
 
 ```json
 {
-  "requestedWindow": {
-    "startTime": "2026-07-29T10:00:00Z",
-    "endTime": "2026-07-29T10:30:00Z"
+  "meta": {
+    "requestedWindow": {
+      "startTime": "2026-07-29T10:00:00Z",
+      "endTime": "2026-07-29T10:30:00Z"
+    },
+    "observedWindow": {
+      "startTime": "2026-07-29T10:00:00Z",
+      "endTime": "2026-07-29T10:20:00Z"
+    }
   },
-  "observedWindow": {
-    "startTime": "2026-07-29T10:00:00Z",
-    "endTime": "2026-07-29T10:20:00Z"
-  },
-  "min_wifi_temp_2.4G": 60,
-  "max_wifi_temp_2.4G": 70,
-  "avg_wifi_temp_2.4G": 65.0,
-  "latest_wifi_temp_2.4G": 70,
-  "min_wifi_temp_5G": 50,
-  "max_wifi_temp_5G": 60,
-  "avg_wifi_temp_5G": 55.0,
-  "latest_wifi_temp_5G": 60
+  "data": {
+    "min_wifi_temp_2.4G": 60,
+    "max_wifi_temp_2.4G": 70,
+    "avg_wifi_temp_2.4G": 65.0,
+    "latest_wifi_temp_2.4G": 70,
+    "min_wifi_temp_5G": 50,
+    "max_wifi_temp_5G": 60,
+    "avg_wifi_temp_5G": 55.0,
+    "latest_wifi_temp_5G": 60
+  }
 }
 ```
 
@@ -3077,22 +3085,26 @@ Expected response:
 
 ```json
 {
-  "requestedWindow": {
-    "startTime": "2026-07-29T10:00:00Z",
-    "endTime": "2026-07-29T10:30:00Z"
+  "meta": {
+    "requestedWindow": {
+      "startTime": "2026-07-29T10:00:00Z",
+      "endTime": "2026-07-29T10:30:00Z"
+    },
+    "observedWindow": {
+      "startTime": "2026-07-29T10:00:00Z",
+      "endTime": "2026-07-29T10:20:00Z"
+    }
   },
-  "observedWindow": {
-    "startTime": "2026-07-29T10:00:00Z",
-    "endTime": "2026-07-29T10:20:00Z"
-  },
-  "min_wifi_temp_2.4G": 60,
-  "max_wifi_temp_2.4G": 70,
-  "avg_wifi_temp_2.4G": 65.0,
-  "latest_wifi_temp_2.4G": 70,
-  "min_wifi_temp_5G": null,
-  "max_wifi_temp_5G": null,
-  "avg_wifi_temp_5G": null,
-  "latest_wifi_temp_5G": null
+  "data": {
+    "min_wifi_temp_2.4G": 60,
+    "max_wifi_temp_2.4G": 70,
+    "avg_wifi_temp_2.4G": 65.0,
+    "latest_wifi_temp_2.4G": 70,
+    "min_wifi_temp_5G": null,
+    "max_wifi_temp_5G": null,
+    "avg_wifi_temp_5G": null,
+    "latest_wifi_temp_5G": null
+  }
 }
 ```
 
@@ -3113,22 +3125,26 @@ Expected response:
 
 ```json
 {
-  "requestedWindow": {
-    "startTime": "2026-07-29T10:00:00Z",
-    "endTime": "2026-07-29T10:30:00Z"
+  "meta": {
+    "requestedWindow": {
+      "startTime": "2026-07-29T10:00:00Z",
+      "endTime": "2026-07-29T10:30:00Z"
+    },
+    "observedWindow": {
+      "startTime": null,
+      "endTime": null
+    }
   },
-  "observedWindow": {
-    "startTime": null,
-    "endTime": null
-  },
-  "min_wifi_temp_2.4G": null,
-  "max_wifi_temp_2.4G": null,
-  "avg_wifi_temp_2.4G": null,
-  "latest_wifi_temp_2.4G": null,
-  "min_wifi_temp_5G": null,
-  "max_wifi_temp_5G": null,
-  "avg_wifi_temp_5G": null,
-  "latest_wifi_temp_5G": null
+  "data": {
+    "min_wifi_temp_2.4G": null,
+    "max_wifi_temp_2.4G": null,
+    "avg_wifi_temp_2.4G": null,
+    "latest_wifi_temp_2.4G": null,
+    "min_wifi_temp_5G": null,
+    "max_wifi_temp_5G": null,
+    "avg_wifi_temp_5G": null,
+    "latest_wifi_temp_5G": null
+  }
 }
 ```
 
@@ -3187,58 +3203,60 @@ Database contains historical row: sample time = 2026-07-29T09:59:59Z, temperatur
 
 ---
 
-## TC-TEMP-008: Zero temperature follows telemetry contract
+## TC-TEMP-008: Zero temperature is valid
 
 ### Preconditions
 
-The sample contains:
+Database contains in-window samples:
 
 ```text
-temperature = 0
+0
+10
+20
 ```
 
 ### Expected result
 
-* If the persisted/resolved telemetry contract for that sample has `temperatureZeroIsUnavailable = true`, the sample is excluded from temperature aggregation and does not contribute to min, max, or average calculations.
-* If the persisted/resolved telemetry contract has `temperatureZeroIsUnavailable = false` or no contract can be resolved, `0°C` is a valid in-range measurement and contributes to min, max, and average calculations.
+* `0°C` is included as a valid in-range measurement.
+* `min = 0`.
+* `max = 20`.
+* `avg = 10`.
+* The sample count used for aggregation is `3`.
 
 ---
 
-## TC-TEMP-008A: Zero-sentinel resolved at ingestion time remains excluded after contract change
+## TC-TEMP-008A: Latest temperature can be zero
 
-### Objective
+### Test data
 
-Verify that zero-sentinel interpretation (`temperatureZeroIsUnavailable = true`) is resolved and persisted at ingestion time so that later telemetry/device contract changes do not reinterpret historical telemetry at query time.
-
-### Steps
-
-1. Ingest a telemetry sample containing `temperature = 0` at timestamp `10:00:00Z` while the active producer/device contract has `temperatureZeroIsUnavailable = true`.
-2. Change the active producer/device telemetry contract to `temperatureZeroIsUnavailable = false`.
-3. Call the `radio-temperature-summary` API for a time window containing `10:00:00Z`.
+```text
+10 at T1
+20 at T2
+0 at T3
+```
 
 ### Expected result
 
-* The 0°C sample ingested at `10:00:00Z` remains excluded from temperature aggregation.
-* Querying historical intervals does not reinterpret stored samples based on the current/new telemetry contract state.
+* `latest = 0`.
+* The zero value is not converted to `null` or skipped.
 
 ---
 
-## TC-TEMP-008B: Valid zero measurement resolved at ingestion time remains included after contract change
+## TC-TEMP-008B: Ingested zero is persisted as zero
 
 ### Objective
 
-Verify that a valid 0°C measurement (`temperatureZeroIsUnavailable = false`) resolved and persisted at ingestion time remains included in aggregation despite subsequent contract changes.
+Verify that a device-state message containing temperature value `0` is stored as numeric `0`.
 
 ### Steps
 
-1. Ingest a telemetry sample containing `temperature = 0` at timestamp `10:00:00Z` while the active producer/device contract has `temperatureZeroIsUnavailable = false`.
-2. Change the active producer/device telemetry contract to `temperatureZeroIsUnavailable = true`.
-3. Call the `radio-temperature-summary` API for a time window containing `10:00:00Z`.
+1. Ingest a telemetry sample containing `temperature = 0` at timestamp `10:00:00Z`.
+2. Query the stored timepoint or call the `radio-temperature-summary` API for a time window containing `10:00:00Z`.
 
 ### Expected result
 
-* The 0°C sample ingested at `10:00:00Z` remains included in temperature aggregation as a valid `0°C` measurement.
-* Updating the active telemetry contract does not retroactively discard valid historical 0°C samples.
+* The persisted radio temperature value is numeric `0`.
+* The API includes the zero sample in returned aggregates.
 
 ---
 
@@ -3262,9 +3280,9 @@ A sample contains a numeric `temperature` value.
 * A numeric `temperature` is included only when all of the following hold:
   * `-40 <= temperature <= 125`
   * `temperature != 255`
-  * `temperature != 0` only when the persisted/resolved telemetry contract has `temperatureZeroIsUnavailable = true`
 * Explicit boundary values `-40` and `125` are valid inclusive measurements and are included in aggregation.
-* Sentinel and out-of-range values (`255`, `< -40`, and `> 125`) are excluded. `0°C` is excluded only under a telemetry contract that marks zero as unavailable.
+* `0°C` is a valid numeric measurement and is included in aggregation.
+* Sentinel and out-of-range values (`255`, `< -40`, and `> 125`) are excluded.
 
 ---
 
@@ -3418,59 +3436,7 @@ A timepoint contains invalid JSON in `radio_data`.
 
 ---
 
-## TC-CONFIG-TEMP-001: Zero-sentinel file configuration starts service
-
-### Preconditions
-
-The configuration file may define comma-separated lists:
-
-```properties
-temperature.zero_unavailable_device_types = ap-model-a,ap-model-b
-temperature.zero_unavailable_platforms = platform-a
-temperature.zero_unavailable_firmware_prefixes = v1.,v2.
-```
-
-### Expected result
-
-* Service initializes successfully.
-* Matching telemetry samples resolve `temperatureZeroIsUnavailable = true` during ingestion when no explicit producer flag is present.
-
----
-
-## TC-CONFIG-TEMP-002: Zero-sentinel environment configuration starts service
-
-### Preconditions
-
-The templated deployment sets:
-
-```text
-TEMPERATURE_ZERO_UNAVAILABLE_DEVICE_TYPES = ap-model-a,ap-model-b
-TEMPERATURE_ZERO_UNAVAILABLE_PLATFORMS = platform-a
-TEMPERATURE_ZERO_UNAVAILABLE_FIRMWARE_PREFIXES = v1.,v2.
-```
-
-### Expected result
-
-* Service initializes successfully.
-* The rendered config contains the corresponding `temperature.zero_unavailable_*` keys.
-
----
-
-## TC-CONFIG-TEMP-003: Explicit telemetry flag takes precedence over config lists
-
-### Preconditions
-
-* Device metadata matches a configured `temperature.zero_unavailable_device_types` entry.
-* The radio telemetry sample includes `temperatureZeroIsUnavailable = false`.
-
-### Expected result
-
-* The explicit telemetry flag wins.
-* `temperature = 0` is included as a valid measurement for that sample.
-
----
-
-## TC-CONFIG-TEMP-004: Missing migration is a deployment ordering failure
+## TC-CONFIG-TEMP-001: Missing migration is a deployment ordering failure
 
 ### Preconditions
 
@@ -4590,7 +4556,7 @@ Availability:    data.fetch_status = success, data.offline_count = 0, meta.offli
 * Availability API reports the observed offline transition.
 * Other APIs return data available before shutdown within the requested range.
 * Lack of samples after shutdown does not erase earlier valid data.
-* Missing later samples are not converted into zero memory, zero temperature or zero RSSI.
+* Missing later samples are not converted into zero memory, temperature or RSSI values.
 
 ---
 

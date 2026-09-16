@@ -184,7 +184,6 @@ if(BUILD_TESTING)
             src/RESTObjects/RESTAPI_MCPAnalyticsObjects.cpp
             src/RESTObjects/RESTAPI_ProvObjects.cpp
             src/RESTObjects/RESTAPI_SecurityObjects.cpp
-            src/framework/MicroServiceFuncs.cpp
             src/framework/utils.cpp)
     target_include_directories(test_mcp_radio_temperature_summary PRIVATE src)
     target_link_libraries(test_mcp_radio_temperature_summary PUBLIC

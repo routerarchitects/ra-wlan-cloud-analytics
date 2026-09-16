@@ -146,13 +146,7 @@ openwifi.kafka.ssl.key.password =
 ### Temperature
 The radio temperature API reads nullable `temperature` values from persisted radio telemetry. Deploy the external Flyway migration from `routerarchitects/mango-cloud-migrations` before deploying this Analytics version so historical rows expose the migrated nullable `temperature` field.
 
-Zero-temperature sentinel behavior is resolved during ingestion from either an explicit producer contract flag or the configured device metadata contract lists below.
-
-```properties
-temperature.zero_unavailable_device_types =
-temperature.zero_unavailable_platforms =
-temperature.zero_unavailable_firmware_prefixes =
-```
+A temperature value of `0` is a valid numeric reading. It is persisted, queried, aggregated, and returned exactly like any other in-range temperature value. Missing or null temperature fields remain unavailable data and are not converted to zero.
 
 ### DB Type
 The controller supports 3 types of Database. SQLite should only be used for sites with less than 100 APs or for testing in the lab.

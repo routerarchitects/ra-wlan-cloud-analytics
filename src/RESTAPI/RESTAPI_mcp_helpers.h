@@ -460,8 +460,8 @@ namespace OpenWifi {
 			};
 
 			AnalyticsObjects::MCPGatewayWifiTemperatureSummary Summary;
-			Summary.requestedWindow.startTime = FormatTimestamp(Requested.startTime);
-			Summary.requestedWindow.endTime = FormatTimestamp(Requested.endTime);
+			Summary.meta.requestedWindow.startTime = FormatTimestamp(Requested.startTime);
+			Summary.meta.requestedWindow.endTime = FormatTimestamp(Requested.endTime);
 
 			BandStats Band2G;
 			BandStats Band5G;
@@ -482,8 +482,6 @@ namespace OpenWifi {
 						continue;
 					auto Value = *Radio.temperature;
 					if (Value < -40.0 || Value > 125.0)
-						continue;
-					if (Value == 0.0 && Radio.temperature_zero_is_unavailable)
 						continue;
 
 					if (Radio.band == 2)
@@ -506,23 +504,23 @@ namespace OpenWifi {
 			}
 
 			if (AnyValidSample) {
-				Summary.observedWindow.startTime = FormatTimestamp(ObservedStartTimestamp);
-				Summary.observedWindow.endTime = FormatTimestamp(ObservedEndTimestamp);
+				Summary.meta.observedWindow.startTime = FormatTimestamp(ObservedStartTimestamp);
+				Summary.meta.observedWindow.endTime = FormatTimestamp(ObservedEndTimestamp);
 			}
 
 			if (Band2G.count > 0) {
-				Summary.min_wifi_temp_2_4G = Band2G.min;
-				Summary.max_wifi_temp_2_4G = Band2G.max;
-				Summary.avg_wifi_temp_2_4G =
+				Summary.data.min_wifi_temp_2_4G = Band2G.min;
+				Summary.data.max_wifi_temp_2_4G = Band2G.max;
+				Summary.data.avg_wifi_temp_2_4G =
 					static_cast<double>(Band2G.sum / static_cast<long double>(Band2G.count));
-				Summary.latest_wifi_temp_2_4G = Band2G.latest;
+				Summary.data.latest_wifi_temp_2_4G = Band2G.latest;
 			}
 			if (Band5G.count > 0) {
-				Summary.min_wifi_temp_5G = Band5G.min;
-				Summary.max_wifi_temp_5G = Band5G.max;
-				Summary.avg_wifi_temp_5G =
+				Summary.data.min_wifi_temp_5G = Band5G.min;
+				Summary.data.max_wifi_temp_5G = Band5G.max;
+				Summary.data.avg_wifi_temp_5G =
 					static_cast<double>(Band5G.sum / static_cast<long double>(Band5G.count));
-				Summary.latest_wifi_temp_5G = Band5G.latest;
+				Summary.data.latest_wifi_temp_5G = Band5G.latest;
 			}
 
 			return Summary;

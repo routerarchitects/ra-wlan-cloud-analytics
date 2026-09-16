@@ -4,11 +4,8 @@
 
 #pragma once
 
-#include "Poco/String.h"
-#include "Poco/StringTokenizer.h"
 #include "Poco/Logger.h"
 #include "RESTObjects/RESTAPI_AnalyticsObjects.h"
-#include "framework/MicroServiceFuncs.h"
 #include "framework/utils.h"
 #include "nlohmann/json.hpp"
 #include <mutex>
@@ -29,69 +26,10 @@ namespace OpenWifi {
 			return std::nullopt;
 		}
 
-		inline bool GetOptionalBoolJSON(const char *field, const nlohmann::json &doc, bool &value) {
-			try {
-				if (!doc.contains(field) || doc[field].is_null() || !doc[field].is_boolean())
-					return false;
-				value = doc[field].get<bool>();
-				return true;
-			} catch (...) {
-			}
-			return false;
-		}
-
-		inline bool ConfigListContains(const std::string &ConfigKey, const std::string &Value) {
-			if (Value.empty())
-				return false;
-
-			Poco::StringTokenizer Tokens(MicroServiceConfigGetString(ConfigKey, ""), ",",
-										 Poco::StringTokenizer::TOK_TRIM |
-											 Poco::StringTokenizer::TOK_IGNORE_EMPTY);
-			for (const auto &Token : Tokens) {
-				if (!Poco::icompare(Token, Value))
-					return true;
-			}
-			return false;
-		}
-
-		inline bool ConfigListContainsPrefix(const std::string &ConfigKey,
-											 const std::string &Value) {
-			if (Value.empty())
-				return false;
-
-			Poco::StringTokenizer Tokens(MicroServiceConfigGetString(ConfigKey, ""), ",",
-										 Poco::StringTokenizer::TOK_TRIM |
-											 Poco::StringTokenizer::TOK_IGNORE_EMPTY);
-			for (const auto &Token : Tokens) {
-				if (Value.size() >= Token.size() &&
-					!Poco::icompare(Value.substr(0, Token.size()), Token))
-					return true;
-			}
-			return false;
-		}
-
-		inline bool ResolveTemperatureZeroIsUnavailableContract(
-			const nlohmann::json &radio, const AnalyticsObjects::DeviceInfo &Device) {
-			bool ExplicitContract = false;
-			if (GetOptionalBoolJSON("temperature_zero_is_unavailable", radio, ExplicitContract) ||
-				GetOptionalBoolJSON("temperatureZeroIsUnavailable", radio, ExplicitContract))
-				return ExplicitContract;
-
-			return ConfigListContains("temperature.zero_unavailable_device_types",
-									  Device.deviceType) ||
-				   ConfigListContains("temperature.zero_unavailable_platforms",
-									  Device.platform) ||
-				   ConfigListContainsPrefix(
-					   "temperature.zero_unavailable_firmware_prefixes",
-					   Device.lastFirmware);
-		}
-
 		inline bool ParseRadioTimePoint(const nlohmann::json &radio,
-										const AnalyticsObjects::DeviceInfo &Device,
+										const AnalyticsObjects::DeviceInfo &,
 										AnalyticsObjects::RadioTimePoint &RTP) {
 			RTP.temperature = GetOptionalDoubleJSON("temperature", radio);
-			RTP.temperature_zero_is_unavailable =
-				ResolveTemperatureZeroIsUnavailableContract(radio, Device);
 			return true;
 		}
 	} // namespace APStats

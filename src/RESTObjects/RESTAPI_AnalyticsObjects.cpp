@@ -381,8 +381,6 @@ bool Fingerprint::from_json(const Poco::JSON::Object::Ptr &Obj) {
 			field_to_json(Obj, "temperature", *temperature);
 		else
 			Obj.set("temperature", Poco::Dynamic::Var());
-		field_to_json(Obj, "temperature_zero_is_unavailable",
-					  temperature_zero_is_unavailable);
 		field_to_json(Obj, "noise", noise);
 		field_to_json(Obj, "active_pct", active_pct);
 		field_to_json(Obj, "busy_pct", busy_pct);
@@ -401,10 +399,6 @@ bool Fingerprint::from_json(const Poco::JSON::Object::Ptr &Obj) {
 			field_from_json(Obj, "tx_power", tx_power);
 			field_from_json(Obj, "channel", channel);
 			temperature = OptionalDoubleFromJson(Obj, "temperature");
-			field_from_json(Obj, "temperature_zero_is_unavailable",
-							temperature_zero_is_unavailable);
-			field_from_json(Obj, "temperatureZeroIsUnavailable",
-							temperature_zero_is_unavailable);
 			field_from_json(Obj, "noise", noise);
 			field_from_json(Obj, "active_pct", active_pct);
 			field_from_json(Obj, "busy_pct", busy_pct);

@@ -189,7 +189,6 @@ namespace OpenWifi {
 					 channel = 0;
 			std::optional<double> temperature;
 			int64_t noise = 0;
-			bool temperature_zero_is_unavailable = false;
 
 			double active_pct = 0.0, busy_pct = 0.0, receive_pct = 0.0, transmit_pct = 0.0;
 
@@ -399,9 +398,7 @@ namespace OpenWifi {
 			void to_json(Poco::JSON::Object &Obj) const;
 		};
 
-		struct MCPGatewayWifiTemperatureSummary {
-			MCPRequestedWindow requestedWindow;
-			MCPObservedWindow observedWindow;
+		struct MCPGatewayWifiTemperatureSummaryData {
 			std::optional<double> min_wifi_temp_2_4G;
 			std::optional<double> max_wifi_temp_2_4G;
 			std::optional<double> avg_wifi_temp_2_4G;
@@ -410,6 +407,13 @@ namespace OpenWifi {
 			std::optional<double> max_wifi_temp_5G;
 			std::optional<double> avg_wifi_temp_5G;
 			std::optional<double> latest_wifi_temp_5G;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+		};
+
+		struct MCPGatewayWifiTemperatureSummary {
+			MCPGatewayWifiTemperatureSummaryData data;
+			MCPMemorySummaryMeta meta;
 
 			void to_json(Poco::JSON::Object &Obj) const;
 		};

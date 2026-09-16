@@ -242,19 +242,19 @@ def seeded_board():
 
 
 def assert_empty_temperature_summary(body: dict[str, Any], expected_start: str, expected_end: str) -> None:
-    assert body["requestedWindow"] == {
+    assert body["meta"]["requestedWindow"] == {
         "startTime": expected_start,
         "endTime": expected_end,
     }
-    assert body["observedWindow"] == {"startTime": None, "endTime": None}
-    assert body["min_wifi_temp_2.4G"] is None
-    assert body["max_wifi_temp_2.4G"] is None
-    assert body["avg_wifi_temp_2.4G"] is None
-    assert body["latest_wifi_temp_2.4G"] is None
-    assert body["min_wifi_temp_5G"] is None
-    assert body["max_wifi_temp_5G"] is None
-    assert body["avg_wifi_temp_5G"] is None
-    assert body["latest_wifi_temp_5G"] is None
+    assert body["meta"]["observedWindow"] == {"startTime": None, "endTime": None}
+    assert body["data"]["min_wifi_temp_2.4G"] is None
+    assert body["data"]["max_wifi_temp_2.4G"] is None
+    assert body["data"]["avg_wifi_temp_2.4G"] is None
+    assert body["data"]["latest_wifi_temp_2.4G"] is None
+    assert body["data"]["min_wifi_temp_5G"] is None
+    assert body["data"]["max_wifi_temp_5G"] is None
+    assert body["data"]["avg_wifi_temp_5G"] is None
+    assert body["data"]["latest_wifi_temp_5G"] is None
 
 
 def test_radio_temperature_summary_aggregates_persisted_temperature_samples(seeded_board) -> None:
@@ -273,9 +273,9 @@ def test_radio_temperature_summary_aggregates_persisted_temperature_samples(seed
     result = http_json(temperature_summary_path(format_utc(end_dt)), valid_token())
 
     assert result.status == 200
-    assert set(result.body) == {
-        "requestedWindow",
-        "observedWindow",
+    assert set(result.body) == {"data", "meta"}
+    assert set(result.body["meta"]) == {"requestedWindow", "observedWindow"}
+    assert set(result.body["data"]) == {
         "min_wifi_temp_2.4G",
         "max_wifi_temp_2.4G",
         "avg_wifi_temp_2.4G",
@@ -285,22 +285,22 @@ def test_radio_temperature_summary_aggregates_persisted_temperature_samples(seed
         "avg_wifi_temp_5G",
         "latest_wifi_temp_5G",
     }
-    assert result.body["requestedWindow"] == {
+    assert result.body["meta"]["requestedWindow"] == {
         "startTime": format_utc(start_dt),
         "endTime": format_utc(end_dt),
     }
-    assert result.body["observedWindow"] == {
+    assert result.body["meta"]["observedWindow"] == {
         "startTime": format_utc(t_a),
         "endTime": format_utc(t_c),
     }
-    assert result.body["min_wifi_temp_2.4G"] == 62
-    assert result.body["max_wifi_temp_2.4G"] == 70
-    assert result.body["avg_wifi_temp_2.4G"] == pytest.approx((62 + 70 + 68) / 3)
-    assert result.body["latest_wifi_temp_2.4G"] == 68
-    assert result.body["min_wifi_temp_5G"] == 56
-    assert result.body["max_wifi_temp_5G"] == 65
-    assert result.body["avg_wifi_temp_5G"] == pytest.approx((56 + 65 + 60) / 3)
-    assert result.body["latest_wifi_temp_5G"] == 60
+    assert result.body["data"]["min_wifi_temp_2.4G"] == 62
+    assert result.body["data"]["max_wifi_temp_2.4G"] == 70
+    assert result.body["data"]["avg_wifi_temp_2.4G"] == pytest.approx((62 + 70 + 68) / 3)
+    assert result.body["data"]["latest_wifi_temp_2.4G"] == 68
+    assert result.body["data"]["min_wifi_temp_5G"] == 56
+    assert result.body["data"]["max_wifi_temp_5G"] == 65
+    assert result.body["data"]["avg_wifi_temp_5G"] == pytest.approx((56 + 65 + 60) / 3)
+    assert result.body["data"]["latest_wifi_temp_5G"] == 60
 
 
 def test_radio_temperature_summary_filters_window_board_serial_and_band(seeded_board) -> None:
@@ -324,13 +324,13 @@ def test_radio_temperature_summary_filters_window_board_serial_and_band(seeded_b
     result = http_json(temperature_summary_path(format_utc(end_dt)), valid_token())
 
     assert result.status == 200
-    assert result.body["min_wifi_temp_2.4G"] == 20
-    assert result.body["max_wifi_temp_2.4G"] == 30
-    assert result.body["avg_wifi_temp_2.4G"] == 25
-    assert result.body["latest_wifi_temp_2.4G"] == 30
-    assert result.body["min_wifi_temp_5G"] is None
-    assert result.body["latest_wifi_temp_5G"] is None
-    assert result.body["observedWindow"] == {
+    assert result.body["data"]["min_wifi_temp_2.4G"] == 20
+    assert result.body["data"]["max_wifi_temp_2.4G"] == 30
+    assert result.body["data"]["avg_wifi_temp_2.4G"] == 25
+    assert result.body["data"]["latest_wifi_temp_2.4G"] == 30
+    assert result.body["data"]["min_wifi_temp_5G"] is None
+    assert result.body["data"]["latest_wifi_temp_5G"] is None
+    assert result.body["meta"]["observedWindow"] == {
         "startTime": format_utc(start_sample_dt),
         "endTime": format_utc(inside_dt),
     }
@@ -371,7 +371,7 @@ def test_radio_temperature_summary_ignores_invalid_missing_and_null_temperature(
     t_invalid_a = end_dt - timedelta(minutes=50)
     t_invalid_b = end_dt - timedelta(minutes=45)
     t_invalid_c = end_dt - timedelta(minutes=40)
-    t_invalid_d = end_dt - timedelta(minutes=35)
+    t_zero_a = end_dt - timedelta(minutes=35)
     t_malformed = end_dt - timedelta(minutes=30)
     t_valid_a = end_dt - timedelta(minutes=25)
     t_valid_b = end_dt - timedelta(minutes=20)
@@ -381,7 +381,7 @@ def test_radio_temperature_summary_ignores_invalid_missing_and_null_temperature(
             insert_timepoint(cursor, format_utc(t_invalid_a), [{"band": 2}], suffix="missing")
             insert_timepoint(cursor, format_utc(t_invalid_b), [{"band": 2, "temperature": None}], suffix="null")
             insert_timepoint(cursor, format_utc(t_invalid_c), [{"band": 2, "temperature": -41}, {"band": 5, "temperature": 126}], suffix="range")
-            insert_timepoint(cursor, format_utc(t_invalid_d), [{"band": 2, "temperature": 255}, {"band": 5, "temperature": 0, "temperature_zero_is_unavailable": True}], suffix="sentinel")
+            insert_timepoint(cursor, format_utc(t_zero_a), [{"band": 2, "temperature": 255}, {"band": 5, "temperature": 0}], suffix="zero-a")
             insert_timepoint(cursor, format_utc(t_malformed), "[", suffix="malformed")
             insert_timepoint(cursor, format_utc(t_valid_a), [{"band": 2, "temperature": 20}, {"band": 5, "temperature": 0}], suffix="valid-a")
             insert_timepoint(cursor, format_utc(t_valid_b), [{"band": 2, "temperature": 30}, {"band": 5, "temperature": 10}], suffix="valid-b")
@@ -389,16 +389,16 @@ def test_radio_temperature_summary_ignores_invalid_missing_and_null_temperature(
     result = http_json(temperature_summary_path(format_utc(end_dt)), valid_token())
 
     assert result.status == 200
-    assert result.body["min_wifi_temp_2.4G"] == 20
-    assert result.body["max_wifi_temp_2.4G"] == 30
-    assert result.body["avg_wifi_temp_2.4G"] == 25
-    assert result.body["latest_wifi_temp_2.4G"] == 30
-    assert result.body["min_wifi_temp_5G"] == 0
-    assert result.body["max_wifi_temp_5G"] == 10
-    assert result.body["avg_wifi_temp_5G"] == 5
-    assert result.body["latest_wifi_temp_5G"] == 10
-    assert result.body["observedWindow"] == {
-        "startTime": format_utc(t_valid_a),
+    assert result.body["data"]["min_wifi_temp_2.4G"] == 20
+    assert result.body["data"]["max_wifi_temp_2.4G"] == 30
+    assert result.body["data"]["avg_wifi_temp_2.4G"] == 25
+    assert result.body["data"]["latest_wifi_temp_2.4G"] == 30
+    assert result.body["data"]["min_wifi_temp_5G"] == 0
+    assert result.body["data"]["max_wifi_temp_5G"] == 10
+    assert result.body["data"]["avg_wifi_temp_5G"] == pytest.approx(10 / 3)
+    assert result.body["data"]["latest_wifi_temp_5G"] == 10
+    assert result.body["meta"]["observedWindow"] == {
+        "startTime": format_utc(t_zero_a),
         "endTime": format_utc(t_valid_b),
     }
 
@@ -560,15 +560,15 @@ def test_radio_temperature_summary_reassigned_router_ignores_old_board_samples(s
     )
 
     assert result.status == 200
-    assert result.body["requestedWindow"]["startTime"] == format_utc(req_start)
-    assert result.body["requestedWindow"]["endTime"] == format_utc(end_dt)
+    assert result.body["meta"]["requestedWindow"]["startTime"] == format_utc(req_start)
+    assert result.body["meta"]["requestedWindow"]["endTime"] == format_utc(end_dt)
     # Observed window & statistics should be derived strictly from current board B samples
-    assert result.body["observedWindow"]["startTime"] == format_utc(t1)
-    assert result.body["observedWindow"]["endTime"] == format_utc(t2)
-    assert result.body["min_wifi_temp_2.4G"] == 72.0
-    assert result.body["max_wifi_temp_2.4G"] == 78.0
-    assert result.body["avg_wifi_temp_2.4G"] == 75.0
-    assert result.body["latest_wifi_temp_2.4G"] == 78.0
+    assert result.body["meta"]["observedWindow"]["startTime"] == format_utc(t1)
+    assert result.body["meta"]["observedWindow"]["endTime"] == format_utc(t2)
+    assert result.body["data"]["min_wifi_temp_2.4G"] == 72.0
+    assert result.body["data"]["max_wifi_temp_2.4G"] == 78.0
+    assert result.body["data"]["avg_wifi_temp_2.4G"] == 75.0
+    assert result.body["data"]["latest_wifi_temp_2.4G"] == 78.0
 
 
 def test_radio_temperature_summary_raw_telemetry_json_payload(seeded_board) -> None:
@@ -577,8 +577,8 @@ def test_radio_temperature_summary_raw_telemetry_json_payload(seeded_board) -> N
 
     # Test raw radio telemetry payload structure as ingested from device state messages
     raw_radios = [
-        {"band": 2, "channel": 6, "temperature": 52.5, "temperature_zero_is_unavailable": True},
-        {"band": 5, "channel": 36, "temperature": 0.0, "temperature_zero_is_unavailable": True},
+        {"band": 2, "channel": 6, "temperature": 52.5},
+        {"band": 5, "channel": 36, "temperature": 0.0},
     ]
 
     with db_connection() as connection:
@@ -588,13 +588,14 @@ def test_radio_temperature_summary_raw_telemetry_json_payload(seeded_board) -> N
     result = http_json(temperature_summary_path(format_utc(end_dt)), valid_token())
 
     assert result.status == 200
-    assert result.body["min_wifi_temp_2.4G"] == 52.5
-    assert result.body["max_wifi_temp_2.4G"] == 52.5
-    assert result.body["avg_wifi_temp_2.4G"] == 52.5
-    assert result.body["latest_wifi_temp_2.4G"] == 52.5
-    # 5G 0.0 reading with zero-is-unavailable=True sentinel contract flag should be ignored
-    assert result.body["min_wifi_temp_5G"] is None
-    assert result.body["latest_wifi_temp_5G"] is None
+    assert result.body["data"]["min_wifi_temp_2.4G"] == 52.5
+    assert result.body["data"]["max_wifi_temp_2.4G"] == 52.5
+    assert result.body["data"]["avg_wifi_temp_2.4G"] == 52.5
+    assert result.body["data"]["latest_wifi_temp_2.4G"] == 52.5
+    assert result.body["data"]["min_wifi_temp_5G"] == 0
+    assert result.body["data"]["max_wifi_temp_5G"] == 0
+    assert result.body["data"]["avg_wifi_temp_5G"] == 0
+    assert result.body["data"]["latest_wifi_temp_5G"] == 0
 
 
 def test_radio_temperature_summary_exceeds_max_samples_with_malformed_records(seeded_board) -> None:
@@ -633,5 +634,3 @@ def test_radio_temperature_summary_exceeds_max_samples_with_malformed_records(se
     assert result.status == 400
     assert result.body["error"] == "exceeds_max_samples"
     assert result.body["message"] == "Requested query window exceeds maximum allowed telemetry sample count"
-
-
