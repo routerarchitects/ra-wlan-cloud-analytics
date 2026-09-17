@@ -53,6 +53,14 @@ namespace {
 		return std::fabs(Left - Right) < 0.000001;
 	}
 
+	AnalyticsObjects::RadioTimePoint PersistedRadioFromJson(Poco::JSON::Parser &Parser,
+															const std::string &Json) {
+		auto Obj = Parser.parse(Json).extract<Poco::JSON::Object::Ptr>();
+		AnalyticsObjects::RadioTimePoint RTP;
+		assert(RTP.from_json(Obj));
+		return RTP;
+	}
+
 	void TestAggregatesByBand() {
 		auto Summary = MCP::CalculateRadioTemperatureSummary(
 			{Point(1100, {Radio(2, 62), Radio(5, 56)}),
@@ -255,36 +263,71 @@ namespace {
 
 	void TestPersistedRadioJsonNullableTemperature() {
 		Poco::JSON::Parser Parser;
-		auto NullObj =
-			Parser.parse(R"({"band":2,"temperature":null})").extract<Poco::JSON::Object::Ptr>();
-		AnalyticsObjects::RadioTimePoint NullRTP;
-		assert(NullRTP.from_json(NullObj));
-		assert(!NullRTP.temperature.has_value());
 
-		auto MissingObj =
-			Parser.parse(R"({"band":5})").extract<Poco::JSON::Object::Ptr>();
-		AnalyticsObjects::RadioTimePoint MissingRTP;
-		assert(MissingRTP.from_json(MissingObj));
-		assert(!MissingRTP.temperature.has_value());
+		auto IntegerRTP = PersistedRadioFromJson(Parser, R"({"band":2,"temperature":20})");
+		assert(IntegerRTP.temperature.has_value());
+		assert(NearlyEqual(*IntegerRTP.temperature, 20.0));
 
-		auto ValidObj =
-			Parser.parse(R"({"band":2,"temperature":62.5})").extract<Poco::JSON::Object::Ptr>();
-		AnalyticsObjects::RadioTimePoint ValidRTP;
-		assert(ValidRTP.from_json(ValidObj));
-		assert(ValidRTP.temperature.has_value());
-		assert(*ValidRTP.temperature == 62.5);
+		auto FloatingPointRTP =
+			PersistedRadioFromJson(Parser, R"({"band":2,"temperature":20.5})");
+		assert(FloatingPointRTP.temperature.has_value());
+		assert(NearlyEqual(*FloatingPointRTP.temperature, 20.5));
 
-		auto ZeroObj =
-			Parser.parse(R"({"band":2,"temperature":0})").extract<Poco::JSON::Object::Ptr>();
-		AnalyticsObjects::RadioTimePoint ZeroRTP;
-		assert(ZeroRTP.from_json(ZeroObj));
+		auto ZeroRTP = PersistedRadioFromJson(Parser, R"({"band":2,"temperature":0})");
 		assert(ZeroRTP.temperature.has_value());
 		assert(NearlyEqual(*ZeroRTP.temperature, 0.0));
+
+		auto NegativeRTP = PersistedRadioFromJson(Parser, R"({"band":2,"temperature":-10})");
+		assert(NegativeRTP.temperature.has_value());
+		assert(NearlyEqual(*NegativeRTP.temperature, -10.0));
+
+		auto StringRTP = PersistedRadioFromJson(Parser, R"({"band":2,"temperature":"20"})");
+		assert(!StringRTP.temperature.has_value());
+
+		auto StringZeroRTP = PersistedRadioFromJson(Parser, R"({"band":2,"temperature":"0"})");
+		assert(!StringZeroRTP.temperature.has_value());
+
+		auto TrueRTP = PersistedRadioFromJson(Parser, R"({"band":2,"temperature":true})");
+		assert(!TrueRTP.temperature.has_value());
+
+		auto FalseRTP = PersistedRadioFromJson(Parser, R"({"band":2,"temperature":false})");
+		assert(!FalseRTP.temperature.has_value());
+
+		auto NullRTP = PersistedRadioFromJson(Parser, R"({"band":2,"temperature":null})");
+		assert(!NullRTP.temperature.has_value());
+
+		auto MissingRTP = PersistedRadioFromJson(Parser, R"({"band":5})");
+		assert(!MissingRTP.temperature.has_value());
+
+		auto ObjectRTP = PersistedRadioFromJson(Parser, R"({"band":2,"temperature":{}})");
+		assert(!ObjectRTP.temperature.has_value());
+
+		auto ArrayRTP = PersistedRadioFromJson(Parser, R"({"band":2,"temperature":[]})");
+		assert(!ArrayRTP.temperature.has_value());
 
 		Poco::JSON::Object Serialized;
 		ZeroRTP.to_json(Serialized);
 		assert(Serialized.has("temperature"));
 		assert(Serialized.getValue<double>("temperature") == 0);
+	}
+
+	void TestMalformedPersistedTemperatureTypesDoNotAggregate() {
+		Poco::JSON::Parser Parser;
+		auto Summary = MCP::CalculateRadioTemperatureSummary(
+			{Point(1100, {PersistedRadioFromJson(Parser, R"({"band":2,"temperature":10})")}),
+			 Point(1200, {PersistedRadioFromJson(Parser, R"({"band":2,"temperature":"100"})")}),
+			 Point(1300, {PersistedRadioFromJson(Parser, R"({"band":2,"temperature":true})")}),
+			 Point(1400, {PersistedRadioFromJson(Parser, R"({"band":2,"temperature":20})")}),
+			 Point(1500, {PersistedRadioFromJson(Parser, R"({"band":2,"temperature":0})")}),
+			 Point(1600, {PersistedRadioFromJson(Parser, R"({"band":2,"temperature":"50"})")})},
+			TestWindow());
+
+		assert(Summary.data.min_wifi_temp_2_4G == 0);
+		assert(Summary.data.max_wifi_temp_2_4G == 20);
+		assert(Summary.data.avg_wifi_temp_2_4G == 10);
+		assert(Summary.data.latest_wifi_temp_2_4G == 0);
+		assert(Summary.meta.observedWindow.startTime == "1970-01-01T00:18:20Z");
+		assert(Summary.meta.observedWindow.endTime == "1970-01-01T00:25:00Z");
 	}
 
 	void TestValidTwentyIsPreserved() {
@@ -378,6 +421,7 @@ int main() {
 	TestLatestTemperatureCanBeZero();
 	TestTelemetryJsonParsingToRadioTimePoint();
 	TestPersistedRadioJsonNullableTemperature();
+	TestMalformedPersistedTemperatureTypesDoNotAggregate();
 	TestValidTwentyIsPreserved();
 	TestValidateExpectedSampleCount();
 	TestValidateConfiguredMaxSamples();

@@ -42,7 +42,10 @@ namespace OpenWifi::AnalyticsObjects {
 			try {
 				if (!Obj->has(Field) || Obj->isNull(Field))
 					return std::nullopt;
-				return (double)Obj->get(Field);
+				auto Value = Obj->get(Field);
+				if (!Value.isNumeric() || Value.isBoolean())
+					return std::nullopt;
+				return Value.convert<double>();
 			} catch (...) {
 			}
 			return std::nullopt;

@@ -833,10 +833,10 @@ radios[].temperature
 Required ingestion rule:
 
 ```text
-If the source radio temperature is present and non-null:
+If the source radio temperature is present, non-null, and represented as a JSON number:
   store radios[].temperature = source temperature
 
-If the source radio temperature is missing or null:
+If the source radio temperature is missing, null, or non-numeric:
   omit radios[].temperature or store radios[].temperature = null
 
 Do not synthesize a numeric fallback temperature for missing data.
@@ -897,7 +897,7 @@ For each record:
   parse radio_data
   for each radio in radio_data:
     if radio.band is 2 or 5:
-      if radio.temperature is present, non-null, and -40 <= radio.temperature <= 125:
+      if radio.temperature is a JSON number and -40 <= radio.temperature <= 125:
         add radio.temperature to that band's sample list
 
 For each band:
@@ -917,7 +917,7 @@ A valid temperature sample is:
 
 ```text
 record timestamp is in the requested half-open window
-radio.temperature is present, non-null, and within range [-40, 125]
+radio.temperature is a JSON number within range [-40, 125]
 radio.temperature = 0 is included as a valid sample
 ```
 
