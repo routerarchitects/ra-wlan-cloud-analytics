@@ -123,19 +123,19 @@ namespace {
 		assert(!Obj.has("observedWindow"));
 		assert(!Obj.has("min_wifi_temp_2.4G"));
 
-		auto DataObj = Obj.getObject("data");
-		assert(DataObj->has("min_wifi_temp_2.4G"));
-		assert(DataObj->has("max_wifi_temp_2.4G"));
-		assert(DataObj->has("avg_wifi_temp_2.4G"));
-		assert(DataObj->has("latest_wifi_temp_2.4G"));
-		assert(DataObj->has("min_wifi_temp_5G"));
-		assert(DataObj->has("max_wifi_temp_5G"));
-		assert(DataObj->has("avg_wifi_temp_5G"));
-		assert(DataObj->has("latest_wifi_temp_5G"));
+		auto DataObj = Obj.get("data").extract<Poco::JSON::Object>();
+		assert(DataObj.has("min_wifi_temp_2.4G"));
+		assert(DataObj.has("max_wifi_temp_2.4G"));
+		assert(DataObj.has("avg_wifi_temp_2.4G"));
+		assert(DataObj.has("latest_wifi_temp_2.4G"));
+		assert(DataObj.has("min_wifi_temp_5G"));
+		assert(DataObj.has("max_wifi_temp_5G"));
+		assert(DataObj.has("avg_wifi_temp_5G"));
+		assert(DataObj.has("latest_wifi_temp_5G"));
 
-		auto MetaObj = Obj.getObject("meta");
-		assert(MetaObj->has("requestedWindow"));
-		assert(MetaObj->has("observedWindow"));
+		auto MetaObj = Obj.get("meta").extract<Poco::JSON::Object>();
+		assert(MetaObj.has("requestedWindow"));
+		assert(MetaObj.has("observedWindow"));
 	}
 
 	void TestOnlyOneBand() {
