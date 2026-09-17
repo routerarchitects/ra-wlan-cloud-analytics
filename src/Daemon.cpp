@@ -9,6 +9,7 @@
 #include "Daemon.h"
 
 #include "Poco/Environment.h"
+#include "Poco/Exception.h"
 #include "Poco/Net/SSLManager.h"
 #include "Poco/Util/Application.h"
 #include "Poco/Util/Option.h"

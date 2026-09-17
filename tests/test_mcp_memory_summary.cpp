@@ -7,6 +7,13 @@
 #include <utility>
 #include <vector>
 
+namespace OpenWifi {
+	const std::string &MicroServiceDataDirectory() {
+		static const std::string DataDirectory = "/tmp";
+		return DataDirectory;
+	}
+} // namespace OpenWifi
+
 using namespace OpenWifi;
 
 namespace {
@@ -35,13 +42,11 @@ namespace {
 		return URI.getQueryParameters();
 	}
 
-	AnalyticsObjects::BoardInfo Board(const std::string &BoardId, const std::string &VenueId) {
-		AnalyticsObjects::BoardInfo B;
-		B.info.id = BoardId;
-		AnalyticsObjects::VenueInfo V;
-		V.id = VenueId;
-		V.retention = 86400;
-		B.venueList.push_back(V);
+	BoardVenueRecord Board(const std::string &BoardId, const std::string &VenueId) {
+		BoardVenueRecord B;
+		B.boardId = BoardId;
+		B.venueId = VenueId;
+		B.retention = 86400;
 		return B;
 	}
 
@@ -215,6 +220,7 @@ namespace {
 													  E));
 		assert(R.resolvedBoardId == "board-a");
 		assert(R.resolvedVenueId == "venue-a");
+		assert(R.retention == 86400);
 
 		assert(!RouterIdResolver::ResolveBoardForVenue("venue-b", {Board("board-a", "venue-a")},
 													   R, E));
@@ -225,13 +231,6 @@ namespace {
 			"venue-a", {Board("board-a", "venue-a"), Board("board-b", "venue-a")}, R, E));
 		assert(E.status == Poco::Net::HTTPResponse::HTTP_CONFLICT);
 		assert(E.error == "multiple_boards");
-
-		AnalyticsObjects::BoardInfo MultiVenueBoard = Board("board-c", "venue-a");
-		AnalyticsObjects::VenueInfo ExtraVenue;
-		ExtraVenue.id = "venue-extra";
-		MultiVenueBoard.venueList.push_back(ExtraVenue);
-		assert(!RouterIdResolver::ResolveBoardForVenue("venue-a", {MultiVenueBoard}, R, E));
-		assert(E.status == Poco::Net::HTTPResponse::HTTP_NOT_FOUND);
 
 		assert(!RouterIdResolver::ClassifyProvisioningFailure(
 			Poco::Net::HTTPResponse::HTTP_FORBIDDEN, E));
@@ -346,8 +345,11 @@ namespace {
 			Params("timestampTill=2026-08-21T06:25:00Z&lookbackHours=1.5"), Now, 300, W, E));
 		assert(E.error == "invalid_lookback_hours");
 		assert(!MCP::ValidateWindowQuery(
-			Params("timestampTill=2026-08-21T06:25:00Z&lookbackHours=999999999999999999999"),
-			Now, 300, W, E));
+			Params("timestampTill=2026-08-21T06:25:00Z&lookbackHours=87601"), Now, 300, W, E));
+		assert(E.error == "invalid_lookback_hours");
+		assert(!MCP::ValidateWindowQuery(
+			Params("timestampTill=2026-08-21T06:25:00Z&lookbackHours=2147483648"), Now, 300,
+			W, E));
 		assert(E.error == "invalid_lookback_hours");
 	}
 

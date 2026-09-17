@@ -7,6 +7,8 @@
 #include "framework/OpenWifiTypes.h"
 #include "framework/RESTAPI_utils.h"
 #include "VenueCoordinator.h"
+#include <Poco/JSON/Parser.h>
+#include <limits>
 #include <utility>
 
 template <>
@@ -18,6 +20,38 @@ void ORM::DB<OpenWifi::TimePointDBRecordType, OpenWifi::AnalyticsObjects::Device
 	const OpenWifi::AnalyticsObjects::DeviceTimePoint &In, OpenWifi::TimePointDBRecordType &Out);
 
 namespace OpenWifi {
+	namespace {
+		uint64_t LimitWithOverflowSentinel(uint64_t MaxRecords) {
+			return MaxRecords == std::numeric_limits<uint64_t>::max() ? MaxRecords
+																	  : MaxRecords + 1;
+		}
+
+		bool ParseRadioData(const std::string &Json, const std::string &RecordId,
+							Poco::Logger &Logger,
+							std::vector<AnalyticsObjects::RadioTimePoint> &Radios) {
+			Radios.clear();
+			if (Json.empty())
+				return true;
+			try {
+				Poco::JSON::Parser Parser;
+				auto Array = Parser.parse(Json).extract<Poco::JSON::Array::Ptr>();
+				for (auto const &Item : *Array) {
+					auto Object = Item.extract<Poco::JSON::Object::Ptr>();
+					AnalyticsObjects::RadioTimePoint Radio;
+					if (Radio.from_json(Object))
+						Radios.emplace_back(std::move(Radio));
+				}
+				return true;
+			} catch (const Poco::Exception &E) {
+				Logger.warning("Skipping malformed radio_data in timepoint id=" + RecordId +
+							   ": " + E.displayText());
+			} catch (...) {
+				Logger.warning("Skipping malformed radio_data in timepoint id=" + RecordId);
+			}
+			Radios.clear();
+			return false;
+		}
+	} // namespace
 
 	static ORM::FieldVec TimePoint_Fields{// object info
 										  ORM::Field{"id", 64, true},
@@ -105,7 +139,10 @@ namespace OpenWifi {
 	bool TimePointDB::SelectRecordsBySerial(const std::string &boardId,
 											const std::string &serialNumber, uint64_t startTime,
 											uint64_t endTime,
-											std::vector<AnalyticsObjects::DeviceTimePoint> &Recs) {
+											std::vector<AnalyticsObjects::DeviceTimePoint> &Recs,
+											uint64_t maxRecords, bool *limitExceeded) {
+		if (limitExceeded)
+			*limitExceeded = false;
 		Recs.clear();
 		if (endTime <= startTime)
 			return true;
@@ -113,11 +150,17 @@ namespace OpenWifi {
 		auto WhereClause = fmt::format(
 			" boardId='{}' and serialNumber='{}' and (timestamp >= {}) and (timestamp < {}) ",
 			ORM::Escape(boardId), ORM::Escape(serialNumber), startTime, endTime);
-		const auto Sql = fmt::format("select {} from {} where {} order by timestamp, id ASC",
-									 SelectFields(), TableName_, WhereClause);
+		const auto RangeClause =
+			(maxRecords > 0) ? ComputeRange(0, LimitWithOverflowSentinel(maxRecords)) : "";
+		const auto Sql = fmt::format("select {} from {} where {} order by timestamp, id ASC{}",
+									 SelectFields(), TableName_, WhereClause, RangeClause);
 		std::vector<TimePointDBRecordType> RawRecords;
 		if (!Join(Sql, RawRecords))
 			return false;
+		if (maxRecords > 0 && RawRecords.size() > static_cast<size_t>(maxRecords)) {
+			if (limitExceeded)
+				*limitExceeded = true;
+		}
 		Recs.reserve(RawRecords.size());
 		for (const auto &Row : RawRecords) {
 			AnalyticsObjects::DeviceTimePoint Point;
@@ -129,7 +172,10 @@ namespace OpenWifi {
 
 	bool TimePointDB::SelectResourceRecordsBySerial(
 		const std::string &boardId, const std::string &serialNumber, uint64_t startTime,
-		uint64_t endTime, std::vector<AnalyticsObjects::DeviceTimePoint> &Recs) {
+		uint64_t endTime, std::vector<AnalyticsObjects::DeviceTimePoint> &Recs,
+		uint64_t maxRecords, bool *limitExceeded) {
+		if (limitExceeded)
+			*limitExceeded = false;
 		Recs.clear();
 		if (endTime <= startTime)
 			return true;
@@ -137,12 +183,18 @@ namespace OpenWifi {
 		auto WhereClause = fmt::format(
 			" boardId='{}' and serialNumber='{}' and (timestamp >= {}) and (timestamp < {}) ",
 			ORM::Escape(boardId), ORM::Escape(serialNumber), startTime, endTime);
+		const auto RangeClause =
+			(maxRecords > 0) ? ComputeRange(0, LimitWithOverflowSentinel(maxRecords)) : "";
 		const auto Sql = fmt::format(
-			"select id, timestamp, resource_data from {} where {} order by timestamp, id ASC",
-			TableName_, WhereClause);
+			"select id, timestamp, resource_data from {} where {} order by timestamp, id ASC{}",
+			TableName_, WhereClause, RangeClause);
 		std::vector<TimePointResourceDBRecordType> RawRecords;
 		if (!Join(Sql, RawRecords))
 			return false;
+		if (maxRecords > 0 && RawRecords.size() > static_cast<size_t>(maxRecords)) {
+			if (limitExceeded)
+				*limitExceeded = true;
+		}
 		Recs.reserve(RawRecords.size());
 		for (const auto &Row : RawRecords) {
 			AnalyticsObjects::DeviceTimePoint Point;
@@ -150,6 +202,45 @@ namespace OpenWifi {
 			Point.timestamp = Row.get<1>();
 			Point.resource_data =
 				RESTAPI_utils::to_object<AnalyticsObjects::DeviceResourceTimePoint>(Row.get<2>());
+			Recs.emplace_back(std::move(Point));
+		}
+		return true;
+	}
+
+	bool TimePointDB::SelectRadioRecordsBySerial(const std::string &boardId,
+												 const std::string &serialNumber,
+												 uint64_t startTime, uint64_t endTime,
+												 std::vector<AnalyticsObjects::DeviceTimePoint>
+													 &Recs,
+												 uint64_t maxRecords, bool *limitExceeded) {
+		if (limitExceeded)
+			*limitExceeded = false;
+		Recs.clear();
+		if (endTime <= startTime)
+			return true;
+
+		auto WhereClause = fmt::format(
+			" boardId='{}' and serialNumber='{}' and (timestamp >= {}) and (timestamp < {}) ",
+			ORM::Escape(boardId), ORM::Escape(serialNumber), startTime, endTime);
+		const auto RangeClause =
+			(maxRecords > 0) ? ComputeRange(0, LimitWithOverflowSentinel(maxRecords)) : "";
+		const auto Sql = fmt::format(
+			"select id, timestamp, radio_data from {} where {} order by timestamp, id ASC{}",
+			TableName_, WhereClause, RangeClause);
+		std::vector<TimePointRadioDBRecordType> RawRecords;
+		if (!Join(Sql, RawRecords))
+			return false;
+		if (maxRecords > 0 && RawRecords.size() > static_cast<size_t>(maxRecords)) {
+			if (limitExceeded)
+				*limitExceeded = true;
+		}
+		Recs.reserve(RawRecords.size());
+		for (const auto &Row : RawRecords) {
+			AnalyticsObjects::DeviceTimePoint Point;
+			Point.id = Row.get<0>();
+			Point.timestamp = Row.get<1>();
+			if (!ParseRadioData(Row.get<2>(), Point.id, Logger_, Point.radio_data))
+				continue;
 			Recs.emplace_back(std::move(Point));
 		}
 		return true;

@@ -9,8 +9,30 @@
 #include "framework/utils.h"
 #include "nlohmann/json.hpp"
 #include <mutex>
+#include <optional>
 
 namespace OpenWifi {
+
+	namespace APStats {
+		inline std::optional<double> GetOptionalDoubleJSON(const char *field,
+														   const nlohmann::json &doc) {
+			try {
+				if (!doc.contains(field) || doc[field].is_null())
+					return std::nullopt;
+				if (doc[field].is_number())
+					return doc[field].get<double>();
+			} catch (...) {
+			}
+			return std::nullopt;
+		}
+
+		inline bool ParseRadioTimePoint(const nlohmann::json &radio,
+										const AnalyticsObjects::DeviceInfo &,
+										AnalyticsObjects::RadioTimePoint &RTP) {
+			RTP.temperature = GetOptionalDoubleJSON("temperature", radio);
+			return true;
+		}
+	} // namespace APStats
 
 	struct InterfaceClientEntry {
 		std::vector<std::string> ipv4_addresses;

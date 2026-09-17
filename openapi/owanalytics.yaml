@@ -62,7 +62,7 @@ components:
                 error: lookback_outside_retention
                 message: Requested range is outside the configured monitoring retention window
     TemperatureAnalyticsBadRequest:
-      description: Invalid request or temperature range before the supported migration cutover.
+      description: Invalid request for radio temperature analytics.
       content:
         application/json:
           schema:
@@ -88,10 +88,6 @@ components:
               value:
                 error: lookback_outside_retention
                 message: Requested range is outside the configured monitoring retention window
-            temperatureBeforeCutover:
-              value:
-                error: temperature_range_before_cutover
-                message: The requested summary interval starts before the temperature migration cutover timestamp.
     AvailabilityAnalyticsBadRequest:
       description: Invalid request or availability range before the supported cutover.
       content:
@@ -134,17 +130,6 @@ components:
               value:
                 error: unauthorized
                 message: Missing, invalid, or expired bearer token
-    AnalyticsForbidden:
-      description: Caller has visibility of the resolved router ownership scope, but lacks analytics.gateway_metrics.read permission for the requested operation. Do not use this response for nonexistent routers or routers outside the caller's accessible ownership scope; those cases are normalized to 404 not_found to avoid disclosing router existence.
-      content:
-        application/json:
-          schema:
-            $ref: '#/components/schemas/AnalyticsForbiddenError'
-          examples:
-            forbidden:
-              value:
-                error: forbidden
-                message: Caller lacks analytics.gateway_metrics.read permission for this router scope
     AnalyticsNotFound:
       description: Router was not found, caller cannot access it, or monitoring is not configured for the resolved router scope. Public 404 responses for inventory missing, empty venue, board not configured, and access denied are intentionally collapsed to not_found unless monitoring is not configured.
       content:
@@ -286,14 +271,15 @@ components:
       name: lookbackHours
       description: >
         Number of hours to look back from timestampTill. Must be greater than 0 and less than or equal to
-        maxLookbackHours, where maxLookbackHours is derived from the configured monitoringDuration; the
-        resulting half-open range must fit inside the configured retention window. Handlers must parse the
-        raw HTTP query parameter collection to ensure lookbackHours appears exactly once and reject repeated,
-        empty, fractional, partially numeric, overflowing, zero, and negative values.
+        maxLookbackHours, where maxLookbackHours is bounded by the configured board retention (monitoringDuration / 3600)
+        up to an absolute maximum API safety limit of 87600 hours (10 years); the resulting half-open range must fit inside
+        the configured retention window. Handlers must parse the raw HTTP query parameter collection to ensure lookbackHours
+        appears exactly once and reject repeated, empty, fractional, partially numeric, overflowing, zero, and negative values.
       schema:
         type: integer
         format: int32
         minimum: 1
+        maximum: 87600
         example: 24
       required: true
   schemas:
@@ -438,6 +424,8 @@ components:
         serialNumber:
           type: string
         deviceType:
+          type: string
+        platform:
           type: string
         lastHealth:
           type: integer
@@ -778,14 +766,10 @@ components:
           type: integer
           format: int64
         temperature:
-          type: integer
-          format: int64
-          description: Legacy Wi-Fi radio temperature telemetry in degrees Celsius. This field MUST NOT be used as the source for radio-temperature-summary; that endpoint aggregates wifi_temp according to the post-cutover telemetry contract.
-        wifi_temp:
-          type: integer
-          format: int64
+          type: number
+          format: double
           nullable: true
-          description: Wi-Fi radio temperature in degrees Celsius. A reported 0°C value is valid unless the persisted/resolved telemetry contract has wifiTempZeroIsUnavailable = true; when no contract is available, the default is false.
+          description: Wi-Fi radio temperature in degrees Celsius. Null or missing values are ignored by radio-temperature-summary aggregation. A reported 0°C value is a valid numeric temperature reading and must not be interpreted as unavailable or missing.
         noise:
           type: integer
           format: int64
@@ -1082,7 +1066,6 @@ components:
             - invalid_lookback_hours
             - invalid_query_parameter
             - lookback_outside_retention
-            - temperature_range_before_cutover
         message:
           type: string
 
@@ -1114,19 +1097,6 @@ components:
           type: string
           enum:
             - unauthorized
-        message:
-          type: string
-
-    AnalyticsForbiddenError:
-      type: object
-      required:
-        - error
-        - message
-      properties:
-        error:
-          type: string
-          enum:
-            - forbidden
         message:
           type: string
 
@@ -1284,34 +1254,50 @@ components:
     GatewayWifiTemperatureSummary:
       type: object
       description: >
-        Wi-Fi radio temperature summary. The 2.4 GHz JSON property names intentionally use
-        the dotted `2.4G` suffix to match the MCP API wire contract; clients should treat
+        Wi-Fi radio temperature summary envelope. requestedWindow and observedWindow are returned
+        in meta. Temperature statistics are returned in data.
+      required:
+        - data
+        - meta
+      properties:
+        meta:
+          type: object
+          required:
+            - requestedWindow
+            - observedWindow
+          properties:
+            requestedWindow:
+              $ref: '#/components/schemas/RequestedWindow'
+            observedWindow:
+              $ref: '#/components/schemas/ObservedWindow'
+        data:
+          $ref: '#/components/schemas/GatewayWifiTemperatureSummaryData'
+
+    GatewayWifiTemperatureSummaryData:
+      type: object
+      description: >
+        Wi-Fi radio temperature summary metrics. The 2.4 GHz JSON property names intentionally
+        use the dotted `2.4G` suffix to match the MCP API wire contract; clients should treat
         these as literal JSON keys, not property paths. Temperature statistics are arithmetic
         aggregations of valid radio temperature samples whose timestamps fall within the
         requested half-open window. They are not time-weighted. For gateways with multiple
         radios in the same band, all valid samples for that band are combined directly rather
         than averaging each radio first. Null applies independently per band: a band returns
-        null min, max, and average values when that band has no valid temperature samples,
+        null min, max, average, and latest values when that band has no valid temperature samples,
         even if another band has samples. A valid radio temperature sample is a present,
         finite Celsius value where -40 <= temperature <= 125. A reported 0°C value is valid
-        unless the persisted/resolved telemetry contract has wifiTempZeroIsUnavailable = true;
-        when no contract is available, the default is false. Missing, null, non-numeric, NaN,
-        infinite, conditionally unavailable 0°C values, 255, and out-of-range values are
-        excluded from aggregation.
+        and participates in aggregation. Missing, null, non-numeric, NaN, infinite, 255, and
+        out-of-range values are excluded from aggregation.
       required:
-        - requestedWindow
-        - observedWindow
         - min_wifi_temp_2.4G
         - max_wifi_temp_2.4G
         - avg_wifi_temp_2.4G
+        - latest_wifi_temp_2.4G
         - min_wifi_temp_5G
         - max_wifi_temp_5G
         - avg_wifi_temp_5G
+        - latest_wifi_temp_5G
       properties:
-        requestedWindow:
-          $ref: '#/components/schemas/RequestedWindow'
-        observedWindow:
-          $ref: '#/components/schemas/ObservedWindow'
         min_wifi_temp_2.4G:
           type: number
           format: double
@@ -1333,6 +1319,13 @@ components:
           maximum: 125
           nullable: true
           description: Arithmetic average of reported 2.4 GHz Wi-Fi radio temperature samples in degrees Celsius for the effective aggregation window. Literal MCP JSON key; dotted suffix is required for compatibility.
+        latest_wifi_temp_2.4G:
+          type: number
+          format: double
+          minimum: -40
+          maximum: 125
+          nullable: true
+          description: Latest valid 2.4 GHz Wi-Fi radio temperature sample in degrees Celsius for the effective aggregation window. Literal MCP JSON key; dotted suffix is required for compatibility.
         min_wifi_temp_5G:
           type: number
           format: double
@@ -1354,6 +1347,13 @@ components:
           maximum: 125
           nullable: true
           description: Arithmetic average of reported 5 GHz Wi-Fi radio temperature samples in degrees Celsius for the effective aggregation window.
+        latest_wifi_temp_5G:
+          type: number
+          format: double
+          minimum: -40
+          maximum: 125
+          nullable: true
+          description: Latest valid 5 GHz Wi-Fi radio temperature sample in degrees Celsius for the effective aggregation window.
 
     ClientBandwidthConsumption:
       type: object
@@ -1975,8 +1975,6 @@ paths:
           $ref: '#/components/responses/CommonAnalyticsBadRequest'
         401:
           $ref: '#/components/responses/AnalyticsUnauthorized'
-        403:
-          $ref: '#/components/responses/AnalyticsForbidden'
         404:
           $ref: '#/components/responses/AnalyticsNotFound'
         409:
@@ -2008,24 +2006,26 @@ paths:
               examples:
                 withSamples:
                   value:
-                    requestedWindow:
-                      startTime: "2026-07-26T12:00:00Z"
-                      endTime: "2026-07-27T12:00:00Z"
-                    observedWindow:
-                      startTime: "2026-07-26T12:04:00Z"
-                      endTime: "2026-07-27T11:55:00Z"
-                    min_wifi_temp_2.4G: 62
-                    max_wifi_temp_2.4G: 70
-                    avg_wifi_temp_2.4G: 66.64
-                    min_wifi_temp_5G: 56
-                    max_wifi_temp_5G: 65
-                    avg_wifi_temp_5G: 60.38
+                    meta:
+                      requestedWindow:
+                        startTime: "2026-07-26T12:00:00Z"
+                        endTime: "2026-07-27T12:00:00Z"
+                      observedWindow:
+                        startTime: "2026-07-26T12:04:00Z"
+                        endTime: "2026-07-27T11:55:00Z"
+                    data:
+                      min_wifi_temp_2.4G: 62
+                      max_wifi_temp_2.4G: 70
+                      avg_wifi_temp_2.4G: 66.64
+                      latest_wifi_temp_2.4G: 68
+                      min_wifi_temp_5G: 56
+                      max_wifi_temp_5G: 65
+                      avg_wifi_temp_5G: 60.38
+                      latest_wifi_temp_5G: 60
         400:
           $ref: '#/components/responses/TemperatureAnalyticsBadRequest'
         401:
           $ref: '#/components/responses/AnalyticsUnauthorized'
-        403:
-          $ref: '#/components/responses/AnalyticsForbidden'
         404:
           $ref: '#/components/responses/AnalyticsNotFound'
         409:
@@ -2079,8 +2079,6 @@ paths:
           $ref: '#/components/responses/CommonAnalyticsBadRequest'
         401:
           $ref: '#/components/responses/AnalyticsUnauthorized'
-        403:
-          $ref: '#/components/responses/AnalyticsForbidden'
         404:
           $ref: '#/components/responses/AnalyticsNotFound'
         409:
@@ -2142,8 +2140,6 @@ paths:
           $ref: '#/components/responses/CommonAnalyticsBadRequest'
         401:
           $ref: '#/components/responses/AnalyticsUnauthorized'
-        403:
-          $ref: '#/components/responses/AnalyticsForbidden'
         404:
           $ref: '#/components/responses/AnalyticsNotFound'
         409:
@@ -2205,8 +2201,6 @@ paths:
           $ref: '#/components/responses/AvailabilityAnalyticsBadRequest'
         401:
           $ref: '#/components/responses/AnalyticsUnauthorized'
-        403:
-          $ref: '#/components/responses/AnalyticsForbidden'
         404:
           $ref: '#/components/responses/AnalyticsNotFound'
         409:

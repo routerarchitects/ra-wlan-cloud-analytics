@@ -156,6 +156,7 @@ configProperties:
   openwifi.kafka.ssl.certificate.location: ""
   openwifi.kafka.ssl.key.location: ""
   openwifi.kafka.ssl.key.password: ""
+  mcp.max_samples: 10000
   # Storage
   storage.type: sqlite # (sqlite|postgresql|mysql|odbc)
   ## SQLite

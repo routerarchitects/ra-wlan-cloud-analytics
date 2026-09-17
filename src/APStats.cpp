@@ -7,7 +7,10 @@
 #include "WifiClientCache.h"
 #include "dict_ssid.h"
 #include "fmt/format.h"
+#include "framework/MicroServiceFuncs.h"
 #include "framework/utils.h"
+#include <Poco/String.h>
+#include <Poco/StringTokenizer.h>
 #include <optional>
 
 namespace OpenWifi {
@@ -58,6 +61,8 @@ namespace OpenWifi {
 		}
 		return std::nullopt;
 	}
+
+
 
 	inline double safe_div(uint64_t a, uint64_t b) {
 		if (b == 0)
@@ -181,7 +186,7 @@ namespace OpenWifi {
 						GetJSON("tx_power", radio, RTP.tx_power, (uint64_t)0);
 						GetJSON("active_ms", radio, RTP.active_ms, (uint64_t)0);
 						GetJSON("channel", radio, RTP.channel, (uint64_t)0);
-						GetJSON("temperature", radio, RTP.temperature, (int64_t)20);
+						APStats::ParseRadioTimePoint(radio, DI_, RTP);
 						if (radio.contains("channel_width") && !radio["channel_width"].is_null()) {
 							if (radio["channel_width"].is_string()) {
 								std::string C = radio["channel_width"];
@@ -192,8 +197,6 @@ namespace OpenWifi {
 								RTP.channel_width = 20;
 							}
 						}
-						if (RTP.temperature == 0)
-							RTP.temperature = 20;
 						GetJSON("noise", radio, RTP.noise, (int64_t)-90);
 						if (RTP.noise == 0)
 							RTP.noise = -90;
@@ -604,6 +607,7 @@ namespace OpenWifi {
 				DI_.lastPing = Utils::Now();
 				auto ping = (*Connection)["ping"];
 				GetJSON("compatible", ping, DI_.deviceType, std::string{});
+				GetJSON("platform", ping, DI_.platform, std::string{});
 				GetJSON("connectionIp", ping, DI_.connectionIp, std::string{});
 				GetJSON("locale", ping, DI_.locale, std::string{});
 				GetJSON("timestamp", ping, DI_.lastConnection, (uint64_t)Utils::Now());
@@ -626,6 +630,8 @@ namespace OpenWifi {
 				DI_.connected = true;
 				DI_.lastConnection = Utils::Now();
 				auto ConnectionData = (*Connection)["capabilities"];
+				GetJSON("compatible", ConnectionData, DI_.deviceType, std::string{});
+				GetJSON("platform", ConnectionData, DI_.platform, std::string{});
 				if (ConnectionData.contains("firmware")) {
 					auto NewFirmware = ConnectionData["firmware"];
 					if (NewFirmware != DI_.lastFirmware) {
