@@ -314,8 +314,12 @@ namespace OpenWifi {
 								AnalyticsObjects::UETimePoint TP;
 								GetJSON("station", association, TP.station, std::string{});
 								GetJSON("rssi", association, TP.rssi, (int64_t)0);
-								GetJSON("tx_bytes", association, TP.tx_bytes, (uint64_t)0);
-								GetJSON("rx_bytes", association, TP.rx_bytes, (uint64_t)0);
+								auto TxBytes = GetOptionalUInt64JSON("tx_bytes", association);
+								TP.tx_bytes_present = TxBytes.has_value();
+								TP.tx_bytes = TxBytes.value_or(0);
+								auto RxBytes = GetOptionalUInt64JSON("rx_bytes", association);
+								TP.rx_bytes_present = RxBytes.has_value();
+								TP.rx_bytes = RxBytes.value_or(0);
 								GetJSON("tx_duration", association, TP.tx_duration, (uint64_t)0);
 								GetJSON("rx_packets", association, TP.rx_packets, (uint64_t)0);
 								GetJSON("tx_packets", association, TP.tx_packets, (uint64_t)0);

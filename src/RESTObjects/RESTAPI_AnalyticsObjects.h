@@ -121,6 +121,8 @@ namespace OpenWifi {
 			int64_t rssi = 0;
 			uint64_t tx_bytes = 0, rx_bytes = 0, tx_duration = 0, rx_packets = 0, tx_packets = 0,
 					 tx_retries = 0, tx_failed = 0, connected = 0, inactive = 0;
+			bool tx_bytes_present = false;
+			bool rx_bytes_present = false;
 
 			double tx_bytes_bw = 0.0, rx_bytes_bw = 0.0, tx_packets_bw = 0.0, rx_packets_bw = 0.0,
 				   tx_failed_pct = 0.0, tx_retries_pct = 0.0, tx_duration_pct = 0.0;

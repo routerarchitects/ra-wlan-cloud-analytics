@@ -5,7 +5,7 @@
 #include "StorageService.h"
 #include "framework/MicroServiceFuncs.h"
 
-#include <limits>
+#include <optional>
 #include <vector>
 
 namespace OpenWifi {
@@ -61,22 +61,11 @@ namespace OpenWifi {
 		if (!MCP::ValidateExpectedSampleCount(Window, Resolved.interval, MaxSamples, Error))
 			return MCP::SendError(*this, Error);
 
-		auto BoundaryInterval = Resolved.interval > 0 ? Resolved.interval : static_cast<uint64_t>(60);
-		auto QueryStart =
-			Window.startTime > BoundaryInterval ? Window.startTime - BoundaryInterval : 0;
-		auto QueryEnd = Window.endTime;
-		if (std::numeric_limits<uint64_t>::max() - QueryEnd >= BoundaryInterval)
-			QueryEnd += BoundaryInterval;
-
-		uint64_t QueryMaxSamples = MaxSamples;
-		if (QueryMaxSamples <= std::numeric_limits<uint64_t>::max() - 2)
-			QueryMaxSamples += 2;
-
 		std::vector<AnalyticsObjects::DeviceTimePoint> Records;
 		bool LimitExceeded = false;
 		if (!StorageService()->TimePointsDB().SelectRecordsBySerial(
-				Resolved.resolvedBoardId, routerId, QueryStart, QueryEnd, Records, QueryMaxSamples,
-				&LimitExceeded)) {
+				Resolved.resolvedBoardId, routerId, Window.startTime, Window.endTime, Records,
+				MaxSamples, &LimitExceeded)) {
 			poco_error(Logger(), "Failed to query timepoints for bandwidth consumption summary");
 			MCP::SetError(Error, Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR,
 						  "wifi_client_usage_query_failed",
@@ -88,6 +77,33 @@ namespace OpenWifi {
 						  "Requested query window exceeds maximum allowed telemetry sample count");
 			return MCP::SendError(*this, Error);
 		}
+
+		auto Now = Utils::Now();
+		auto RetentionStart = Now > Resolved.retention ? Now - Resolved.retention : 0;
+		std::optional<AnalyticsObjects::DeviceTimePoint> StartBoundary;
+		if (!StorageService()->TimePointsDB().SelectLatestRecordAtOrBeforeBySerial(
+				Resolved.resolvedBoardId, routerId, RetentionStart, Window.startTime,
+				StartBoundary)) {
+			poco_error(Logger(), "Failed to query start boundary for bandwidth consumption summary");
+			MCP::SetError(Error, Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR,
+						  "wifi_client_usage_query_failed",
+						  "Unable to retrieve Wi-Fi client usage history");
+			return MCP::SendError(*this, Error);
+		}
+		if (StartBoundary)
+			Records.push_back(std::move(*StartBoundary));
+
+		std::optional<AnalyticsObjects::DeviceTimePoint> EndBoundary;
+		if (!StorageService()->TimePointsDB().SelectEarliestRecordAtOrAfterBySerial(
+				Resolved.resolvedBoardId, routerId, Window.endTime, EndBoundary)) {
+			poco_error(Logger(), "Failed to query end boundary for bandwidth consumption summary");
+			MCP::SetError(Error, Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR,
+						  "wifi_client_usage_query_failed",
+						  "Unable to retrieve Wi-Fi client usage history");
+			return MCP::SendError(*this, Error);
+		}
+		if (EndBoundary)
+			Records.push_back(std::move(*EndBoundary));
 
 		auto Summary = MCP::CalculateBandwidthConsumptionSummary(Records, Window);
 		return Object(Summary);

@@ -596,9 +596,15 @@ namespace OpenWifi {
 			const Window &Requested) {
 			struct Sample {
 				uint64_t timestamp = 0;
-				uint64_t rx = 0;
-				uint64_t tx = 0;
+				std::optional<uint64_t> rx;
+				std::optional<uint64_t> tx;
 				std::string id;
+				bool inWindow = false;
+			};
+
+			struct CounterSample {
+				uint64_t timestamp = 0;
+				uint64_t value = 0;
 				bool inWindow = false;
 			};
 
@@ -643,8 +649,10 @@ namespace OpenWifi {
 
 						Sample S;
 						S.timestamp = Record.timestamp;
-						S.rx = Assoc.rx_bytes;
-						S.tx = Assoc.tx_bytes;
+						if (Assoc.rx_bytes_present)
+							S.rx = Assoc.rx_bytes;
+						if (Assoc.tx_bytes_present)
+							S.tx = Assoc.tx_bytes;
 						S.id = Record.id;
 						S.inWindow = TimestampInHalfOpenWindow(Record.timestamp, Requested);
 						Streams[Key].push_back(std::move(S));
@@ -654,10 +662,11 @@ namespace OpenWifi {
 
 			std::map<std::string, ClientTotals> TotalsByMac;
 			for (auto &[Key, Samples] : Streams) {
-				std::sort(Samples.begin(), Samples.end(), [](const Sample &A, const Sample &B) {
-					return std::tie(A.timestamp, A.id, A.rx, A.tx) <
-						   std::tie(B.timestamp, B.id, B.rx, B.tx);
-				});
+				std::sort(Samples.begin(), Samples.end(),
+						  [](const Sample &A, const Sample &B) {
+							  return std::tie(A.timestamp, A.id, A.rx, A.tx) <
+									 std::tie(B.timestamp, B.id, B.rx, B.tx);
+						  });
 
 				std::vector<Sample> Deduped;
 				for (size_t i = 0; i < Samples.size();) {
@@ -685,33 +694,46 @@ namespace OpenWifi {
 				if (Deduped.size() < 2)
 					continue;
 
-				for (size_t i = 1; i < Deduped.size(); ++i) {
-					const auto &Previous = Deduped[i - 1];
-					const auto &Current = Deduped[i];
-					if (!Previous.inWindow && !Current.inWindow)
-						continue;
+				auto MarkObservedSegment = [&Totals](uint64_t Start, uint64_t End) {
+					if (!Totals.hasCalculableSegment) {
+						Totals.observedStart = Start;
+						Totals.observedEnd = End;
+						Totals.hasCalculableSegment = true;
+					} else {
+						Totals.observedStart = std::min(Totals.observedStart, Start);
+						Totals.observedEnd = std::max(Totals.observedEnd, End);
+					}
+				};
 
-					bool SegmentUsable = false;
-					if (Current.rx >= Previous.rx) {
-						Totals.rx = SaturatingAdd(Totals.rx, Current.rx - Previous.rx);
-						SegmentUsable = true;
-					}
-					if (Current.tx >= Previous.tx) {
-						Totals.tx = SaturatingAdd(Totals.tx, Current.tx - Previous.tx);
-						SegmentUsable = true;
+				auto ApplyCounterSample = [&MarkObservedSegment](
+											  std::optional<CounterSample> &Previous,
+											  const Sample &Current,
+											  const std::optional<uint64_t> &CurrentValue,
+											  uint64_t &Total) {
+					if (!CurrentValue)
+						return;
+
+					CounterSample CurrentCounter{Current.timestamp, *CurrentValue,
+												 Current.inWindow};
+					if (!Previous) {
+						Previous = CurrentCounter;
+						return;
 					}
 
-					if (SegmentUsable) {
-						if (!Totals.hasCalculableSegment) {
-							Totals.observedStart = Previous.timestamp;
-							Totals.observedEnd = Current.timestamp;
-							Totals.hasCalculableSegment = true;
-						} else {
-							Totals.observedStart =
-								std::min(Totals.observedStart, Previous.timestamp);
-							Totals.observedEnd = std::max(Totals.observedEnd, Current.timestamp);
-						}
+					if ((Previous->inWindow || CurrentCounter.inWindow) &&
+						CurrentCounter.value >= Previous->value) {
+						Total = SaturatingAdd(Total, CurrentCounter.value - Previous->value);
+						MarkObservedSegment(Previous->timestamp, CurrentCounter.timestamp);
 					}
+
+					Previous = CurrentCounter;
+				};
+
+				std::optional<CounterSample> PreviousRx;
+				std::optional<CounterSample> PreviousTx;
+				for (const auto &Current : Deduped) {
+					ApplyCounterSample(PreviousRx, Current, Current.rx, Totals.rx);
+					ApplyCounterSample(PreviousTx, Current, Current.tx, Totals.tx);
 				}
 			}
 

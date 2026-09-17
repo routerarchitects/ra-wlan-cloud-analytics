@@ -20,13 +20,20 @@ namespace {
 		return W;
 	}
 
-	AnalyticsObjects::UETimePoint Assoc(const std::string &Station, uint64_t Rx,
-										uint64_t Tx) {
+	AnalyticsObjects::UETimePoint Assoc(const std::string &Station, std::optional<uint64_t> Rx,
+										std::optional<uint64_t> Tx) {
 		AnalyticsObjects::UETimePoint UE;
 		UE.station = Station;
-		UE.rx_bytes = Rx;
-		UE.tx_bytes = Tx;
+		UE.rx_bytes_present = Rx.has_value();
+		UE.rx_bytes = Rx.value_or(0);
+		UE.tx_bytes_present = Tx.has_value();
+		UE.tx_bytes = Tx.value_or(0);
 		return UE;
+	}
+
+	AnalyticsObjects::UETimePoint Assoc(const std::string &Station, uint64_t Rx,
+										uint64_t Tx) {
+		return Assoc(Station, std::optional<uint64_t>(Rx), std::optional<uint64_t>(Tx));
 	}
 
 	AnalyticsObjects::DeviceTimePoint Point(
@@ -158,6 +165,101 @@ namespace {
 		assert(Summary.data.items[1].mac == "aa:bb:cc:dd:ee:04");
 	}
 
+	void TestPreviousMissingDirectionDoesNotCreateTraffic() {
+		auto Summary = MCP::CalculateBandwidthConsumptionSummary(
+			{Point(1100,
+				   {Assoc("aa:bb:cc:dd:ee:07", std::optional<uint64_t>(100),
+						  std::nullopt)}),
+			 Point(1200,
+				   {Assoc("aa:bb:cc:dd:ee:07", std::optional<uint64_t>(300),
+						  std::optional<uint64_t>(500))})},
+			TestWindow());
+
+		const auto *Item = FindItem(Summary, "aa:bb:cc:dd:ee:07");
+		assert(Item != nullptr);
+		assert(Item->rx_bytes == 200);
+		assert(Item->tx_bytes == 0);
+		assert(Item->total_bytes == 200);
+	}
+
+	void TestPreviousMissingRxDoesNotCreateTraffic() {
+		auto Summary = MCP::CalculateBandwidthConsumptionSummary(
+			{Point(1100,
+				   {Assoc("aa:bb:cc:dd:ee:08", std::nullopt,
+						  std::optional<uint64_t>(100))}),
+			 Point(1200,
+				   {Assoc("aa:bb:cc:dd:ee:08", std::optional<uint64_t>(500),
+						  std::optional<uint64_t>(300))})},
+			TestWindow());
+
+		const auto *Item = FindItem(Summary, "aa:bb:cc:dd:ee:08");
+		assert(Item != nullptr);
+		assert(Item->rx_bytes == 0);
+		assert(Item->tx_bytes == 200);
+		assert(Item->total_bytes == 200);
+	}
+
+	void TestMissingCounterBetweenValidSamplesIsSkippedForThatDirection() {
+		auto Summary = MCP::CalculateBandwidthConsumptionSummary(
+			{Point(1100,
+				   {Assoc("aa:bb:cc:dd:ee:09", std::optional<uint64_t>(100),
+						  std::optional<uint64_t>(100))}),
+			 Point(1200,
+				   {Assoc("aa:bb:cc:dd:ee:09", std::nullopt,
+						  std::optional<uint64_t>(200))}),
+			 Point(1300,
+				   {Assoc("aa:bb:cc:dd:ee:09", std::optional<uint64_t>(400),
+						  std::optional<uint64_t>(300))})},
+			TestWindow());
+
+		const auto *Item = FindItem(Summary, "aa:bb:cc:dd:ee:09");
+		assert(Item != nullptr);
+		assert(Item->rx_bytes == 300);
+		assert(Item->tx_bytes == 200);
+		assert(Item->total_bytes == 500);
+	}
+
+	void TestSingleDirectionCountersAreCalculatedIndependently() {
+		auto RxOnly = MCP::CalculateBandwidthConsumptionSummary(
+			{Point(1100,
+				   {Assoc("aa:bb:cc:dd:ee:0a", std::optional<uint64_t>(100),
+						  std::nullopt)}),
+			 Point(1200,
+				   {Assoc("aa:bb:cc:dd:ee:0a", std::optional<uint64_t>(600),
+						  std::nullopt)})},
+			TestWindow());
+		const auto *RxOnlyItem = FindItem(RxOnly, "aa:bb:cc:dd:ee:0a");
+		assert(RxOnlyItem != nullptr);
+		assert(RxOnlyItem->rx_bytes == 500);
+		assert(RxOnlyItem->tx_bytes == 0);
+
+		auto TxOnly = MCP::CalculateBandwidthConsumptionSummary(
+			{Point(1100,
+				   {Assoc("aa:bb:cc:dd:ee:0b", std::nullopt,
+						  std::optional<uint64_t>(100))}),
+			 Point(1200,
+				   {Assoc("aa:bb:cc:dd:ee:0b", std::nullopt,
+						  std::optional<uint64_t>(600))})},
+			TestWindow());
+		const auto *TxOnlyItem = FindItem(TxOnly, "aa:bb:cc:dd:ee:0b");
+		assert(TxOnlyItem != nullptr);
+		assert(TxOnlyItem->rx_bytes == 0);
+		assert(TxOnlyItem->tx_bytes == 500);
+	}
+
+	void TestExplicitZeroCounterIsValid() {
+		auto Summary = MCP::CalculateBandwidthConsumptionSummary(
+			{Point(1100, {Assoc("aa:bb:cc:dd:ee:0c", 0, 0)}),
+			 Point(1200, {Assoc("aa:bb:cc:dd:ee:0c", 500, 250)})},
+			TestWindow());
+
+		const auto *Item = FindItem(Summary, "aa:bb:cc:dd:ee:0c");
+		assert(Item != nullptr);
+		assert(Item->rx_bytes == 500);
+		assert(Item->tx_bytes == 250);
+		assert(Item->total_bytes == 750);
+	}
+
 	void TestSerializationShape() {
 		auto Summary = MCP::CalculateBandwidthConsumptionSummary(
 			{Point(1000, {Assoc("aa:bb:cc:dd:ee:06", 100, 100)}),
@@ -197,6 +299,11 @@ int main() {
 	TestOutsideWindowOnlyClientIsExcluded();
 	TestStreamChangesAreCalculatedIndependentlyAndAggregatedByMac();
 	TestSortingAndInvalidMacFiltering();
+	TestPreviousMissingDirectionDoesNotCreateTraffic();
+	TestPreviousMissingRxDoesNotCreateTraffic();
+	TestMissingCounterBetweenValidSamplesIsSkippedForThatDirection();
+	TestSingleDirectionCountersAreCalculatedIndependently();
+	TestExplicitZeroCounterIsValid();
 	TestSerializationShape();
 
 	std::cout << "test_mcp_bandwidth_consumption passed\n";

@@ -44,6 +44,7 @@ DEFAULT_BOARD_ID = "board-test-01"
 DEFAULT_VENUE_ID = "venue-test-01"
 OTHER_BOARD_ID = "usage-other-board"
 DEFAULT_VALID_TOKEN = "root-token"
+MISSING = object()
 
 
 def env_or_skip(name: str) -> str:
@@ -188,8 +189,17 @@ def seed_board(cursor, *, board: str | None = None, venue: str | None = None, re
     )
 
 
-def assoc(station: str, rx_bytes: int, tx_bytes: int) -> dict[str, Any]:
-    return {"station": station, "rx_bytes": rx_bytes, "tx_bytes": tx_bytes}
+def assoc(
+    station: str,
+    rx_bytes: int | None | object = MISSING,
+    tx_bytes: int | None | object = MISSING,
+) -> dict[str, Any]:
+    item: dict[str, Any] = {"station": station}
+    if rx_bytes is not MISSING:
+        item["rx_bytes"] = rx_bytes
+    if tx_bytes is not MISSING:
+        item["tx_bytes"] = tx_bytes
+    return item
 
 
 def ssid(
@@ -307,7 +317,7 @@ def test_usage_summary_calculates_cumulative_counter_deltas(seeded_board) -> Non
 def test_usage_summary_uses_boundary_samples_and_filters_gateway_scope(seeded_board) -> None:
     end_dt = utc_now() - timedelta(seconds=30)
     start_dt = end_dt - timedelta(hours=1)
-    baseline_dt = start_dt - timedelta(seconds=30)
+    baseline_dt = start_dt - timedelta(minutes=9)
     mid_dt = start_dt + timedelta(minutes=30)
     end_boundary_dt = end_dt
 
@@ -346,6 +356,69 @@ def test_usage_summary_uses_boundary_samples_and_filters_gateway_scope(seeded_bo
     assert item["data_consume_rx"] == "2.00 MB"
     assert item["data_consume_tx"] == "2.00 MB"
     assert item["total_data_usage"] == "4.00 MB"
+
+
+def test_usage_summary_preserves_missing_and_null_counter_semantics(seeded_board) -> None:
+    end_dt = utc_now() - timedelta(seconds=30)
+    start_dt = end_dt - timedelta(hours=1)
+    t1 = start_dt + timedelta(minutes=10)
+    t2 = start_dt + timedelta(minutes=20)
+    t3 = start_dt + timedelta(minutes=30)
+
+    with db_connection() as connection:
+        with connection.cursor() as cursor:
+            insert_timepoint(
+                cursor,
+                format_utc(t1),
+                [
+                    ssid(
+                        [
+                            assoc("aa:bb:cc:dd:ee:20", 100),
+                            assoc("aa:bb:cc:dd:ee:21", None, 100),
+                            assoc("aa:bb:cc:dd:ee:22", 100, 100),
+                            assoc("aa:bb:cc:dd:ee:23", 0, 0),
+                        ]
+                    )
+                ],
+            )
+            insert_timepoint(
+                cursor,
+                format_utc(t2),
+                [
+                    ssid(
+                        [
+                            assoc("aa:bb:cc:dd:ee:20", 300, 500),
+                            assoc("aa:bb:cc:dd:ee:21", 500, 300),
+                            assoc("aa:bb:cc:dd:ee:22", tx_bytes=200),
+                            assoc("aa:bb:cc:dd:ee:23", 500, 250),
+                        ]
+                    )
+                ],
+            )
+            insert_timepoint(
+                cursor,
+                format_utc(t3),
+                [
+                    ssid(
+                        [
+                            assoc("aa:bb:cc:dd:ee:22", 400, 300),
+                        ]
+                    )
+                ],
+            )
+
+    result = http_json(usage_summary_path(format_utc(end_dt)), valid_token())
+
+    assert result.status == 200
+    items = {item["mac"]: item for item in result.body["data"]["items"]}
+    assert items["aa:bb:cc:dd:ee:20"]["rx_bytes"] == 200
+    assert items["aa:bb:cc:dd:ee:20"]["tx_bytes"] == 0
+    assert items["aa:bb:cc:dd:ee:21"]["rx_bytes"] == 0
+    assert items["aa:bb:cc:dd:ee:21"]["tx_bytes"] == 200
+    assert items["aa:bb:cc:dd:ee:22"]["rx_bytes"] == 300
+    assert items["aa:bb:cc:dd:ee:22"]["tx_bytes"] == 200
+    assert items["aa:bb:cc:dd:ee:23"]["rx_bytes"] == 500
+    assert items["aa:bb:cc:dd:ee:23"]["tx_bytes"] == 250
 
 
 def test_usage_summary_handles_resets_and_stream_changes_without_overcounting(seeded_board) -> None:

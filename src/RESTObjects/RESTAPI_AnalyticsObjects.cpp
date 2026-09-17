@@ -214,8 +214,10 @@ bool Fingerprint::from_json(const Poco::JSON::Object::Ptr &Obj) {
 	void UETimePoint::to_json(Poco::JSON::Object &Obj) const {
 		field_to_json(Obj, "station", station);
 		field_to_json(Obj, "rssi", rssi);
-		field_to_json(Obj, "tx_bytes", tx_bytes);
-		field_to_json(Obj, "rx_bytes", rx_bytes);
+		if (tx_bytes_present)
+			field_to_json(Obj, "tx_bytes", tx_bytes);
+		if (rx_bytes_present)
+			field_to_json(Obj, "rx_bytes", rx_bytes);
 		field_to_json(Obj, "tx_duration", tx_duration);
 		field_to_json(Obj, "rx_packets", rx_packets);
 		field_to_json(Obj, "tx_packets", tx_packets);
@@ -249,8 +251,12 @@ bool Fingerprint::from_json(const Poco::JSON::Object::Ptr &Obj) {
 		try {
 			field_from_json(Obj, "station", station);
 			field_from_json(Obj, "rssi", rssi);
-			field_from_json(Obj, "tx_bytes", tx_bytes);
-			field_from_json(Obj, "rx_bytes", rx_bytes);
+			auto TxBytes = OptionalUint64FromJson(Obj, "tx_bytes");
+			tx_bytes_present = TxBytes.has_value();
+			tx_bytes = TxBytes.value_or(0);
+			auto RxBytes = OptionalUint64FromJson(Obj, "rx_bytes");
+			rx_bytes_present = RxBytes.has_value();
+			rx_bytes = RxBytes.value_or(0);
 			field_from_json(Obj, "tx_duration", tx_duration);
 			field_from_json(Obj, "rx_packets", rx_packets);
 		field_from_json(Obj, "tx_packets", tx_packets);

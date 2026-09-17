@@ -6,6 +6,7 @@
 
 #include "RESTObjects/RESTAPI_AnalyticsObjects.h"
 #include "framework/orm.h"
+#include <optional>
 #include <set>
 
 namespace OpenWifi {
@@ -24,6 +25,16 @@ namespace OpenWifi {
 		bool SelectRecordsBySerial(const std::string &boardId, const std::string &serialNumber,
 								   uint64_t startTime, uint64_t endTime, DB::RecordVec &Recs,
 								   uint64_t maxRecords = 0, bool *limitExceeded = nullptr);
+		bool SelectLatestRecordAtOrBeforeBySerial(const std::string &boardId,
+												  const std::string &serialNumber,
+												  uint64_t minimumTime, uint64_t boundaryTime,
+												  std::optional<AnalyticsObjects::DeviceTimePoint>
+													  &Rec);
+		bool SelectEarliestRecordAtOrAfterBySerial(const std::string &boardId,
+												   const std::string &serialNumber,
+												   uint64_t boundaryTime,
+												   std::optional<AnalyticsObjects::DeviceTimePoint>
+													   &Rec);
 		bool SelectResourceRecordsBySerial(const std::string &boardId,
 										   const std::string &serialNumber, uint64_t startTime,
 										   uint64_t endTime, DB::RecordVec &Recs,
