@@ -350,15 +350,25 @@ namespace OpenWifi {
 			return true;
 		}
 
-		inline bool ValidateExpectedSampleCount(const Window &Requested, uint64_t IntervalSeconds,
-												uint64_t MaxAllowedSamples, Error &E) {
-			if (MaxAllowedSamples == 0)
-				return true;
+		inline uint64_t EstimateExpectedSampleCount(const Window &Requested,
+													uint64_t IntervalSeconds) {
 			uint64_t EffectiveInterval = (IntervalSeconds > 0) ? IntervalSeconds : 60;
 			uint64_t WindowDuration = Requested.endTime > Requested.startTime
 										  ? (Requested.endTime - Requested.startTime)
 										  : 0;
-			uint64_t EstimatedSamples = (WindowDuration / EffectiveInterval) + 1;
+			uint64_t EstimatedSamples = 0;
+			if (WindowDuration > 0) {
+				EstimatedSamples = (WindowDuration / EffectiveInterval) +
+								   ((WindowDuration % EffectiveInterval) != 0 ? 1 : 0);
+			}
+			return EstimatedSamples;
+		}
+
+		inline bool ValidateExpectedSampleCount(const Window &Requested, uint64_t IntervalSeconds,
+												uint64_t MaxAllowedSamples, Error &E) {
+			if (MaxAllowedSamples == 0)
+				return true;
+			uint64_t EstimatedSamples = EstimateExpectedSampleCount(Requested, IntervalSeconds);
 
 			if (EstimatedSamples > MaxAllowedSamples) {
 				SetError(E, Poco::Net::HTTPResponse::HTTP_BAD_REQUEST, "exceeds_max_samples",

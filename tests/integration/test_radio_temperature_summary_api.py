@@ -604,7 +604,7 @@ def test_radio_temperature_summary_exceeds_max_samples_with_malformed_records(se
     base_ts = utc_epoch(format_utc(t_base))
 
     # Bulk insert 10,005 raw timepoint rows with malformed JSON payloads interspersed.
-    # Estimated sample count for 1h query window @ 60s interval is 61 expected samples (61 <= 10000 limit).
+    # Estimated sample count for a 1h half-open query window @ 60s interval is 60 samples.
     # But actual DB row count (10,005) genuinely exceeds the default 10,000 max_samples limit.
     with db_connection() as connection:
         with connection.cursor() as cursor:

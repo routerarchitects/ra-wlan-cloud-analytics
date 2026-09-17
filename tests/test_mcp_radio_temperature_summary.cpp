@@ -303,22 +303,43 @@ namespace {
 
 	void TestValidateExpectedSampleCount() {
 		MCP::Error E;
-		MCP::Window W;
-		W.startTime = 1000;
-		W.endTime = 4600; // 3600 seconds = 1 hour window
+		auto WindowWithDuration = [](uint64_t Duration) {
+			MCP::Window W;
+			W.startTime = 1000;
+			W.endTime = W.startTime + Duration;
+			W.lookbackHours = 1;
+			return W;
+		};
+		auto AssertSampleLimit = [&](uint64_t Duration, uint64_t Interval,
+									 uint64_t ExpectedSamples) {
+			auto W = WindowWithDuration(Duration);
+			assert(MCP::EstimateExpectedSampleCount(W, Interval) == ExpectedSamples);
+			assert(MCP::ValidateExpectedSampleCount(W, Interval, ExpectedSamples, E));
+			if (ExpectedSamples > 1) {
+				assert(!MCP::ValidateExpectedSampleCount(W, Interval, ExpectedSamples - 1, E));
+				assert(E.status == Poco::Net::HTTPResponse::HTTP_BAD_REQUEST);
+				assert(E.error == "exceeds_max_samples");
+			}
+		};
 
-		// Interval 60s -> 3600 / 60 + 1 = 61 estimated samples
-		assert(MCP::ValidateExpectedSampleCount(W, 60, 100, E));
-		assert(MCP::ValidateExpectedSampleCount(W, 60, 61, E));
+		AssertSampleLimit(3600, 60, 60);
+		AssertSampleLimit(3599, 60, 60);
+		AssertSampleLimit(3601, 60, 61);
+		AssertSampleLimit(60, 60, 1);
+		AssertSampleLimit(61, 60, 2);
+		AssertSampleLimit(59, 60, 1);
+		AssertSampleLimit(1, 60, 1);
 
-		// Exceeds limit
-		assert(!MCP::ValidateExpectedSampleCount(W, 60, 60, E));
+		auto EmptyWindow = WindowWithDuration(0);
+		assert(MCP::EstimateExpectedSampleCount(EmptyWindow, 60) == 0);
+		assert(MCP::ValidateExpectedSampleCount(EmptyWindow, 60, 1, E));
+
+		// Interval 0 falls back to the 60s effective interval.
+		auto OneHourWindow = WindowWithDuration(3600);
+		assert(MCP::ValidateExpectedSampleCount(OneHourWindow, 0, 60, E));
+		assert(!MCP::ValidateExpectedSampleCount(OneHourWindow, 0, 59, E));
 		assert(E.status == Poco::Net::HTTPResponse::HTTP_BAD_REQUEST);
 		assert(E.error == "exceeds_max_samples");
-
-		// Interval 0 -> fallback to 60s
-		assert(MCP::ValidateExpectedSampleCount(W, 0, 100, E));
-		assert(!MCP::ValidateExpectedSampleCount(W, 0, 50, E));
 	}
 
 	void TestValidateConfiguredMaxSamples() {
