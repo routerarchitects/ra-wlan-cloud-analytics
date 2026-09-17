@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <optional>
 #include <vector>
 
@@ -320,6 +321,29 @@ namespace {
 		assert(!MCP::ValidateExpectedSampleCount(W, 0, 50, E));
 	}
 
+	void TestValidateConfiguredMaxSamples() {
+		MCP::Error E;
+		uint64_t MaxSamples = 0;
+
+		assert(MCP::ValidateConfiguredMaxSamples(1, MaxSamples, E));
+		assert(MaxSamples == 1);
+		assert(MCP::ValidateConfiguredMaxSamples(100000, MaxSamples, E));
+		assert(MaxSamples == 100000);
+
+		assert(!MCP::ValidateConfiguredMaxSamples(0, MaxSamples, E));
+		assert(E.status == Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
+		assert(E.error == "invalid_configuration");
+
+		assert(!MCP::ValidateConfiguredMaxSamples(100001, MaxSamples, E));
+		assert(E.status == Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
+		assert(E.error == "invalid_configuration");
+
+		assert(!MCP::ValidateConfiguredMaxSamples(std::numeric_limits<uint64_t>::max(),
+												  MaxSamples, E));
+		assert(E.status == Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR);
+		assert(E.error == "invalid_configuration");
+	}
+
 } // namespace
 
 int main() {
@@ -335,6 +359,7 @@ int main() {
 	TestPersistedRadioJsonNullableTemperature();
 	TestValidTwentyIsPreserved();
 	TestValidateExpectedSampleCount();
+	TestValidateConfiguredMaxSamples();
 	std::cout << "test_mcp_radio_temperature_summary passed\n";
 	return 0;
 }

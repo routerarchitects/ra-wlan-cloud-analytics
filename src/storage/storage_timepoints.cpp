@@ -8,6 +8,7 @@
 #include "framework/RESTAPI_utils.h"
 #include "VenueCoordinator.h"
 #include <Poco/JSON/Parser.h>
+#include <limits>
 #include <utility>
 
 template <>
@@ -20,6 +21,11 @@ void ORM::DB<OpenWifi::TimePointDBRecordType, OpenWifi::AnalyticsObjects::Device
 
 namespace OpenWifi {
 	namespace {
+		uint64_t LimitWithOverflowSentinel(uint64_t MaxRecords) {
+			return MaxRecords == std::numeric_limits<uint64_t>::max() ? MaxRecords
+																	  : MaxRecords + 1;
+		}
+
 		bool ParseRadioData(const std::string &Json, const std::string &RecordId,
 							Poco::Logger &Logger,
 							std::vector<AnalyticsObjects::RadioTimePoint> &Radios) {
@@ -144,7 +150,8 @@ namespace OpenWifi {
 		auto WhereClause = fmt::format(
 			" boardId='{}' and serialNumber='{}' and (timestamp >= {}) and (timestamp < {}) ",
 			ORM::Escape(boardId), ORM::Escape(serialNumber), startTime, endTime);
-		const auto RangeClause = (maxRecords > 0) ? ComputeRange(0, maxRecords + 1) : "";
+		const auto RangeClause =
+			(maxRecords > 0) ? ComputeRange(0, LimitWithOverflowSentinel(maxRecords)) : "";
 		const auto Sql = fmt::format("select {} from {} where {} order by timestamp, id ASC{}",
 									 SelectFields(), TableName_, WhereClause, RangeClause);
 		std::vector<TimePointDBRecordType> RawRecords;
@@ -176,7 +183,8 @@ namespace OpenWifi {
 		auto WhereClause = fmt::format(
 			" boardId='{}' and serialNumber='{}' and (timestamp >= {}) and (timestamp < {}) ",
 			ORM::Escape(boardId), ORM::Escape(serialNumber), startTime, endTime);
-		const auto RangeClause = (maxRecords > 0) ? ComputeRange(0, maxRecords + 1) : "";
+		const auto RangeClause =
+			(maxRecords > 0) ? ComputeRange(0, LimitWithOverflowSentinel(maxRecords)) : "";
 		const auto Sql = fmt::format(
 			"select id, timestamp, resource_data from {} where {} order by timestamp, id ASC{}",
 			TableName_, WhereClause, RangeClause);
@@ -214,7 +222,8 @@ namespace OpenWifi {
 		auto WhereClause = fmt::format(
 			" boardId='{}' and serialNumber='{}' and (timestamp >= {}) and (timestamp < {}) ",
 			ORM::Escape(boardId), ORM::Escape(serialNumber), startTime, endTime);
-		const auto RangeClause = (maxRecords > 0) ? ComputeRange(0, maxRecords + 1) : "";
+		const auto RangeClause =
+			(maxRecords > 0) ? ComputeRange(0, LimitWithOverflowSentinel(maxRecords)) : "";
 		const auto Sql = fmt::format(
 			"select id, timestamp, radio_data from {} where {} order by timestamp, id ASC{}",
 			TableName_, WhereClause, RangeClause);

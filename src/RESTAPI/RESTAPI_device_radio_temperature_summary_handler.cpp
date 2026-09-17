@@ -50,7 +50,12 @@ namespace OpenWifi {
 		if (!MCP::ValidateRetention(Window, Resolved.retention, Utils::Now(), ClockSkewSeconds, Error))
 			return MCP::SendError(*this, Error);
 
-		auto MaxSamples = MicroServiceConfigGetInt("mcp.max_samples", 10000);
+		uint64_t MaxSamples = 0;
+		auto ConfiguredMaxSamples =
+			MicroServiceConfigGetInt("mcp.max_samples", MCP::DefaultMaxSamples);
+		if (!MCP::ValidateConfiguredMaxSamples(ConfiguredMaxSamples, MaxSamples, Error))
+			return MCP::SendError(*this, Error);
+
 		if (!MCP::ValidateExpectedSampleCount(Window, Resolved.interval, MaxSamples, Error))
 			return MCP::SendError(*this, Error);
 

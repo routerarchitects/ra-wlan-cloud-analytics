@@ -27,6 +27,9 @@ namespace OpenWifi {
 			"alphanumeric characters, hyphens, or underscores)";
 		constexpr const char *UnauthorizedMessage =
 			"Missing, invalid, or expired bearer token";
+		constexpr uint64_t DefaultMaxSamples = 10000;
+		constexpr uint64_t MinMaxSamples = 1;
+		constexpr uint64_t MaxMaxSamples = 100000;
 
 		struct Error {
 			Poco::Net::HTTPResponse::HTTPStatus status =
@@ -362,6 +365,19 @@ namespace OpenWifi {
 						 "Requested query window exceeds maximum allowed telemetry sample count");
 				return false;
 			}
+			return true;
+		}
+
+		inline bool ValidateConfiguredMaxSamples(uint64_t ConfiguredMaxSamples,
+												 uint64_t &MaxSamples, Error &E) {
+			if (ConfiguredMaxSamples < MinMaxSamples || ConfiguredMaxSamples > MaxMaxSamples) {
+				SetError(E, Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR,
+						 "invalid_configuration",
+						 "mcp.max_samples must be between 1 and 100000");
+				return false;
+			}
+
+			MaxSamples = ConfiguredMaxSamples;
 			return true;
 		}
 
