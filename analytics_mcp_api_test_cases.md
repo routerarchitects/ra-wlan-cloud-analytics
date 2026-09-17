@@ -38,6 +38,118 @@ The test cases cover:
 
 ---
 
+# CI/CD Test Execution Flow
+
+The GitHub Actions `CI` workflow runs the MCP Analytics tests in the
+`mcp-analytics-tests` job. The job is designed to exercise the same request path
+used by deployed services while replacing OWSEC and OWPROV with deterministic
+fake services.
+
+## CI Flow
+
+1. Checkout the repository.
+2. Build the C++ test image from the real Dockerfile target:
+
+```text
+docker build --target owanalytics-build --tag owanalytics-build-ci:test .
+```
+
+3. Run C++ unit tests inside the build image:
+
+```text
+ctest --test-dir /owanalytics/cmake-build --output-on-failure
+```
+
+The unit-test phase includes the MCP aggregation tests:
+
+```text
+test_mcp_memory_summary
+test_mcp_radio_temperature_summary
+test_mcp_bandwidth_consumption
+```
+
+4. Build the runtime image used for API integration tests:
+
+```text
+docker build --tag owanalytics-ci:test .
+```
+
+5. Verify runtime shared-library dependencies with `ldd`.
+6. Install Python test dependencies on the runner:
+
+```text
+pytest
+psycopg2-binary
+```
+
+7. Start fake OWSEC on `127.0.0.1:18080`.
+   - `root-token` is accepted as a valid bearer token.
+   - invalid tokens return `401`.
+
+8. Start fake OWPROV on `127.0.0.1:18081`.
+   - `60cf84f22290` resolves to the configured test venue.
+   - `60cf84f22291` returns not found.
+   - `60cf84f22292` returns forbidden, which Analytics exposes as `404 not_found`.
+   - `60cf84f22293` returns malformed inventory data, which Analytics exposes as
+     `502 owprov_invalid_response`.
+
+9. Generate short-lived test TLS certificates for the Analytics REST API.
+10. Start OWAnalytics with host networking and fake-service routing enabled:
+
+```text
+CI_FAKE_EXTERNAL_SERVICES=1
+FAKE_EXTERNAL_SERVICE_OWSEC=http://127.0.0.1:18080
+FAKE_EXTERNAL_SERVICE_OWPROV=http://127.0.0.1:18081
+STORAGE_TYPE=postgresql
+KAFKA_ENABLE=false
+```
+
+11. Run Python integration tests against the live Analytics service:
+
+```text
+OWANALYTICS_TEST_URL=https://127.0.0.1:16009
+OWANALYTICS_TEST_VALID_TOKEN=root-token
+OWANALYTICS_TEST_DB_DSN="host=127.0.0.1 port=5432 dbname=owanalytics user=owanalytics password=owanalytics"
+pytest tests/integration -v
+```
+
+This executes the MCP integration suites:
+
+```text
+tests/integration/test_memory_summary_api.py
+tests/integration/test_radio_temperature_summary_api.py
+tests/integration/test_bandwidth_consumption_api.py
+```
+
+Each integration suite seeds PostgreSQL board and `timepoints` rows directly,
+calls the public HTTPS API with bearer authentication, and verifies the response
+after Analytics resolves router ownership through fake OWPROV.
+
+12. On failure, CI prints:
+    - Docker container status
+    - fake OWSEC logs
+    - fake OWPROV logs
+    - OWAnalytics container logs
+
+13. Cleanup always removes the OWAnalytics container and terminates fake OWSEC
+and fake OWPROV.
+
+## CD Gate
+
+Downstream test and deployment jobs depend on the Docker image build and the
+`mcp-analytics-tests` job:
+
+```text
+docker
+mcp-analytics-tests
+```
+
+For pull requests, the workflow triggers the external OpenWiFi docker-compose
+test workflow only after both dependencies pass. For pushes to `main`, the dev
+deployment trigger also waits for both dependencies.
+
+---
+
 # 2. Common Preconditions and Database Setup
 
 Before executing the test cases:

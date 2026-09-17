@@ -77,4 +77,25 @@ namespace OpenWifi::AnalyticsObjects {
 		field_to_json(Obj, "meta", meta);
 	}
 
+	void MCPClientUsageItem::to_json(Poco::JSON::Object &Obj) const {
+		field_to_json(Obj, "mac", mac);
+		field_to_json(Obj, "rx_bytes", rx_bytes);
+		field_to_json(Obj, "tx_bytes", tx_bytes);
+		field_to_json(Obj, "total_bytes", total_bytes);
+		field_to_json(Obj, "data_consume_rx", data_consume_rx);
+		field_to_json(Obj, "data_consume_tx", data_consume_tx);
+		field_to_json(Obj, "total_data_usage", total_data_usage);
+	}
+
+	void MCPClientUsageSummaryData::to_json(Poco::JSON::Object &Obj) const {
+		field_to_json(Obj, "items", items);
+		field_to_json(Obj, "totalClients", totalClients);
+		field_to_json(Obj, "truncated", truncated);
+	}
+
+	void MCPDeviceBandwidthConsumptionSummary::to_json(Poco::JSON::Object &Obj) const {
+		field_to_json(Obj, "data", data);
+		field_to_json(Obj, "meta", meta);
+	}
+
 } // namespace OpenWifi::AnalyticsObjects

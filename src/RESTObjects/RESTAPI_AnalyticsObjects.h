@@ -418,6 +418,33 @@ namespace OpenWifi {
 			void to_json(Poco::JSON::Object &Obj) const;
 		};
 
+		struct MCPClientUsageItem {
+			std::string mac;
+			uint64_t rx_bytes = 0;
+			uint64_t tx_bytes = 0;
+			uint64_t total_bytes = 0;
+			std::string data_consume_rx;
+			std::string data_consume_tx;
+			std::string total_data_usage;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+		};
+
+		struct MCPClientUsageSummaryData {
+			std::vector<MCPClientUsageItem> items;
+			uint64_t totalClients = 0;
+			bool truncated = false;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+		};
+
+		struct MCPDeviceBandwidthConsumptionSummary {
+			MCPClientUsageSummaryData data;
+			MCPMemorySummaryMeta meta;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+		};
+
 	} // namespace AnalyticsObjects
 
 } // namespace OpenWifi
