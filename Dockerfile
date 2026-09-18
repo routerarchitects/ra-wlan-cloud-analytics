@@ -5,13 +5,34 @@ ARG VALIJASON_VERSION=tip-v1
 
 FROM debian:$DEBIAN_VERSION AS build-base
 
-RUN apt-get -o Acquire::Retries=5 update && \
-    apt-get -o Acquire::Retries=5 install --no-install-recommends -y \
-    make cmake g++ git \
-    libpq-dev libmariadb-dev libmariadb-dev-compat \
-    librdkafka-dev libboost-all-dev libssl-dev \
-    zlib1g-dev nlohmann-json3-dev ca-certificates libcurl4-openssl-dev libfmt-dev && \
-    rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    for attempt in 1 2 3 4 5; do \
+        echo "APT transaction attempt $attempt/5..."; \
+        rm -rf /var/lib/apt/lists/*; \
+        apt-get clean; \
+        if apt-get \
+            -o Acquire::Retries=5 \
+            -o Acquire::http::No-Cache=true \
+            update && \
+           apt-get \
+            -o Acquire::Retries=5 \
+            -o Acquire::http::No-Cache=true \
+            install --no-install-recommends -y \
+                make cmake g++ git \
+                libpq-dev libmariadb-dev libmariadb-dev-compat \
+                librdkafka-dev libboost-all-dev libssl-dev \
+                zlib1g-dev nlohmann-json3-dev ca-certificates libcurl4-openssl-dev libfmt-dev; then \
+            break; \
+        fi; \
+        if [ "$attempt" -eq 5 ]; then \
+            echo "APT installation failed after $attempt attempts"; \
+            exit 1; \
+        fi; \
+        echo "APT transaction failed; refreshing repository metadata. Retrying after $((attempt * 10)) seconds..."; \
+        sleep $((attempt * 10)); \
+    done; \
+    rm -rf /var/lib/apt/lists/*; \
+    apt-get clean
 
 FROM build-base AS poco-build
 
@@ -89,11 +110,32 @@ RUN mkdir /openwifi
 RUN mkdir -p "$OWANALYTICS_ROOT" "$OWANALYTICS_CONFIG" && \
     chown "$OWANALYTICS_USER": "$OWANALYTICS_ROOT" "$OWANALYTICS_CONFIG"
 
-RUN apt-get -o Acquire::Retries=5 update && \
-    apt-get -o Acquire::Retries=5 install --no-install-recommends -y \
-    librdkafka++1 gosu gettext ca-certificates bash jq curl wget \
-    libmariadb3 libpq5 postgresql-client libfmt10 && \
-    rm -rf /var/lib/apt/lists/*
+RUN set -eux; \
+    for attempt in 1 2 3 4 5; do \
+        echo "APT transaction attempt $attempt/5..."; \
+        rm -rf /var/lib/apt/lists/*; \
+        apt-get clean; \
+        if apt-get \
+            -o Acquire::Retries=5 \
+            -o Acquire::http::No-Cache=true \
+            update && \
+           apt-get \
+            -o Acquire::Retries=5 \
+            -o Acquire::http::No-Cache=true \
+            install --no-install-recommends -y \
+                librdkafka++1 gosu gettext ca-certificates bash jq curl wget \
+                libmariadb3 libpq5 postgresql-client libfmt10; then \
+            break; \
+        fi; \
+        if [ "$attempt" -eq 5 ]; then \
+            echo "APT installation failed after $attempt attempts"; \
+            exit 1; \
+        fi; \
+        echo "APT transaction failed; refreshing repository metadata. Retrying after $((attempt * 10)) seconds..."; \
+        sleep $((attempt * 10)); \
+    done; \
+    rm -rf /var/lib/apt/lists/*; \
+    apt-get clean
 
 COPY readiness_check /readiness_check
 COPY test_scripts/curl/cli /cli
