@@ -3,6 +3,7 @@
 #include "RESTObjects/RESTAPI_AnalyticsObjects.h"
 #include <Poco/Net/HTTPResponse.h>
 #include <Poco/URI.h>
+#include <fmt/format.h>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -578,10 +579,9 @@ namespace OpenWifi {
 		}
 
 		inline std::string FormatDecimalMB(uint64_t Bytes) {
-			std::ostringstream Stream;
-			Stream << std::fixed << std::setprecision(2)
-				   << (static_cast<long double>(Bytes) / 1000000.0L) << " MB";
-			return Stream.str();
+			return fmt::format(
+				"{:.2f} MB",
+				static_cast<double>(Bytes) / 1000000.0);
 		}
 
 		inline uint64_t SaturatingAdd(uint64_t Left, uint64_t Right) {

@@ -43,6 +43,7 @@ INVALID_RESPONSE_ROUTER_ID = "60cf84f22293"
 DEFAULT_BOARD_ID = "board-test-01"
 DEFAULT_VENUE_ID = "venue-test-01"
 OTHER_BOARD_ID = "usage-other-board"
+OTHER_VENUE_ID = "usage-other-venue"
 DEFAULT_VALID_TOKEN = "root-token"
 MISSING = object()
 
@@ -160,6 +161,7 @@ def cleanup_test_rows(cursor) -> None:
         "delete from timepoints where boardid in (%s, %s)",
         (board_id(), OTHER_BOARD_ID),
     )
+    cursor.execute("delete from timepoints where venueid in (%s, %s)", (venue_id(), OTHER_VENUE_ID))
     cursor.execute("delete from boards where id in (%s, %s)", (board_id(), OTHER_BOARD_ID))
 
 
@@ -323,7 +325,7 @@ def test_usage_summary_uses_boundary_samples_and_filters_gateway_scope(seeded_bo
 
     with db_connection() as connection:
         with connection.cursor() as cursor:
-            seed_board(cursor, board=OTHER_BOARD_ID, venue=venue_id(), retention=7200)
+            seed_board(cursor, board=OTHER_BOARD_ID, venue=OTHER_VENUE_ID, retention=7200)
             insert_timepoint(cursor, format_utc(baseline_dt), [ssid([assoc("28:39:26:a1:7c:a5", 1_000_000, 1_000_000)])])
             insert_timepoint(cursor, format_utc(mid_dt), [ssid([assoc("28:39:26:a1:7c:a5", 2_000_000, 2_000_000)])])
             insert_timepoint(cursor, format_utc(end_boundary_dt), [ssid([assoc("28:39:26:a1:7c:a5", 3_000_000, 3_000_000)])])
@@ -338,6 +340,7 @@ def test_usage_summary_uses_boundary_samples_and_filters_gateway_scope(seeded_bo
                 format_utc(mid_dt),
                 [ssid([assoc("28:39:26:a1:7c:a5", 888_000_000, 888_000_000)])],
                 board=OTHER_BOARD_ID,
+                venue=OTHER_VENUE_ID,
             )
 
     result = http_json(usage_summary_path(format_utc(end_dt)), valid_token())
