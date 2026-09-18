@@ -1,12 +1,25 @@
 #include "RESTAPI/RESTAPI_mcp_helpers.h"
 
 #include <Poco/JSON/Object.h>
+#include <Poco/JSON/Parser.h>
 #include <cassert>
 #include <iostream>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
+
+namespace OpenWifi {
+	const std::string &MicroServiceDataDirectory() {
+		static const std::string DataDirectory = "/tmp";
+		return DataDirectory;
+	}
+
+	std::string MicroServiceCreateUUID() {
+		return "test-uuid";
+	}
+} // namespace OpenWifi
 
 using namespace OpenWifi;
 
@@ -268,16 +281,22 @@ namespace {
 
 		Poco::JSON::Object Obj;
 		Summary.to_json(Obj);
-		assert(Obj.has("data"));
-		assert(Obj.has("meta"));
-		assert(!Obj.has("items"));
 
-		auto DataObj = Obj.get("data").extract<Poco::JSON::Object>();
-		assert(DataObj.has("items"));
-		assert(DataObj.has("totalClients"));
-		assert(DataObj.has("truncated"));
+		std::stringstream ss;
+		Obj.stringify(ss);
+		Poco::JSON::Parser parser;
+		auto ParsedObj = parser.parse(ss).extract<Poco::JSON::Object::Ptr>();
 
-		auto Items = DataObj.getArray("items");
+		assert(ParsedObj->has("data"));
+		assert(ParsedObj->has("meta"));
+		assert(!ParsedObj->has("items"));
+
+		auto DataObj = ParsedObj->getObject("data");
+		assert(DataObj->has("items"));
+		assert(DataObj->has("totalClients"));
+		assert(DataObj->has("truncated"));
+
+		auto Items = DataObj->getArray("items");
 		assert(Items->size() == 1);
 		auto Item = Items->getObject(0);
 		assert(Item->has("mac"));
