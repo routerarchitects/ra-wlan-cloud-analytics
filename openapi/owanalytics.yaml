@@ -1400,24 +1400,16 @@ components:
           type: string
           description: Display-only decimal megabytes derived from total_bytes / 1,000,000. Format using standard floating point two decimal places and the literal " MB" suffix. Use raw byte fields for calculations.
           example: 110.34 MB
-    ClientBandwidthConsumptionResponse:
+    ClientBandwidthConsumptionData:
       type: object
       description: >
-        Wrapped Wi-Fi usage differential summary calculated from persisted samples currently
-        available to Analytics. requestedWindow is the requested interval. observedWindow is the
-        earliest/latest persisted sample timestamp used by any returned client calculation, or
-        null/null when no valid sample contributes.
+        Wi-Fi usage differential summary data calculated from persisted samples currently
+        available to Analytics.
       required:
-        - requestedWindow
-        - observedWindow
         - items
         - totalClients
         - truncated
       properties:
-        requestedWindow:
-          $ref: '#/components/schemas/RequestedWindow'
-        observedWindow:
-          $ref: '#/components/schemas/ObservedWindow'
         items:
           type: array
           maxItems: 500
@@ -1434,6 +1426,30 @@ components:
         truncated:
           type: boolean
           description: True when totalClients is greater than the number of returned items.
+
+    ClientBandwidthConsumptionResponse:
+      type: object
+      description: >
+        Wrapped Wi-Fi usage differential summary. requestedWindow is the requested interval
+        returned in meta. observedWindow is the earliest/latest persisted sample timestamp used
+        by any returned client calculation, or null/null when no valid sample contributes.
+        Usage items and counts are returned in data.
+      required:
+        - data
+        - meta
+      properties:
+        meta:
+          type: object
+          required:
+            - requestedWindow
+            - observedWindow
+          properties:
+            requestedWindow:
+              $ref: '#/components/schemas/RequestedWindow'
+            observedWindow:
+              $ref: '#/components/schemas/ObservedWindow'
+        data:
+          $ref: '#/components/schemas/ClientBandwidthConsumptionData'
 
     ClientRssiQuality:
       type: object
@@ -2059,22 +2075,24 @@ paths:
               examples:
                 withClients:
                   value:
-                    requestedWindow:
-                      startTime: "2026-07-26T12:00:00Z"
-                      endTime: "2026-07-27T12:00:00Z"
-                    observedWindow:
-                      startTime: "2026-07-26T11:55:00Z"
-                      endTime: "2026-07-27T12:05:00Z"
-                    items:
-                      - mac: "e2:51:95:ed:0f:28"
-                        rx_bytes: 106487500
-                        tx_bytes: 3851250
-                        total_bytes: 110338750
-                        data_consume_rx: "106.49 MB"
-                        data_consume_tx: "3.85 MB"
-                        total_data_usage: "110.34 MB"
-                    totalClients: 1
-                    truncated: false
+                    meta:
+                      requestedWindow:
+                        startTime: "2026-07-26T12:00:00Z"
+                        endTime: "2026-07-27T12:00:00Z"
+                      observedWindow:
+                        startTime: "2026-07-26T11:55:00Z"
+                        endTime: "2026-07-27T12:05:00Z"
+                    data:
+                      items:
+                        - mac: "e2:51:95:ed:0f:28"
+                          rx_bytes: 106487500
+                          tx_bytes: 3851250
+                          total_bytes: 110338750
+                          data_consume_rx: "106.49 MB"
+                          data_consume_tx: "3.85 MB"
+                          total_data_usage: "110.34 MB"
+                      totalClients: 1
+                      truncated: false
         400:
           $ref: '#/components/responses/CommonAnalyticsBadRequest'
         401:

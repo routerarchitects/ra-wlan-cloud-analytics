@@ -121,6 +121,8 @@ namespace OpenWifi {
 			int64_t rssi = 0;
 			uint64_t tx_bytes = 0, rx_bytes = 0, tx_duration = 0, rx_packets = 0, tx_packets = 0,
 					 tx_retries = 0, tx_failed = 0, connected = 0, inactive = 0;
+			bool tx_bytes_present = false;
+			bool rx_bytes_present = false;
 
 			double tx_bytes_bw = 0.0, rx_bytes_bw = 0.0, tx_packets_bw = 0.0, rx_packets_bw = 0.0,
 				   tx_failed_pct = 0.0, tx_retries_pct = 0.0, tx_duration_pct = 0.0;
@@ -413,6 +415,33 @@ namespace OpenWifi {
 
 		struct MCPGatewayWifiTemperatureSummary {
 			MCPGatewayWifiTemperatureSummaryData data;
+			MCPMemorySummaryMeta meta;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+		};
+
+		struct MCPClientUsageItem {
+			std::string mac;
+			uint64_t rx_bytes = 0;
+			uint64_t tx_bytes = 0;
+			uint64_t total_bytes = 0;
+			std::string data_consume_rx;
+			std::string data_consume_tx;
+			std::string total_data_usage;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+		};
+
+		struct MCPClientUsageSummaryData {
+			std::vector<MCPClientUsageItem> items;
+			uint64_t totalClients = 0;
+			bool truncated = false;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+		};
+
+		struct MCPDeviceBandwidthConsumptionSummary {
+			MCPClientUsageSummaryData data;
 			MCPMemorySummaryMeta meta;
 
 			void to_json(Poco::JSON::Object &Obj) const;

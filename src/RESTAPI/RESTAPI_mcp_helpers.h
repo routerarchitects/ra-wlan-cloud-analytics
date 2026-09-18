@@ -3,16 +3,21 @@
 #include "RESTObjects/RESTAPI_AnalyticsObjects.h"
 #include <Poco/Net/HTTPResponse.h>
 #include <Poco/URI.h>
+#include <fmt/format.h>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdint>
 #include <ctime>
 #include <functional>
+#include <iomanip>
 #include <limits>
+#include <map>
 #include <optional>
 #include <set>
+#include <sstream>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -549,6 +554,240 @@ namespace OpenWifi {
 				Summary.data.latest_wifi_temp_5G = Band5G.latest;
 			}
 
+			return Summary;
+		}
+
+		inline std::optional<std::string> NormalizeClientMac(const std::string &RawMac) {
+			std::string Clean;
+			for (auto c : RawMac) {
+				if (std::isxdigit(static_cast<unsigned char>(c))) {
+					Clean += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+				} else if (c != ':' && c != '-' && c != '.') {
+					return std::nullopt;
+				}
+			}
+			if (Clean.size() != 12)
+				return std::nullopt;
+
+			std::string Formatted;
+			for (size_t i = 0; i < Clean.size(); i += 2) {
+				if (!Formatted.empty())
+					Formatted += ":";
+				Formatted += Clean.substr(i, 2);
+			}
+			return Formatted;
+		}
+
+		inline std::string FormatDecimalMB(uint64_t Bytes) {
+			return fmt::format(
+				"{:.2f} MB",
+				static_cast<double>(Bytes) / 1000000.0);
+		}
+
+		inline uint64_t SaturatingAdd(uint64_t Left, uint64_t Right) {
+			if (std::numeric_limits<uint64_t>::max() - Left < Right)
+				return std::numeric_limits<uint64_t>::max();
+			return Left + Right;
+		}
+
+		inline AnalyticsObjects::MCPDeviceBandwidthConsumptionSummary
+		CalculateBandwidthConsumptionSummary(
+			const std::vector<AnalyticsObjects::DeviceTimePoint> &Records,
+			const Window &Requested) {
+			struct Sample {
+				uint64_t timestamp = 0;
+				std::optional<uint64_t> rx;
+				std::optional<uint64_t> tx;
+				std::string id;
+				bool inWindow = false;
+			};
+
+			struct CounterSample {
+				uint64_t timestamp = 0;
+				uint64_t value = 0;
+				bool inWindow = false;
+			};
+
+			struct StreamKey {
+				std::string mac;
+				std::string bssid;
+				std::string ssid;
+				uint64_t band = 0;
+
+				bool operator<(const StreamKey &Other) const {
+					return std::tie(mac, bssid, ssid, band) <
+						   std::tie(Other.mac, Other.bssid, Other.ssid, Other.band);
+				}
+			};
+
+			struct ClientTotals {
+				uint64_t rx = 0;
+				uint64_t tx = 0;
+				bool hasInWindowObservation = false;
+				bool hasCalculableSegment = false;
+				uint64_t observedStart = 0;
+				uint64_t observedEnd = 0;
+			};
+
+			AnalyticsObjects::MCPDeviceBandwidthConsumptionSummary Summary;
+			Summary.meta.requestedWindow.startTime = FormatTimestamp(Requested.startTime);
+			Summary.meta.requestedWindow.endTime = FormatTimestamp(Requested.endTime);
+
+			std::map<StreamKey, std::vector<Sample>> Streams;
+			for (const auto &Record : Records) {
+				for (const auto &SSID : Record.ssid_data) {
+					for (const auto &Assoc : SSID.associations) {
+						auto Mac = NormalizeClientMac(Assoc.station);
+						if (!Mac)
+							continue;
+
+						StreamKey Key;
+						Key.mac = *Mac;
+						Key.bssid = SSID.bssid;
+						Key.ssid = SSID.ssid;
+						Key.band = SSID.band;
+
+						Sample S;
+						S.timestamp = Record.timestamp;
+						if (Assoc.rx_bytes_present)
+							S.rx = Assoc.rx_bytes;
+						if (Assoc.tx_bytes_present)
+							S.tx = Assoc.tx_bytes;
+						S.id = Record.id;
+						S.inWindow = TimestampInHalfOpenWindow(Record.timestamp, Requested);
+						Streams[Key].push_back(std::move(S));
+					}
+				}
+			}
+
+			std::map<std::string, ClientTotals> TotalsByMac;
+			for (auto &[Key, Samples] : Streams) {
+				std::sort(Samples.begin(), Samples.end(),
+						  [](const Sample &A, const Sample &B) {
+							  return std::tie(A.timestamp, A.id, A.rx, A.tx) <
+									 std::tie(B.timestamp, B.id, B.rx, B.tx);
+						  });
+
+				std::vector<Sample> Deduped;
+				for (size_t i = 0; i < Samples.size();) {
+					size_t Next = i + 1;
+					bool Conflict = false;
+					while (Next < Samples.size() &&
+						   Samples[Next].timestamp == Samples[i].timestamp) {
+						if (Samples[Next].rx != Samples[i].rx ||
+							Samples[Next].tx != Samples[i].tx) {
+							Conflict = true;
+						}
+						++Next;
+					}
+					if (!Conflict)
+						Deduped.push_back(Samples[i]);
+					i = Next;
+				}
+
+				auto &Totals = TotalsByMac[Key.mac];
+				for (const auto &S : Deduped) {
+					if (S.inWindow)
+						Totals.hasInWindowObservation = true;
+				}
+
+				if (Deduped.size() < 2)
+					continue;
+
+				auto MarkObservedSegment = [&Totals](uint64_t Start, uint64_t End) {
+					if (!Totals.hasCalculableSegment) {
+						Totals.observedStart = Start;
+						Totals.observedEnd = End;
+						Totals.hasCalculableSegment = true;
+					} else {
+						Totals.observedStart = std::min(Totals.observedStart, Start);
+						Totals.observedEnd = std::max(Totals.observedEnd, End);
+					}
+				};
+
+				auto ApplyCounterSample = [&MarkObservedSegment](
+											  std::optional<CounterSample> &Previous,
+											  const Sample &Current,
+											  const std::optional<uint64_t> &CurrentValue,
+											  uint64_t &Total) {
+					if (!CurrentValue)
+						return;
+
+					CounterSample CurrentCounter{Current.timestamp, *CurrentValue,
+												 Current.inWindow};
+					if (!Previous) {
+						Previous = CurrentCounter;
+						return;
+					}
+
+					if ((Previous->inWindow || CurrentCounter.inWindow) &&
+						CurrentCounter.value >= Previous->value) {
+						Total = SaturatingAdd(Total, CurrentCounter.value - Previous->value);
+						MarkObservedSegment(Previous->timestamp, CurrentCounter.timestamp);
+					}
+
+					Previous = CurrentCounter;
+				};
+
+				std::optional<CounterSample> PreviousRx;
+				std::optional<CounterSample> PreviousTx;
+				for (const auto &Current : Deduped) {
+					ApplyCounterSample(PreviousRx, Current, Current.rx, Totals.rx);
+					ApplyCounterSample(PreviousTx, Current, Current.tx, Totals.tx);
+				}
+			}
+
+			std::vector<AnalyticsObjects::MCPClientUsageItem> Items;
+			for (const auto &[Mac, Totals] : TotalsByMac) {
+				if (!Totals.hasInWindowObservation)
+					continue;
+
+				AnalyticsObjects::MCPClientUsageItem Item;
+				Item.mac = Mac;
+				Item.rx_bytes = Totals.rx;
+				Item.tx_bytes = Totals.tx;
+				Item.total_bytes = SaturatingAdd(Totals.rx, Totals.tx);
+				Item.data_consume_rx = FormatDecimalMB(Item.rx_bytes);
+				Item.data_consume_tx = FormatDecimalMB(Item.tx_bytes);
+				Item.total_data_usage = FormatDecimalMB(Item.total_bytes);
+				Items.push_back(std::move(Item));
+			}
+
+			std::sort(Items.begin(), Items.end(),
+					  [](const AnalyticsObjects::MCPClientUsageItem &A,
+						 const AnalyticsObjects::MCPClientUsageItem &B) {
+						  if (A.total_bytes != B.total_bytes)
+							  return A.total_bytes > B.total_bytes;
+						  return A.mac < B.mac;
+					  });
+
+			Summary.data.totalClients = Items.size();
+			Summary.data.truncated = Items.size() > 500;
+			if (Items.size() > 500)
+				Items.resize(500);
+
+			bool HasObservedWindow = false;
+			uint64_t ObservedStart = 0;
+			uint64_t ObservedEnd = 0;
+			for (const auto &Item : Items) {
+				const auto Totals = TotalsByMac.find(Item.mac);
+				if (Totals == TotalsByMac.end() || !Totals->second.hasCalculableSegment)
+					continue;
+
+				if (!HasObservedWindow) {
+					ObservedStart = Totals->second.observedStart;
+					ObservedEnd = Totals->second.observedEnd;
+					HasObservedWindow = true;
+				} else {
+					ObservedStart = std::min(ObservedStart, Totals->second.observedStart);
+					ObservedEnd = std::max(ObservedEnd, Totals->second.observedEnd);
+				}
+			}
+			if (HasObservedWindow) {
+				Summary.meta.observedWindow.startTime = FormatTimestamp(ObservedStart);
+				Summary.meta.observedWindow.endTime = FormatTimestamp(ObservedEnd);
+			}
+			Summary.data.items = std::move(Items);
 			return Summary;
 		}
 

@@ -129,6 +129,7 @@ add_executable(owanalytics
         src/RESTAPI/RESTAPI_mcp_helpers.cpp src/RESTAPI/RESTAPI_mcp_helpers.h
         src/RESTAPI/RESTAPI_device_memory_summary_handler.cpp src/RESTAPI/RESTAPI_device_memory_summary_handler.h
         src/RESTAPI/RESTAPI_device_radio_temperature_summary_handler.cpp src/RESTAPI/RESTAPI_device_radio_temperature_summary_handler.h
+        src/RESTAPI/RESTAPI_device_bandwidth_consumption_handler.cpp src/RESTAPI/RESTAPI_device_bandwidth_consumption_handler.h
         src/RouterIdResolver.cpp src/RouterIdResolver.h
         src/RESTObjects/RESTAPI_SubObjects.cpp src/RESTObjects/RESTAPI_SubObjects.h
         src/RESTAPI/RESTAPI_routers.cpp
@@ -192,4 +193,16 @@ if(BUILD_TESTING)
             fmt::fmt
             resolv)
     add_test(NAME test_mcp_radio_temperature_summary COMMAND test_mcp_radio_temperature_summary)
+
+    add_executable(test_mcp_bandwidth_consumption
+            tests/test_mcp_bandwidth_consumption.cpp
+            src/RESTObjects/RESTAPI_MCPAnalyticsObjects.cpp
+            src/framework/utils.cpp)
+    target_include_directories(test_mcp_bandwidth_consumption PRIVATE src)
+    target_link_libraries(test_mcp_bandwidth_consumption PUBLIC
+            ${Poco_LIBRARIES}
+            ${ZLIB_LIBRARIES}
+            fmt::fmt
+            resolv)
+    add_test(NAME test_mcp_bandwidth_consumption COMMAND test_mcp_bandwidth_consumption)
 endif()

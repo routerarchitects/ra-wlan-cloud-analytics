@@ -1009,45 +1009,49 @@ None
 
 ```json
 {
-  "requestedWindow": {
-    "startTime": "2026-07-26T12:00:00Z",
-    "endTime": "2026-07-27T12:00:00Z"
+  "data": {
+    "items": [
+      {
+        "mac": "e2:51:95:ed:0f:28",
+        "rx_bytes": 106487500,
+        "tx_bytes": 3851250,
+        "total_bytes": 110338750,
+        "data_consume_rx": "106.49 MB",
+        "data_consume_tx": "3.85 MB",
+        "total_data_usage": "110.34 MB"
+      },
+      {
+        "mac": "28:39:26:a1:7c:a5",
+        "rx_bytes": 30071250,
+        "tx_bytes": 16486250,
+        "total_bytes": 46557500,
+        "data_consume_rx": "30.07 MB",
+        "data_consume_tx": "16.49 MB",
+        "total_data_usage": "46.56 MB"
+      },
+      {
+        "mac": "54:6c:0e:44:11:09",
+        "rx_bytes": 4200000,
+        "tx_bytes": 600000,
+        "total_bytes": 4800000,
+        "data_consume_rx": "4.20 MB",
+        "data_consume_tx": "0.60 MB",
+        "total_data_usage": "4.80 MB"
+      }
+    ],
+    "totalClients": 3,
+    "truncated": false
   },
-  "observedWindow": {
-    "startTime": "2026-07-26T11:55:00Z",
-    "endTime": "2026-07-27T12:05:00Z"
-  },
-  "items": [
-    {
-      "mac": "e2:51:95:ed:0f:28",
-      "rx_bytes": 106487500,
-      "tx_bytes": 3851250,
-      "total_bytes": 110338750,
-      "data_consume_rx": "106.49 MB",
-      "data_consume_tx": "3.85 MB",
-      "total_data_usage": "110.34 MB"
+  "meta": {
+    "requestedWindow": {
+      "startTime": "2026-07-26T12:00:00Z",
+      "endTime": "2026-07-27T12:00:00Z"
     },
-    {
-      "mac": "28:39:26:a1:7c:a5",
-      "rx_bytes": 30071250,
-      "tx_bytes": 16486250,
-      "total_bytes": 46557500,
-      "data_consume_rx": "30.07 MB",
-      "data_consume_tx": "16.49 MB",
-      "total_data_usage": "46.56 MB"
-    },
-    {
-      "mac": "54:6c:0e:44:11:09",
-      "rx_bytes": 4200000,
-      "tx_bytes": 600000,
-      "total_bytes": 4800000,
-      "data_consume_rx": "4.20 MB",
-      "data_consume_tx": "0.60 MB",
-      "total_data_usage": "4.80 MB"
+    "observedWindow": {
+      "startTime": "2026-07-26T11:55:00Z",
+      "endTime": "2026-07-27T12:05:00Z"
     }
-  ],
-  "totalClients": 3,
-  "truncated": false
+  }
 }
 ```
 
@@ -1070,17 +1074,21 @@ When no clients are returned:
 
 ```json
 {
-  "requestedWindow": {
-    "startTime": "2026-07-26T12:00:00Z",
-    "endTime": "2026-07-27T12:00:00Z"
+  "data": {
+    "items": [],
+    "totalClients": 0,
+    "truncated": false
   },
-  "observedWindow": {
-    "startTime": null,
-    "endTime": null
-  },
-  "items": [],
-  "totalClients": 0,
-  "truncated": false
+  "meta": {
+    "requestedWindow": {
+      "startTime": "2026-07-26T12:00:00Z",
+      "endTime": "2026-07-27T12:00:00Z"
+    },
+    "observedWindow": {
+      "startTime": null,
+      "endTime": null
+    }
+  }
 }
 ```
 
@@ -1090,27 +1098,31 @@ return zero usage for that client without a quality classification:
 
 ```json
 {
-  "requestedWindow": {
-    "startTime": "2026-08-05T12:00:00Z",
-    "endTime": "2026-08-05T13:00:00Z"
+  "data": {
+    "items": [
+      {
+        "mac": "e2:51:95:ed:0f:28",
+        "rx_bytes": 0,
+        "tx_bytes": 0,
+        "total_bytes": 0,
+        "data_consume_rx": "0.00 MB",
+        "data_consume_tx": "0.00 MB",
+        "total_data_usage": "0.00 MB"
+      }
+    ],
+    "totalClients": 1,
+    "truncated": false
   },
-  "observedWindow": {
-    "startTime": null,
-    "endTime": null
-  },
-  "items": [
-    {
-      "mac": "e2:51:95:ed:0f:28",
-      "rx_bytes": 0,
-      "tx_bytes": 0,
-      "total_bytes": 0,
-      "data_consume_rx": "0.00 MB",
-      "data_consume_tx": "0.00 MB",
-      "total_data_usage": "0.00 MB"
+  "meta": {
+    "requestedWindow": {
+      "startTime": "2026-08-05T12:00:00Z",
+      "endTime": "2026-08-05T13:00:00Z"
+    },
+    "observedWindow": {
+      "startTime": null,
+      "endTime": null
     }
-  ],
-  "totalClients": 1,
-  "truncated": false
+  }
 }
 ```
 

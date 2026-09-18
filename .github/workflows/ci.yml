@@ -59,9 +59,9 @@ jobs:
 
 
   # ---------------------------------------------------------------------------
-  # MCP Memory Summary Integration Tests
+  # MCP Analytics Unit and Integration Tests
   # ---------------------------------------------------------------------------
-  memory-summary-tests:
+  mcp-analytics-tests:
     runs-on: ubuntu-latest
 
     env:
@@ -310,7 +310,7 @@ jobs:
 
 
       # -----------------------------------------------------------------------
-      # Memory Summary integration tests
+      # MCP Analytics integration tests
       # -----------------------------------------------------------------------
       - name: Run Python integration tests with fake OWSEC and OWPROV
         env:
@@ -326,6 +326,8 @@ jobs:
 
         run: |
           test -f tests/integration/test_memory_summary_api.py
+          test -f tests/integration/test_radio_temperature_summary_api.py
+          test -f tests/integration/test_bandwidth_consumption_api.py
 
           pytest \
             tests/integration \
@@ -379,7 +381,7 @@ jobs:
 
     needs:
       - docker
-      - memory-summary-tests
+      - mcp-analytics-tests
 
     steps:
       - name: Get base branch name and set as output
@@ -428,7 +430,7 @@ jobs:
 
     needs:
       - docker
-      - memory-summary-tests
+      - mcp-analytics-tests
 
     steps:
       - name: Checkout actions repo

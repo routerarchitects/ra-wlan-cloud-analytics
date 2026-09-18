@@ -170,6 +170,51 @@ namespace OpenWifi {
 		return true;
 	}
 
+	bool TimePointDB::SelectLatestRecordAtOrBeforeBySerial(
+		const std::string &boardId, const std::string &serialNumber, uint64_t minimumTime,
+		uint64_t boundaryTime, std::optional<AnalyticsObjects::DeviceTimePoint> &Rec) {
+		Rec.reset();
+		if (boundaryTime < minimumTime)
+			return true;
+
+		auto WhereClause = fmt::format(
+			" boardId='{}' and serialNumber='{}' and (timestamp >= {}) and (timestamp <= {}) ",
+			ORM::Escape(boardId), ORM::Escape(serialNumber), minimumTime, boundaryTime);
+		const auto Sql = fmt::format("select {} from {} where {} order by timestamp desc, id desc{}",
+									 SelectFields(), TableName_, WhereClause, ComputeRange(0, 1));
+		std::vector<TimePointDBRecordType> RawRecords;
+		if (!Join(Sql, RawRecords))
+			return false;
+		if (RawRecords.empty())
+			return true;
+
+		AnalyticsObjects::DeviceTimePoint Point;
+		Convert(RawRecords.front(), Point);
+		Rec = std::move(Point);
+		return true;
+	}
+
+	bool TimePointDB::SelectEarliestRecordAtOrAfterBySerial(
+		const std::string &boardId, const std::string &serialNumber, uint64_t boundaryTime,
+		std::optional<AnalyticsObjects::DeviceTimePoint> &Rec) {
+		Rec.reset();
+		auto WhereClause = fmt::format(
+			" boardId='{}' and serialNumber='{}' and (timestamp >= {}) ",
+			ORM::Escape(boardId), ORM::Escape(serialNumber), boundaryTime);
+		const auto Sql = fmt::format("select {} from {} where {} order by timestamp asc, id asc{}",
+									 SelectFields(), TableName_, WhereClause, ComputeRange(0, 1));
+		std::vector<TimePointDBRecordType> RawRecords;
+		if (!Join(Sql, RawRecords))
+			return false;
+		if (RawRecords.empty())
+			return true;
+
+		AnalyticsObjects::DeviceTimePoint Point;
+		Convert(RawRecords.front(), Point);
+		Rec = std::move(Point);
+		return true;
+	}
+
 	bool TimePointDB::SelectResourceRecordsBySerial(
 		const std::string &boardId, const std::string &serialNumber, uint64_t startTime,
 		uint64_t endTime, std::vector<AnalyticsObjects::DeviceTimePoint> &Recs,

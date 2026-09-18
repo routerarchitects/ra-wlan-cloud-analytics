@@ -38,6 +38,118 @@ The test cases cover:
 
 ---
 
+# CI/CD Test Execution Flow
+
+The GitHub Actions `CI` workflow runs the MCP Analytics tests in the
+`mcp-analytics-tests` job. The job is designed to exercise the same request path
+used by deployed services while replacing OWSEC and OWPROV with deterministic
+fake services.
+
+## CI Flow
+
+1. Checkout the repository.
+2. Build the C++ test image from the real Dockerfile target:
+
+```text
+docker build --target owanalytics-build --tag owanalytics-build-ci:test .
+```
+
+3. Run C++ unit tests inside the build image:
+
+```text
+ctest --test-dir /owanalytics/cmake-build --output-on-failure
+```
+
+The unit-test phase includes the MCP aggregation tests:
+
+```text
+test_mcp_memory_summary
+test_mcp_radio_temperature_summary
+test_mcp_bandwidth_consumption
+```
+
+4. Build the runtime image used for API integration tests:
+
+```text
+docker build --tag owanalytics-ci:test .
+```
+
+5. Verify runtime shared-library dependencies with `ldd`.
+6. Install Python test dependencies on the runner:
+
+```text
+pytest
+psycopg2-binary
+```
+
+7. Start fake OWSEC on `127.0.0.1:18080`.
+   - `root-token` is accepted as a valid bearer token.
+   - invalid tokens return `401`.
+
+8. Start fake OWPROV on `127.0.0.1:18081`.
+   - `60cf84f22290` resolves to the configured test venue.
+   - `60cf84f22291` returns not found.
+   - `60cf84f22292` returns forbidden, which Analytics exposes as `404 not_found`.
+   - `60cf84f22293` returns malformed inventory data, which Analytics exposes as
+     `502 owprov_invalid_response`.
+
+9. Generate short-lived test TLS certificates for the Analytics REST API.
+10. Start OWAnalytics with host networking and fake-service routing enabled:
+
+```text
+CI_FAKE_EXTERNAL_SERVICES=1
+FAKE_EXTERNAL_SERVICE_OWSEC=http://127.0.0.1:18080
+FAKE_EXTERNAL_SERVICE_OWPROV=http://127.0.0.1:18081
+STORAGE_TYPE=postgresql
+KAFKA_ENABLE=false
+```
+
+11. Run Python integration tests against the live Analytics service:
+
+```text
+OWANALYTICS_TEST_URL=https://127.0.0.1:16009
+OWANALYTICS_TEST_VALID_TOKEN=root-token
+OWANALYTICS_TEST_DB_DSN="host=127.0.0.1 port=5432 dbname=owanalytics user=owanalytics password=owanalytics"
+pytest tests/integration -v
+```
+
+This executes the MCP integration suites:
+
+```text
+tests/integration/test_memory_summary_api.py
+tests/integration/test_radio_temperature_summary_api.py
+tests/integration/test_bandwidth_consumption_api.py
+```
+
+Each integration suite seeds PostgreSQL board and `timepoints` rows directly,
+calls the public HTTPS API with bearer authentication, and verifies the response
+after Analytics resolves router ownership through fake OWPROV.
+
+12. On failure, CI prints:
+    - Docker container status
+    - fake OWSEC logs
+    - fake OWPROV logs
+    - OWAnalytics container logs
+
+13. Cleanup always removes the OWAnalytics container and terminates fake OWSEC
+and fake OWPROV.
+
+## CD Gate
+
+Downstream test and deployment jobs depend on the Docker image build and the
+`mcp-analytics-tests` job:
+
+```text
+docker
+mcp-analytics-tests
+```
+
+For pull requests, the workflow triggers the external OpenWiFi docker-compose
+test workflow only after both dependencies pass. For pushes to `main`, the dev
+deployment trigger also waits for both dependencies.
+
+---
+
 # 2. Common Preconditions and Database Setup
 
 Before executing the test cases:
@@ -3461,27 +3573,31 @@ Expected response:
 
 ```json
 {
-  "requestedWindow": {
-    "startTime": "2026-07-26T12:00:00Z",
-    "endTime": "2026-07-27T12:00:00Z"
+  "data": {
+    "items": [
+      {
+        "mac": "e2:51:95:ed:0f:28",
+        "rx_bytes": 106487500,
+        "tx_bytes": 3851250,
+        "total_bytes": 110338750,
+        "data_consume_rx": "106.49 MB",
+        "data_consume_tx": "3.85 MB",
+        "total_data_usage": "110.34 MB"
+      }
+    ],
+    "totalClients": 1,
+    "truncated": false
   },
-  "observedWindow": {
-    "startTime": "2026-07-26T12:00:00Z",
-    "endTime": "2026-07-27T12:00:00Z"
-  },
-  "items": [
-    {
-      "mac": "e2:51:95:ed:0f:28",
-      "rx_bytes": 106487500,
-      "tx_bytes": 3851250,
-      "total_bytes": 110338750,
-      "data_consume_rx": "106.49 MB",
-      "data_consume_tx": "3.85 MB",
-      "total_data_usage": "110.34 MB"
+  "meta": {
+    "requestedWindow": {
+      "startTime": "2026-07-26T12:00:00Z",
+      "endTime": "2026-07-27T12:00:00Z"
+    },
+    "observedWindow": {
+      "startTime": "2026-07-26T12:00:00Z",
+      "endTime": "2026-07-27T12:00:00Z"
     }
-  ],
-  "totalClients": 1,
-  "truncated": false
+  }
 }
 ```
 
@@ -3837,17 +3953,21 @@ total = 0
 
 ```json
 {
-  "requestedWindow": {
-    "startTime": "2026-07-26T12:00:00Z",
-    "endTime": "2026-07-27T12:00:00Z"
+  "data": {
+    "items": [],
+    "totalClients": 0,
+    "truncated": false
   },
-  "observedWindow": {
-    "startTime": null,
-    "endTime": null
-  },
-  "items": [],
-  "totalClients": 0,
-  "truncated": false
+  "meta": {
+    "requestedWindow": {
+      "startTime": "2026-07-26T12:00:00Z",
+      "endTime": "2026-07-27T12:00:00Z"
+    },
+    "observedWindow": {
+      "startTime": null,
+      "endTime": null
+    }
+  }
 }
 ```
 
@@ -4538,8 +4658,8 @@ Five separate MCP metric HTTP requests are made for the same gateway `routerId`.
 ```text
 Memory API:      null summary fields
 Temperature API: null summary fields
-Usage API:       object envelope with items: [], totalClients: 0, truncated: false
-RSSI API:        object envelope with items: [], totalClients: 0, truncated: false
+Usage API:       data.items = [], data.totalClients = 0, data.truncated = false
+RSSI API:        data.items = [], data.totalClients = 0, data.truncated = false
 Availability:    data.fetch_status = success, data.offline_count = 0, meta.offlineEventCount = 0
 ```
 
@@ -4713,8 +4833,10 @@ transition history for state tracking, but they do not contribute to
 
 ### Expected result
 
-* Usage (`GET /api/v1/devices/{routerId}/wifi-clients/usage-summary`) and RSSI (`GET /api/v1/devices/{routerId}/wifi-clients/rssi-summary`) summary responses are object envelopes containing `requestedWindow`, `observedWindow`, `items`, `totalClients`, and `truncated`.
-* When no clients match the requested interval, `items` is an empty array `[]`, `totalClients` is `0`, and `truncated` is `false`.
+* Usage (`GET /api/v1/devices/{routerId}/wifi-clients/usage-summary`) and RSSI (`GET /api/v1/devices/{routerId}/wifi-clients/rssi-summary`) summary responses use the shared MCP `{data, meta}` envelope.
+* `meta` contains `requestedWindow` and `observedWindow`.
+* `data` contains `items`, `totalClients`, and `truncated`.
+* When no clients match the requested interval, `data.items` is an empty array `[]`, `data.totalClients` is `0`, and `data.truncated` is `false`.
 
 ---
 
@@ -4797,7 +4919,7 @@ The PR implementation is functionally accepted when:
 16. RSSI thresholds and boundary values are classified correctly.
 17. Invalid RSSI values are ignored.
 18. RSSI percentages are calculated per client.
-19. Usage and RSSI client-summary responses use the documented object envelope shape (`requestedWindow`, `observedWindow`, `items`, `totalClients`, `truncated`) matching TC-CONTRACT-006.
+19. Usage and RSSI client-summary responses use the documented shared MCP `{data, meta}` envelope shape matching TC-CONTRACT-006.
 20. Memory and temperature successful responses include `requestedWindow` and `observedWindow` matching their OpenAPI schemas.
 21. Gateway shutdown and network loss create one offline transition each.
 22. Repeated pings and disconnections do not create duplicate transitions.
