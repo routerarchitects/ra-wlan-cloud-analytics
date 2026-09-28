@@ -131,7 +131,9 @@ add_executable(owanalytics
         src/RESTAPI/RESTAPI_device_radio_temperature_summary_handler.cpp src/RESTAPI/RESTAPI_device_radio_temperature_summary_handler.h
         src/RESTAPI/RESTAPI_device_bandwidth_consumption_handler.cpp src/RESTAPI/RESTAPI_device_bandwidth_consumption_handler.h
         src/RESTAPI/RESTAPI_device_rssi_summary_handler.cpp src/RESTAPI/RESTAPI_device_rssi_summary_handler.h
+        src/RESTAPI/RESTAPI_device_availability_summary_handler.cpp src/RESTAPI/RESTAPI_device_availability_summary_handler.h
         src/storage/storage_rssi_parser.cpp src/storage/storage_rssi_parser.h
+        src/storage/storage_device_availability_events.cpp src/storage/storage_device_availability_events.h
         src/RouterIdResolver.cpp src/RouterIdResolver.h
         src/RESTObjects/RESTAPI_SubObjects.cpp src/RESTObjects/RESTAPI_SubObjects.h
         src/RESTAPI/RESTAPI_routers.cpp
@@ -223,4 +225,27 @@ if(BUILD_TESTING)
             fmt::fmt
             resolv)
     add_test(NAME test_mcp_rssi_quality COMMAND test_mcp_rssi_quality)
+
+    add_executable(test_mcp_availability_summary
+            tests/test_mcp_availability_summary.cpp
+            src/RESTObjects/RESTAPI_MCPAnalyticsObjects.cpp
+            src/framework/utils.cpp)
+    target_include_directories(test_mcp_availability_summary PRIVATE src)
+    target_link_libraries(test_mcp_availability_summary PUBLIC
+            ${Poco_LIBRARIES}
+            ${ZLIB_LIBRARIES}
+            fmt::fmt
+            resolv)
+    add_test(NAME test_mcp_availability_summary COMMAND test_mcp_availability_summary)
+
+    add_executable(test_device_availability_events_retention
+            tests/test_device_availability_events_retention.cpp
+            src/storage/storage_device_availability_events.cpp)
+    target_include_directories(test_device_availability_events_retention PRIVATE src)
+    target_link_libraries(test_device_availability_events_retention PUBLIC
+            ${Poco_LIBRARIES}
+            ${ZLIB_LIBRARIES}
+            fmt::fmt
+            resolv)
+    add_test(NAME test_device_availability_events_retention COMMAND test_device_availability_events_retention)
 endif()

@@ -41,6 +41,7 @@ namespace OpenWifi {
 		VenueCoordinator()->StopBoard(id);
 		StorageService()->BoardsDB().DeleteRecord("id", id);
 		StorageService()->TimePointsDB().DeleteBoard(id);
+		StorageService()->DeviceAvailabilityEventsDB().DeleteEventsForBoard(id);
 		return OK();
 	}
 

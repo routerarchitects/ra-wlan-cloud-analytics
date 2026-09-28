@@ -952,6 +952,24 @@ namespace OpenWifi {
 			return Summary;
 		}
 
+		inline AnalyticsObjects::MCPGatewayAvailabilitySummary
+		CalculateGatewayAvailabilitySummary(const std::string &routerId,
+											const Window &Requested,
+											uint64_t offlineCount,
+											const std::optional<uint64_t> &observedStartTime,
+											const std::optional<uint64_t> &observedEndTime) {
+			AnalyticsObjects::MCPGatewayAvailabilitySummary Summary;
+			Summary.meta.requestedWindow.startTime = FormatTimestamp(Requested.startTime);
+			Summary.meta.requestedWindow.endTime = FormatTimestamp(Requested.endTime);
+			if (observedStartTime)
+				Summary.meta.observedWindow.startTime = FormatTimestamp(*observedStartTime);
+			if (observedEndTime)
+				Summary.meta.observedWindow.endTime = FormatTimestamp(*observedEndTime);
+			Summary.data.gw_uuid = routerId;
+			Summary.data.offlineEventCount = offlineCount;
+			return Summary;
+		}
+
 		void SendError(RESTAPIHandler &Handler, const Error &E);
 		bool AuthenticateBearerToken(RESTAPIHandler &Handler, Error &E);
 

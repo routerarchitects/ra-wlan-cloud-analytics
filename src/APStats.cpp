@@ -62,7 +62,67 @@ namespace OpenWifi {
 		return std::nullopt;
 	}
 
+	static std::string GetOptionalStringJSON(const char *field, const nlohmann::json &doc) {
+		try {
+			if (doc.contains(field) && !doc[field].is_null()) {
+				if (doc[field].is_string())
+					return doc[field].get<std::string>();
+				if (doc[field].is_number_unsigned())
+					return std::to_string(doc[field].get<uint64_t>());
+				if (doc[field].is_number_integer())
+					return std::to_string(doc[field].get<int64_t>());
+			}
+		} catch (...) {
+		}
+		return {};
+	}
 
+	static std::string BuildAvailabilityIdempotencyKey(const std::string &SerialNumber,
+											 const nlohmann::json &Disconnection,
+											 uint64_t EventTime) {
+		const auto SourceEventId = GetOptionalStringJSON("uuid", Disconnection);
+		if (!SourceEventId.empty())
+			return fmt::format("availability:{}:offline:uuid:{}", SerialNumber, SourceEventId);
+		return fmt::format("availability:{}:offline:timestamp:{}", SerialNumber, EventTime);
+	}
+
+	static void PersistOfflineAvailabilityTransition(Poco::Logger &Logger,
+											 const std::string &BoardId,
+											 const AnalyticsObjects::DeviceInfo &Device,
+											 const nlohmann::json &Disconnection) {
+		if (!Device.connected)
+			return;
+
+		uint64_t EventTime = 0;
+		GetJSON("timestamp", Disconnection, EventTime, (uint64_t)0);
+		if (EventTime == 0) {
+			poco_warning(Logger, fmt::format("{}: availability disconnection event missing timestamp.",
+									  Device.serialNumber));
+			return;
+		}
+
+		AnalyticsObjects::DeviceAvailabilityEvent Event;
+		Event.id = MicroServiceCreateUUID();
+		Event.board_id = BoardId;
+		Event.serialNumber = Device.serialNumber;
+		Event.event_type = "offline";
+		Event.event_time = EventTime;
+		Event.reason = GetOptionalStringJSON("reason", Disconnection);
+		Event.connection_ip = GetOptionalStringJSON("connectionIp", Disconnection);
+		if (Event.connection_ip.empty())
+			Event.connection_ip = Device.connectionIp;
+		Event.session_id = GetOptionalStringJSON("session_id", Disconnection);
+		if (Event.session_id.empty())
+			Event.session_id = GetOptionalStringJSON("sessionId", Disconnection);
+		Event.event_id = GetOptionalStringJSON("uuid", Disconnection);
+		Event.idempotency_key =
+			BuildAvailabilityIdempotencyKey(Device.serialNumber, Disconnection, EventTime);
+
+		if (!StorageService()->DeviceAvailabilityEventsDB().CreateEventIfAbsent(Event)) {
+			poco_error(Logger, fmt::format("{}: failed to persist offline availability transition.",
+								 Device.serialNumber));
+		}
+	}
 
 	inline double safe_div(uint64_t a, uint64_t b) {
 		if (b == 0)
@@ -626,6 +686,7 @@ namespace OpenWifi {
 				poco_trace(Logger(), fmt::format("{}: disconnection message.", DI_.serialNumber));
 				auto Disconnection = (*Connection)["disconnection"];
 				GetJSON("timestamp", Disconnection, DI_.lastDisconnection, (uint64_t)0);
+				PersistOfflineAvailabilityTransition(Logger(), boardId_, DI_, Disconnection);
 				got_base = got_health = got_connection = false;
 				DI_.connected = false;
 			} else if (Connection->contains("capabilities")) {

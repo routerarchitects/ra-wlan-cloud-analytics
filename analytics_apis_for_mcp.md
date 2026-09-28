@@ -10,7 +10,7 @@ This document defines the request format, response format, and implementation lo
 
 This specification is structured across two in-scope component areas:
 1. **MCP Analytics Behavior Specification**: Intended HTTP requests, parameter validation, response envelopes, and ownership/error semantics for future MCP-facing Analytics handlers.
-2. **Persistence & Pipeline Architecture Design**: Internal storage structures (`device_availability_events`, `device_availability_state`), Kafka event consumption/ordering, Kafka offset commit semantics, and cutover semantics.
+2. **Persistence & Pipeline Architecture Design**: Internal storage structures (`device_availability_events`, `device_availability_state`), Kafka event consumption/ordering, Kafka offset commit semantics, and retention semantics.
 
 Follow-up deliverables:
 - OpenAPI contract/schema updates in `openapi/owanalytics.yaml`.
@@ -22,7 +22,7 @@ Follow-up deliverables:
 > contract/schema update is a follow-up deliverable. The specified production
 > architecture changes—including two new availability persistence structures
 > (`device_availability_events`, `device_availability_state`), Kafka event
-> ordering and offset commit rules, and cutover migration rules—constitute a production architecture
+> ordering and offset commit rules, and retention rules—constitute a production architecture
 > specification. Approving or merging this behavior specification PR does NOT bypass
 > separate explicit architecture design sign-off for backend schema additions and
 > production Kafka pipeline changes prior to production deployment.
@@ -87,9 +87,7 @@ All REST handlers must enforce request validation in four distinct sequential ph
 3. **Phase 3: Duration, Retention & Endpoint Domain Validation**
    - Validate duration against scope maximum (all endpoints): `lookbackHours > maxLookbackHours` -> HTTP `400 invalid_lookback_hours`.
    - Validate requested range against data retention window (all endpoints): requested window outside retention -> HTTP `400 lookback_outside_retention`.
-   - Validate endpoint-specific domain cutover thresholds:
-     - `availability-summary` endpoint only: `start_time < availabilityValidFrom` -> HTTP `400 availability_range_before_cutover`.
-     - `memory-summary`, `radio-temperature-summary`, `rssi-summary`, and `bandwidth-consumption` endpoints: no domain cutover validation unless explicitly defined by that endpoint.
+   - Endpoint-specific domain validation may apply only when explicitly defined by that endpoint.
 
 Example:
 
@@ -1823,6 +1821,10 @@ Indexes:
     serialNumber ASC
     event_time ASC
 
+  availability_board_time_index:
+    board_id ASC
+    event_time ASC
+
 Unique constraints:
   availability_idempotency_key_unique:
     idempotency_key ASC
@@ -1841,6 +1843,8 @@ When querying device_availability_events, order by event_time only.
 `event_id` stores the normalized source event id when the payload provides one, using `payload.ping.uuid`, `payload.uuid`, or `payload.disconnection.uuid` only when that `uuid` is stable for the same logical source event.
 
 `serialNumber` is the durable identity for availability history. `board_id` is event-time context only and must be nullable because connection events can arrive when the router is not currently assigned to an Analytics board, when OWPROV is unavailable, or after ownership has changed. Do not drop availability events only because current board ownership cannot be resolved.
+
+Persisted availability events are subject to the Analytics retention policy associated with their historical `board_id`. Expired rows are periodically removed from `device_availability_events` by the storage cleanup timer using `event_time < now - retention`; rows exactly at the cutoff are preserved. Boards with zero effective retention are skipped, matching the API behavior that treats zero retention as unavailable rather than an instruction to delete all historical rows. When a board is explicitly deleted or retired, all availability events for that historical `board_id` are deleted with the board to avoid orphaned history that can no longer obtain a board retention value.
 
 Add a persisted current-state table for restart-safe transition detection:
 
@@ -2103,18 +2107,10 @@ src/StorageService.cpp
 ```
 
 Add a DB upgrade/migration path for the new tables. Existing deployments will
-start with no historical availability events. Initialize a fixed
-`availabilityValidFrom` timestamp when availability-event persistence starts and
-persist it as `system_properties.availability_valid_from`. The API should return
-`offline_count: 0` for successful empty queries whose requested range starts at
-or after the persisted `availabilityValidFrom`; do not infer old events from
-`lastDisconnection`.
-
-`availabilityValidFrom` represents the timestamp from which this Analytics
-database can reliably claim that availability transition persistence was active.
-Once initialized, the persisted `system_properties` value is authoritative.
-Changing an environment variable or config file must not silently change the
-historical validity boundary.
+start with no historical availability events. The API returns `offline_count: 0`
+for successful empty queries when no persisted `device_availability_events` rows
+match the resolved board, requested serial number, event type, and requested
+half-open time window; do not infer old events from `lastDisconnection`.
 
 Add all availability storage files to `CMakeLists.txt`, including `storage_device_availability_events.*` and `storage_device_availability_state.*`. Register database migration/upgrade logic for these availability tables so fresh databases and upgraded deployments create the event table, state table, indexes, uniqueness constraints, and state constraints consistently.
 
@@ -2574,102 +2570,31 @@ offline_count =
 observed by Analytics for the requested interval. It is not proof that every
 source event for the interval has been ingested.
 
-Availability migration boundary:
+Availability summary results are derived only from persisted
+`device_availability_events` rows that match the requested gateway, the gateway's
+resolved Analytics board, `event_type = 'offline'`, and the requested half-open
+time window.
+
+The requested query window is used directly:
 
 ```text
-availabilityValidFrom is a durable, deployment-wide cutover timestamp for
-availability history. It represents the timestamp from which this Analytics
-database can reliably claim that availability transition persistence was active.
-
-The authoritative persisted source of truth is:
-  system_properties.availability_valid_from
-
-Configuration and environment values are first-time initialization inputs only.
-They are not equivalent runtime sources once the database property exists.
-Changing an environment variable or config file must not silently change the
-historical validity boundary.
-
-Initialization input precedence, used only when
-system_properties.availability_valid_from does not already exist:
-  ANALYTICS_AVAILABILITY_VALID_FROM
-    overrides
-  availability_valid_from from /etc/ucentral/owanalytics.json
-
-On service startup:
-  rawEnvValue =
-      ANALYTICS_AVAILABILITY_VALID_FROM if present, else unset
-
-  rawConfigValue =
-      availability_valid_from from /etc/ucentral/owanalytics.json if present,
-      else unset
-
-  persistedValue =
-      read system_properties.availability_valid_from
-
-  if persistedValue exists:
-      availabilityValidFrom = persistedValue
-
-      for each supplied rawEnvValue and rawConfigValue:
-          configuredValue = parse supplied value
-          if configuredValue is invalid:
-              fail startup with a clear invalid-configuration error
-
-          if configuredValue != persistedValue:
-              fail startup with a clear configuration-mismatch error:
-                availability_valid_from configuration mismatch:
-                configured value does not match persisted
-                system_properties.availability_valid_from
-
-  else:
-      rawConfiguredValue =
-          rawEnvValue if set
-          else rawConfigValue if set
-          else unset
-
-      if rawConfiguredValue is unset:
-          fail startup with a clear missing-configuration error
-
-      configuredValue = parse rawConfiguredValue
-      if configuredValue is invalid:
-          fail startup with a clear invalid-configuration error
-
-      insert system_properties.availability_valid_from = configuredValue
-      availabilityValidFrom = configuredValue
-
-      if another replica concurrently inserted the property first:
-          re-read system_properties.availability_valid_from
-          apply the persistedValue-exists mismatch checks above
-
-The persisted value must never be silently overwritten during a normal restart
-or deployment. All service replicas and process restarts MUST use the identical
-persisted system_properties.availability_valid_from timestamp to guarantee
-multi-replica and restart consistency. Dynamic process-start timestamps
-(e.g. std::chrono::system_clock::now() at startup) are strictly prohibited.
-
-If startTime < availabilityValidFrom:
-  reject the request
-  do not query device_availability_events
-  do not return offline_count: 0
-
-If startTime >= availabilityValidFrom:
-  query device_availability_events normally
+queryStart = requestedStart
+queryEnd   = requestedEnd
 ```
-
-Rejecting pre-cutover ranges prevents a successful zero response from meaning either
-"no outages occurred" or "Analytics was not collecting availability events yet."
 
 ### Query
 
 ```sql
 SELECT COUNT(*) AS offline_count
 FROM device_availability_events
-WHERE serialNumber = :router_id
+WHERE board_id = :resolvedBoardId
+  AND serialNumber = :router_id
   AND event_type = 'offline'
   AND event_time >= :start_time
   AND event_time < :end_time;
 ```
 
-Do not require `board_id = :resolvedBoardId` for the availability count. `board_id` is nullable event-time context and can differ from the router's current board after reassignment. The durable query identity for gateway availability history is `serialNumber`.
+Require both `board_id = :resolvedBoardId` and `serialNumber = :router_id` for the availability count. The resolved board scopes history to the router's current Analytics board, while the serial number isolates the requested gateway within that board.
 
 The availability REST request path must not call Kafka, compare committed
 offsets to partition high watermarks, inspect consumer lag, wait for the
@@ -2682,8 +2607,8 @@ Final availability query flow:
 Authenticate request
 validate routerId, timestampTill, and lookbackHours
 resolve router ownership
-validate retention and availabilityValidFrom
-query device_availability_events for serialNumber and [startTime, endTime)
+validate retention
+query device_availability_events for resolvedBoardId, serialNumber, and [startTime, endTime)
 filter event_type = offline
 offline_count = number of persisted matching rows
 derive observedWindow from matching persisted offline rows
@@ -2739,21 +2664,6 @@ Same historical API request:
 Both responses are valid because the API reports the persisted observations
 available at request time.
 
-### Range Before Availability Cutover
-
-Use an HTTP error:
-
-```http
-400 Bad Request
-```
-
-```json
-{
-  "error": "availability_range_before_cutover",
-  "message": "Availability history is only available for ranges starting at or after availabilityValidFrom"
-}
-```
-
 ### Success Response with No Offline Events
 
 ```json
@@ -2778,8 +2688,7 @@ Use an HTTP error:
 ```
 
 A zero result means no persisted offline transition was observed in the
-requested post-cutover interval based on the data currently available in
-Analytics storage. It does not make claims about outages not yet observed,
+requested interval based on the matching data currently available in
 unconsumed messages, or Kafka consumer position. Kafka consumer lag is
 operational state and is not represented as availability-domain response
 metadata.

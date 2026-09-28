@@ -89,7 +89,7 @@ components:
                 error: lookback_outside_retention
                 message: Requested range is outside the configured monitoring retention window
     AvailabilityAnalyticsBadRequest:
-      description: Invalid request or availability range before the supported cutover.
+      description: Invalid availability summary request.
       content:
         application/json:
           schema:
@@ -115,10 +115,6 @@ components:
               value:
                 error: lookback_outside_retention
                 message: Requested range is outside the configured monitoring retention window
-            availabilityBeforeCutover:
-              value:
-                error: availability_range_before_cutover
-                message: Availability history is only available for ranges starting at or after availabilityValidFrom
     AnalyticsUnauthorized:
       description: Bearer token is missing, invalid, or expired.
       content:
@@ -1083,7 +1079,6 @@ components:
             - invalid_lookback_hours
             - invalid_query_parameter
             - lookback_outside_retention
-            - availability_range_before_cutover
         message:
           type: string
 
@@ -1562,17 +1557,11 @@ components:
       required:
         - requestedWindow
         - observedWindow
-        - offlineEventCount
       properties:
         requestedWindow:
           $ref: '#/components/schemas/RequestedWindow'
         observedWindow:
           $ref: '#/components/schemas/ObservedWindow'
-        offlineEventCount:
-          type: integer
-          format: int64
-          minimum: 0
-          description: Number of persisted offline transition rows contributing to offline_count.
 
     GatewayAvailabilityData:
       type: object
@@ -1580,7 +1569,7 @@ components:
       required:
         - gw_uuid
         - fetch_status
-        - offline_count
+        - offlineEventCount
       properties:
         gw_uuid:
           $ref: '#/components/schemas/RouterId'
@@ -1590,18 +1579,18 @@ components:
             - success
           description: Status string for availability data retrieval; always "success" in HTTP 200 responses.
           example: success
-        offline_count:
+        offlineEventCount:
           type: integer
           format: int64
           minimum: 0
-          description: Number of persisted offline transition rows currently available in Analytics storage for the requested half-open interval.
+          description: Number of persisted offline transition rows matching the requested gateway and half-open interval in Analytics storage.
 
     GatewayAvailabilitySummaryResponse:
       type: object
       description: >
         Wrapped gateway availability summary response. The endpoint counts persisted offline
-        transition rows in device_availability_events for the requested interval and reports the
-        observed event-time window for those rows.
+        transition rows in device_availability_events for the requested half-open interval and reports the
+        observed event-time window for matching rows.
       required:
         - meta
         - data
@@ -2206,7 +2195,7 @@ paths:
         - $ref: '#/components/parameters/LookbackHours'
       responses:
         200:
-          description: Return the gateway offline-transition count calculated from availability events currently persisted in Analytics storage.
+          description: Return the gateway offline-transition count calculated from matching availability events currently persisted in Analytics storage for the requested range.
           content:
             application/json:
               schema:
@@ -2221,11 +2210,10 @@ paths:
                       observedWindow:
                         startTime: "2026-07-26T13:15:00Z"
                         endTime: "2026-07-27T09:45:00Z"
-                      offlineEventCount: 6
                     data:
                       gw_uuid: "60cf84f22290"
                       fetch_status: success
-                      offline_count: 6
+                      offlineEventCount: 6
                 zeroEvents:
                   value:
                     meta:
@@ -2235,11 +2223,10 @@ paths:
                       observedWindow:
                         startTime: null
                         endTime: null
-                      offlineEventCount: 0
                     data:
                       gw_uuid: "60cf84f22290"
                       fetch_status: success
-                      offline_count: 0
+                      offlineEventCount: 0
         400:
           $ref: '#/components/responses/AvailabilityAnalyticsBadRequest'
         401:

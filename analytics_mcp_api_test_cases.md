@@ -24,11 +24,11 @@ get_gateway_offline_count
 
 The specification and test suite are modularized into three distinct architectural components:
 1. **Public API Contract Specification**: OpenAPI 3.0 schemas (`openapi/owanalytics.yaml` v2.7.0) defining external REST endpoints, query parameters, HTTP status codes, and response envelopes.
-2. **Persistence & Pipeline Architecture Design**: Backend storage structures (`device_availability_events`, `device_availability_state`), Kafka event consumption semantics, and cutover/migration behavior.
+2. **Persistence & Pipeline Architecture Design**: Backend storage structures (`device_availability_events`, `device_availability_state`), Kafka event consumption semantics, and retention behavior.
 3. **Test Specification & Verification Matrix**: Independent verification matrix (this document) defining assertion criteria for API contracts, integration workflows, white-box database rules, and failure modes.
 
 > [!IMPORTANT]
-> This PR reframes and defines the complete target contract and test specification suite. The specified production architecture changes—including availability persistence tables (`device_availability_events`, `device_availability_state`), Kafka event consumption semantics, cutover migration rules, and OpenAPI v2.7.0 endpoint schemas—constitute a production architecture specification. Approving or merging this test specification PR does NOT bypass separate explicit architecture design sign-off for backend schema additions and production Kafka pipeline changes prior to production deployment.
+> This PR reframes and defines the complete target contract and test specification suite. The specified production architecture changes—including availability persistence tables (`device_availability_events`, `device_availability_state`), Kafka event consumption semantics, retention rules, and OpenAPI v2.7.0 endpoint schemas—constitute a production architecture specification. Approving or merging this test specification PR does NOT bypass separate explicit architecture design sign-off for backend schema additions and production Kafka pipeline changes prior to production deployment.
 
 The test cases cover:
 * API contract tests for request shapes, HTTP status codes, response schemas, parameter validation, filtering, and half-open time-range window semantics `[startTime, endTime)`.
@@ -207,7 +207,7 @@ OWPROV lookup if required
     ↓
 OWPROV caller visibility authorization
     ↓
-Retention / cutover validation (availabilityValidFrom)
+Retention validation
     ↓
 Analytics database / query processing
 ```
@@ -1014,20 +1014,6 @@ Use a valid router ID and a lookback window whose calculated `[startTime, endTim
 
 ---
 
-## TC-COMMON-023: Availability range before cutover
-
-### Request
-
-Call `GET /api/v1/devices/{routerId}/availability-summary` with a calculated `startTime` before `availabilityValidFrom`.
-
-### Expected result
-
-* HTTP `400 Bad Request`.
-* Error is `availability_range_before_cutover`.
-* The API does not return `offline_count: 0` for pre-cutover ranges.
-
----
-
 ## TC-COMMON-023A: Future timestampTill exactly at allowed clock skew boundary
 
 ### Request
@@ -1081,7 +1067,7 @@ Verify that current server time is captured exactly once per request execution (
 
 ### Expected result
 
-* Internal clock evaluation uses one frozen `capturedNow` reference timestamp throughout parameter validation, clock-skew checks, and cutover validation.
+* Internal clock evaluation uses one frozen `capturedNow` reference timestamp throughout parameter validation and clock-skew checks.
 * Slight execution delays during handler processing do not cause inconsistent clock evaluation for a single request.
 
 ---
@@ -1455,8 +1441,8 @@ last_event_time = ping source timestamp
 updated_at >= processing time
 ```
 
-* The availability-summary API uses the documented `meta.requestedWindow`, `meta.observedWindow`, `meta.offlineEventCount`, and `data.offline_count` response shape.
-* A requested window with no persisted offline transition rows returns `data.offline_count = 0`, `meta.offlineEventCount = 0`, and `meta.observedWindow.startTime = meta.observedWindow.endTime = null`.
+* The availability-summary API uses the documented `meta.requestedWindow`, `meta.observedWindow`, and `data.offlineEventCount` response shape.
+* A requested window with no persisted offline transition rows returns `data.offlineEventCount = 0`, and `meta.observedWindow.startTime = meta.observedWindow.endTime = null`.
 
 ---
 
@@ -1496,7 +1482,7 @@ Example messages:
 * No additional `online` event is inserted after the first online state.
 * `last_event_time` is updated to the latest source-newer ping timestamp accepted by the per-serial ordering stage.
 * `current_state` remains `online`.
-* `offline_count` remains `0`.
+* `data.offlineEventCount` remains `0`.
 
 ---
 
@@ -1552,13 +1538,12 @@ event_time = disconnection message timestamp
     "observedWindow": {
       "startTime": "<firstOfflineEventAt>",
       "endTime": "<lastOfflineEventAt>"
-    },
-    "offlineEventCount": 1
+    }
   },
   "data": {
     "gw_uuid": "60cf84f22290",
     "fetch_status": "success",
-    "offline_count": 1
+    "offlineEventCount": 1
   }
 }
 ```
@@ -1594,7 +1579,7 @@ sudo shutdown -h now
 
 * One offline transition is stored.
 * Repeated controller checks while the gateway remains shut down do not create more offline events.
-* `offline_count` increases by exactly `1`.
+* `data.offlineEventCount` increases by exactly `1`.
 
 ---
 
@@ -1621,7 +1606,7 @@ Verify that removing the gateway's Ethernet connection creates one offline trans
 ### Expected result
 
 * One offline event is stored.
-* `offline_count` increases by `1`.
+* `data.offlineEventCount` increases by `1`.
 * Keeping the cable disconnected does not create repeated offline events.
 
 ---
@@ -1649,7 +1634,7 @@ Verify that losing the gateway's Wi-Fi uplink creates an offline transition.
 ### Expected result
 
 * One offline event is stored.
-* `offline_count` increases by exactly `1`.
+* `data.offlineEventCount` increases by exactly `1`.
 
 ---
 
@@ -1677,7 +1662,7 @@ Verify that a powered-on gateway with no cloud connectivity is considered offlin
 * One offline transition is stored.
 * The gateway is considered offline even though it is still powered on.
 * The reason field may indicate network or connection loss when available.
-* `offline_count` increases by `1`.
+* `data.offlineEventCount` increases by `1`.
 
 ---
 
@@ -1733,13 +1718,12 @@ API result:
     "observedWindow": {
       "startTime": "12:10",
       "endTime": "12:10"
-    },
-    "offlineEventCount": 1
+    }
   },
   "data": {
     "gw_uuid": "60cf84f22290",
     "fetch_status": "success",
-    "offline_count": 1
+    "offlineEventCount": 1
   }
 }
 ```
@@ -1826,13 +1810,12 @@ The API returns:
     "observedWindow": {
       "startTime": "<firstOfflineEventAt>",
       "endTime": "<lastOfflineEventAt>"
-    },
-    "offlineEventCount": 3
+    }
   },
   "data": {
     "gw_uuid": "60cf84f22290",
     "fetch_status": "success",
-    "offline_count": 3
+    "offlineEventCount": 3
   }
 }
 ```
@@ -1871,7 +1854,7 @@ Example:
 * Later same-state disconnection messages are ignored.
 * For source-newer repeated disconnection messages accepted by the per-serial ordering stage while `current_state = offline`, `last_event_time` advances.
 * `updated_at` is updated for the latest accepted same-state message.
-* `offline_count` is `1`.
+* `data.offlineEventCount` is `1`.
 
 ---
 
@@ -1899,7 +1882,7 @@ Verify storage-level idempotency when Kafka redelivers the same logical connecti
 * Both deliveries map to the same deterministic `idempotency_key` or source `event_id`.
 * Exactly one transition event row is inserted.
 * The duplicate delivery does not move `current_state`, `last_event_time`, `updated_at`, or transition history.
-* `offline_count` is `1`.
+* `data.offlineEventCount` is `1`.
 
 ---
 
@@ -1983,7 +1966,7 @@ Verify that repeated online messages after an offline-to-online transition do no
 * Exactly one online transition event is inserted.
 * No additional offline event is inserted.
 * The source-newer repeated ping accepted by the per-serial ordering stage updates `last_event_time` and `updated_at`.
-* `offline_count` is unchanged.
+* `data.offlineEventCount` is unchanged.
 
 ---
 
@@ -2047,7 +2030,7 @@ The time window is:
 
 * The `10:00` event is excluded.
 * The `12:00` and `14:00` events are included.
-* `offline_count` is `2`.
+* `data.offlineEventCount` is `2`.
 
 ---
 
@@ -2100,10 +2083,8 @@ transition rows match the requested range.
 
 ### Preconditions
 
-* The requested range starts at or after `availabilityValidFrom`.
-* No `offline` rows exist in `device_availability_events` for the gateway where
-  `event_time >= startTime` and `event_time < endTime`.
-* The cutover behavior for ranges beginning before `availabilityValidFrom` is covered by `TC-COMMON-023`.
+* No `offline` rows exist in `device_availability_events` for the resolved board
+  and gateway where `event_time >= startTime` and `event_time < endTime`.
 
 ### Steps
 
@@ -2113,12 +2094,11 @@ transition rows match the requested range.
 ### Expected result
 
 * The response uses the documented top-level `meta` and `data` shape.
-* `meta.offlineEventCount = 0`.
 * `meta.observedWindow.startTime = null`.
 * `meta.observedWindow.endTime = null`.
 * `data.gw_uuid = "60cf84f22290"`.
 * `data.fetch_status = "success"`.
-* `data.offline_count = 0`.
+* `data.offlineEventCount = 0`.
 
 ```json
 {
@@ -2130,20 +2110,19 @@ transition rows match the requested range.
     "observedWindow": {
       "startTime": null,
       "endTime": null
-    },
-    "offlineEventCount": 0
+    }
   },
   "data": {
     "gw_uuid": "60cf84f22290",
     "fetch_status": "success",
-    "offline_count": 0
+    "offlineEventCount": 0
   }
 }
 ```
 
 The API must not treat an empty observed result as an error. A zero result means
 there are zero matching persisted offline transition rows in Analytics storage
-for the requested post-cutover interval. It is not proof of Kafka ingestion
+for the requested interval. It is not proof of Kafka ingestion
 completeness.
 
 ---
@@ -2164,8 +2143,7 @@ Requested lookback: 24 hours
 ### Expected result
 
 * The old event is excluded by the half-open requested window.
-* `data.offline_count = 0`.
-* `meta.offlineEventCount = 0`.
+* `data.offlineEventCount = 0`.
 * `meta.observedWindow.startTime = null`.
 * `meta.observedWindow.endTime = null`.
 
@@ -2423,7 +2401,7 @@ Verify that first-row creation is concurrency-safe and does not rely on locking 
 * The final state is `current_state = offline`.
 * No offline transition row is inserted because the prior state was unknown.
 * An availability-summary response for a window containing these first observations uses the documented observed-data response shape.
-* When no offline transition row is persisted for the requested interval, `data.offline_count = 0`, `meta.offlineEventCount = 0`, and both observed-window timestamps are `null`.
+* When no offline transition row is persisted for the requested interval, `data.offlineEventCount = 0`, and both observed-window timestamps are `null`.
 
 ---
 
@@ -2509,7 +2487,7 @@ Verify the explicit bootstrap behavior when the first accepted availability
 message for a gateway is `disconnection`.
 
 This contract treats an initial unknown-to-offline observation as state
-initialization, not as a counted offline transition, because `offline_count`
+initialization, not as a counted offline transition, because `data.offlineEventCount`
 counts observed online-to-offline transitions.
 
 ### Preconditions
@@ -2558,7 +2536,7 @@ Verify that transition detection is scoped by `serialNumber`.
 
 ### Objective
 
-Verify that online transition rows do not affect `offline_count`.
+Verify that online transition rows do not affect `data.offlineEventCount`.
 
 ### Steps
 
@@ -2576,8 +2554,7 @@ Verify that online transition rows do not affect `offline_count`.
 
 * The API counts only the two stored `offline` rows.
 * Stored `online` rows are ignored by the offline count.
-* `meta.offlineEventCount = 2`.
-* `offline_count` is `2`.
+* `data.offlineEventCount` is `2`.
 * `meta.observedWindow` is bounded by the two offline rows (`12:10` and `12:30`); the `12:15` online row must not extend `observedWindow`.
 
 ---
@@ -2637,48 +2614,15 @@ Ethernet reconnected        → online event
     "observedWindow": {
       "startTime": "<firstOfflineEventAt>",
       "endTime": "<lastOfflineEventAt>"
-    },
-    "offlineEventCount": 2
+    }
   },
   "data": {
     "gw_uuid": "60cf84f22290",
     "fetch_status": "success",
-    "offline_count": 2
+    "offlineEventCount": 2
   }
 }
 ```
-
----
-
-## TC-AVAIL-034: Multi-replica and process restart availabilityValidFrom consistency against persisted system_properties
-
-### Objective
-
-Verify that `availabilityValidFrom` is initialized once in `system_properties` (`availability_valid_from`) when availability persistence starts, and that any subsequent startup with a conflicting or invalid environment/configuration file value fails fast immediately.
-
-### Preconditions
-
-* Database `system_properties` table exists to persist durable system metadata key-value pairs.
-
-### Steps
-
-1. Start Replica A and Replica B concurrently when availability persistence starts with initial environment/config `availability_valid_from = 2026-07-01T00:00:00Z`.
-2. Inspect `system_properties` in database storage.
-3. Issue a request with `startTime = 2026-06-30T23:00:00Z` (`startTime < availabilityValidFrom`) to both Replica A and Replica B.
-4. Modify the local environment variable or configuration file to a conflicting value (`2026-08-01T00:00:00Z`) or an invalid timestamp format (`invalid-date`).
-5. Attempt to start a process or replica with the conflicting or invalid configuration.
-6. Inspect startup exit code, log diagnostics, and database `system_properties`.
-
-### Expected result
-
-* The cutover value is initialized exactly once in `system_properties.availability_valid_from` (`2026-07-01T00:00:00Z`).
-* Concurrent initialization by Replica A and Replica B converges safely on the same persisted value without race conditions or duplicate property inserts.
-* Both Replica A and Replica B reject requests with `startTime < availabilityValidFrom` with HTTP `400 Bad Request` (`error: "availability_range_before_cutover"`).
-* Startup with a conflicting configuration value (`2026-08-01T00:00:00Z`) or an invalid timestamp MUST fail immediately on process startup with a non-zero exit code (`fail-fast`).
-* Startup emits a clear configuration-mismatch error diagnostic.
-* The persisted `system_properties.availability_valid_from` value in database storage remains unchanged (`2026-07-01T00:00:00Z`).
-* Every service replica exhibits identical fail-fast startup behavior on configuration mismatch.
-* Dynamic process startup timestamps (e.g. `std::chrono::system_clock::now()`) are prohibited.
 
 ---
 
@@ -4693,7 +4637,7 @@ lookbackHours
 * Every API calculates the same requested `startTime` and `endTime` from `timestampTill` and `lookbackHours`.
 * Memory, usage, RSSI, and temperature apply the requested half-open aggregation window: `startTime <= sample_time < endTime`.
 * Temperature returns `200 OK` with null aggregates when no valid migrated nullable `temperature` samples exist in the requested window.
-* Availability applies the requested event window only when `startTime >= availabilityValidFrom`; otherwise the availability request is rejected according to the API contract.
+* Availability applies the requested half-open event window directly to matching persisted offline transition rows.
 
 ---
 
@@ -4720,12 +4664,11 @@ Memory API:      null summary fields
 Temperature API: null summary fields
 Usage API:       data.items = [], data.totalClients = 0, data.truncated = false
 RSSI API:        data.items = [], data.totalClients = 0, data.truncated = false
-Availability:    data.fetch_status = success, data.offline_count = 0, meta.offlineEventCount = 0
+Availability:    data.fetch_status = success, data.offlineEventCount = 0
 ```
 
 * All metric responses use HTTP `200 OK` when queries succeed but return no data.
-* Availability returns `data.fetch_status = "success"`, `data.offline_count = 0`, `meta.offlineEventCount = 0`, and `meta.observedWindow` with both timestamps `null` when no persisted offline rows match the requested interval.
-* If `startTime < availabilityValidFrom`, Availability returns `400 Bad Request` with `error: "availability_range_before_cutover"`.
+* Availability returns `data.fetch_status = "success"`, `data.offlineEventCount = 0`, and `meta.observedWindow` with both timestamps `null` when no persisted offline rows match the requested interval.
 
 ---
 
@@ -4862,30 +4805,23 @@ Expected `data` fields:
 ```text
 gw_uuid
 fetch_status
-offline_count
+offlineEventCount
 ```
 
-`offline_count` is a non-negative integer in successful responses.
+`data.offlineEventCount` is a non-negative integer in successful responses.
 
 Expected availability-specific `meta` fields:
 
 ```text
 requestedWindow
 observedWindow
-offlineEventCount
 ```
 
-For availability responses, `offlineEventCount` is the number of persisted
-offline transition rows in `device_availability_events` that contribute to
-`offline_count`:
-
-```text
-offlineEventCount = offline_count
-```
-
+For availability responses, `data.offlineEventCount` is the number of persisted
+offline transition rows in `device_availability_events` that match the request.
 Online recovery transition rows (`event_type = 'online'`) are stored in
 transition history for state tracking, but they do not contribute to
-`observedWindow`, `offlineEventCount`, or `offline_count`.
+`observedWindow` or `data.offlineEventCount`.
 
 ---
 
@@ -4953,7 +4889,7 @@ total_data_usage    formatted string using the documented unit
 
 * RSSI percentages are numeric.
 * RSSI sample count is an integer.
-* Offline count and offlineEventCount are non-negative integers.
+* `data.offlineEventCount` is a non-negative integer.
 
 ---
 

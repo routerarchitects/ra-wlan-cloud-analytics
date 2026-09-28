@@ -328,6 +328,7 @@ jobs:
           test -f tests/integration/test_memory_summary_api.py
           test -f tests/integration/test_radio_temperature_summary_api.py
           test -f tests/integration/test_bandwidth_consumption_api.py
+          test -f tests/integration/test_availability_summary_api.py
 
           pytest \
             tests/integration \

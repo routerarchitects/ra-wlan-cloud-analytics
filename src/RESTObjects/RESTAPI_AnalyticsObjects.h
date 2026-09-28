@@ -468,6 +468,41 @@ namespace OpenWifi {
 			void to_json(Poco::JSON::Object &Obj) const;
 		};
 
+		struct DeviceAvailabilityEvent {
+			std::string id;
+			std::string board_id;
+			std::string serialNumber;
+			std::string event_type;
+			uint64_t event_time = 0;
+			std::string reason;
+			std::string connection_ip;
+			std::string session_id;
+			std::string event_id;
+			std::string idempotency_key;
+		};
+
+		struct MCPGatewayAvailabilityData {
+			std::string gw_uuid;
+			std::string fetch_status = "success";
+			uint64_t offlineEventCount = 0;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+		};
+
+		struct MCPGatewayAvailabilityMeta {
+			MCPRequestedWindow requestedWindow;
+			MCPObservedWindow observedWindow;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+		};
+
+		struct MCPGatewayAvailabilitySummary {
+			MCPGatewayAvailabilityMeta meta;
+			MCPGatewayAvailabilityData data;
+
+			void to_json(Poco::JSON::Object &Obj) const;
+		};
+
 	} // namespace AnalyticsObjects
 
 } // namespace OpenWifi
