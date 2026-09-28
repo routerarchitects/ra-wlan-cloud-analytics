@@ -23,9 +23,6 @@ namespace OpenWifi {
 		 ORM::IndexEntryVec{{std::string("board_id"), ORM::Indextype::ASC},
 							{std::string("serialNumber"), ORM::Indextype::ASC},
 							{std::string("event_time"), ORM::Indextype::ASC}}},
-		{std::string("availability_board_time_index"),
-		 ORM::IndexEntryVec{{std::string("board_id"), ORM::Indextype::ASC},
-							{std::string("event_time"), ORM::Indextype::ASC}}},
 		{std::string("availability_event_id_index"),
 		 ORM::IndexEntryVec{{std::string("event_id"), ORM::Indextype::ASC}}}};
 
@@ -53,9 +50,10 @@ namespace OpenWifi {
 		return Exists("idempotency_key", Event.idempotency_key);
 	}
 
-	bool DeviceAvailabilityEventsDB::CountOfflineEventsByBoard(
-		const std::string &boardId, uint64_t startTime, uint64_t endTime,
-		uint64_t &offlineCount, std::optional<uint64_t> &observedStartTime,
+	bool DeviceAvailabilityEventsDB::CountOfflineEventsByBoardAndSerial(
+		const std::string &boardId, const std::string &serialNumber, uint64_t startTime,
+		uint64_t endTime, uint64_t &offlineCount,
+		std::optional<uint64_t> &observedStartTime,
 		std::optional<uint64_t> &observedEndTime) {
 		offlineCount = 0;
 		observedStartTime.reset();
@@ -64,9 +62,9 @@ namespace OpenWifi {
 			return true;
 
 		auto WhereClause =
-			fmt::format(" board_id='{}' and event_type='offline' and "
+			fmt::format(" board_id='{}' and serialNumber='{}' and event_type='offline' and "
 						"(event_time >= {}) and (event_time < {}) ",
-						ORM::Escape(boardId), startTime, endTime);
+						ORM::Escape(boardId), ORM::Escape(serialNumber), startTime, endTime);
 		const auto Sql = fmt::format(
 			"select count(*), coalesce(min(event_time), 0), coalesce(max(event_time), 0) "
 			"from {} where {}",
@@ -85,7 +83,6 @@ namespace OpenWifi {
 		}
 		return true;
 	}
-
 
 } // namespace OpenWifi
 

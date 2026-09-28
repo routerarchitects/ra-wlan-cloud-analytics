@@ -55,9 +55,9 @@ namespace OpenWifi {
 		uint64_t OfflineCount = 0;
 		std::optional<uint64_t> ObservedStartTime;
 		std::optional<uint64_t> ObservedEndTime;
-		if (!StorageService()->DeviceAvailabilityEventsDB().CountOfflineEventsByBoard(
-				Resolved.resolvedBoardId, Window.startTime, Window.endTime, OfflineCount,
-				ObservedStartTime, ObservedEndTime)) {
+		if (!StorageService()->DeviceAvailabilityEventsDB().CountOfflineEventsByBoardAndSerial(
+				Resolved.resolvedBoardId, routerId, Window.startTime, Window.endTime,
+				OfflineCount, ObservedStartTime, ObservedEndTime)) {
 			poco_error(Logger(), "Failed to query availability events for gateway summary");
 			MCP::SetError(Error, Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR,
 						  "availability_query_failed",
