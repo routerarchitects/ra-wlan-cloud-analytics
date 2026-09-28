@@ -274,7 +274,6 @@ jobs:
             -e FAKE_EXTERNAL_SERVICE_OWSEC=http://127.0.0.1:18080 \
             -e FAKE_EXTERNAL_SERVICE_OWPROV=http://127.0.0.1:18081 \
             -e STORAGE_TYPE=postgresql \
-            -e ANALYTICS_AVAILABILITY_VALID_FROM=2026-01-01T00:00:00Z \
             -e STORAGE_TYPE_POSTGRESQL_HOST=127.0.0.1 \
             -e STORAGE_TYPE_POSTGRESQL_PORT=5432 \
             -e STORAGE_TYPE_POSTGRESQL_DATABASE=owanalytics \

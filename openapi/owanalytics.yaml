@@ -1583,14 +1583,14 @@ components:
           type: integer
           format: int64
           minimum: 0
-          description: Number of persisted offline transition rows currently available in Analytics storage for the requested half-open interval after clamping the query start to availabilityValidFrom.
+          description: Number of persisted offline transition rows matching the requested gateway and half-open interval in Analytics storage.
 
     GatewayAvailabilitySummaryResponse:
       type: object
       description: >
         Wrapped gateway availability summary response. The endpoint counts persisted offline
-        transition rows in device_availability_events for the available portion of the requested interval and reports the
-        observed event-time window for those rows.
+        transition rows in device_availability_events for the requested half-open interval and reports the
+        observed event-time window for matching rows.
       required:
         - meta
         - data
@@ -2195,7 +2195,7 @@ paths:
         - $ref: '#/components/parameters/LookbackHours'
       responses:
         200:
-          description: Return the gateway offline-transition count calculated from availability events currently persisted in Analytics storage for the available portion of the requested range.
+          description: Return the gateway offline-transition count calculated from matching availability events currently persisted in Analytics storage for the requested range.
           content:
             application/json:
               schema:

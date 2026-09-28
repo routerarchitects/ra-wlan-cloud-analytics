@@ -24,11 +24,11 @@ get_gateway_offline_count
 
 The specification and test suite are modularized into three distinct architectural components:
 1. **Public API Contract Specification**: OpenAPI 3.0 schemas (`openapi/owanalytics.yaml` v2.7.0) defining external REST endpoints, query parameters, HTTP status codes, and response envelopes.
-2. **Persistence & Pipeline Architecture Design**: Backend storage structures (`device_availability_events`, `device_availability_state`), Kafka event consumption semantics, and cutover/migration behavior.
+2. **Persistence & Pipeline Architecture Design**: Backend storage structures (`device_availability_events`, `device_availability_state`), Kafka event consumption semantics, and retention behavior.
 3. **Test Specification & Verification Matrix**: Independent verification matrix (this document) defining assertion criteria for API contracts, integration workflows, white-box database rules, and failure modes.
 
 > [!IMPORTANT]
-> This PR reframes and defines the complete target contract and test specification suite. The specified production architecture changes—including availability persistence tables (`device_availability_events`, `device_availability_state`), Kafka event consumption semantics, cutover migration rules, and OpenAPI v2.7.0 endpoint schemas—constitute a production architecture specification. Approving or merging this test specification PR does NOT bypass separate explicit architecture design sign-off for backend schema additions and production Kafka pipeline changes prior to production deployment.
+> This PR reframes and defines the complete target contract and test specification suite. The specified production architecture changes—including availability persistence tables (`device_availability_events`, `device_availability_state`), Kafka event consumption semantics, retention rules, and OpenAPI v2.7.0 endpoint schemas—constitute a production architecture specification. Approving or merging this test specification PR does NOT bypass separate explicit architecture design sign-off for backend schema additions and production Kafka pipeline changes prior to production deployment.
 
 The test cases cover:
 * API contract tests for request shapes, HTTP status codes, response schemas, parameter validation, filtering, and half-open time-range window semantics `[startTime, endTime)`.
@@ -207,7 +207,7 @@ OWPROV lookup if required
     ↓
 OWPROV caller visibility authorization
     ↓
-Retention / cutover validation (availabilityValidFrom)
+Retention validation
     ↓
 Analytics database / query processing
 ```
@@ -1014,20 +1014,6 @@ Use a valid router ID and a lookback window whose calculated `[startTime, endTim
 
 ---
 
-## TC-COMMON-023: Availability range before cutover
-
-### Request
-
-Call `GET /api/v1/devices/{routerId}/availability-summary` with a calculated `startTime` before `availabilityValidFrom`.
-
-### Expected result
-
-* HTTP `400 Bad Request`.
-* Error is `availability_range_before_cutover`.
-* The API does not return `offline_count: 0` for pre-cutover ranges.
-
----
-
 ## TC-COMMON-023A: Future timestampTill exactly at allowed clock skew boundary
 
 ### Request
@@ -1081,7 +1067,7 @@ Verify that current server time is captured exactly once per request execution (
 
 ### Expected result
 
-* Internal clock evaluation uses one frozen `capturedNow` reference timestamp throughout parameter validation, clock-skew checks, and cutover validation.
+* Internal clock evaluation uses one frozen `capturedNow` reference timestamp throughout parameter validation and clock-skew checks.
 * Slight execution delays during handler processing do not cause inconsistent clock evaluation for a single request.
 
 ---
@@ -2100,10 +2086,8 @@ transition rows match the requested range.
 
 ### Preconditions
 
-* The requested range starts at or after `availabilityValidFrom`.
-* No `offline` rows exist in `device_availability_events` for the gateway where
-  `event_time >= startTime` and `event_time < endTime`.
-* The cutover behavior for ranges beginning before `availabilityValidFrom` is covered by `TC-COMMON-023`.
+* No `offline` rows exist in `device_availability_events` for the resolved board
+  and gateway where `event_time >= startTime` and `event_time < endTime`.
 
 ### Steps
 
@@ -2143,7 +2127,7 @@ transition rows match the requested range.
 
 The API must not treat an empty observed result as an error. A zero result means
 there are zero matching persisted offline transition rows in Analytics storage
-for the requested post-cutover interval. It is not proof of Kafka ingestion
+for the requested interval. It is not proof of Kafka ingestion
 completeness.
 
 ---
@@ -2647,38 +2631,6 @@ Ethernet reconnected        → online event
   }
 }
 ```
-
----
-
-## TC-AVAIL-034: Multi-replica and process restart availabilityValidFrom consistency against persisted system_properties
-
-### Objective
-
-Verify that `availabilityValidFrom` is initialized once in `system_properties` (`availability_valid_from`) when availability persistence starts, and that any subsequent startup with a conflicting or invalid environment/configuration file value fails fast immediately.
-
-### Preconditions
-
-* Database `system_properties` table exists to persist durable system metadata key-value pairs.
-
-### Steps
-
-1. Start Replica A and Replica B concurrently when availability persistence starts with initial environment/config `availability_valid_from = 2026-07-01T00:00:00Z`.
-2. Inspect `system_properties` in database storage.
-3. Issue a request with `startTime = 2026-06-30T23:00:00Z` (`startTime < availabilityValidFrom`) to both Replica A and Replica B.
-4. Modify the local environment variable or configuration file to a conflicting value (`2026-08-01T00:00:00Z`) or an invalid timestamp format (`invalid-date`).
-5. Attempt to start a process or replica with the conflicting or invalid configuration.
-6. Inspect startup exit code, log diagnostics, and database `system_properties`.
-
-### Expected result
-
-* The cutover value is initialized exactly once in `system_properties.availability_valid_from` (`2026-07-01T00:00:00Z`).
-* Concurrent initialization by Replica A and Replica B converges safely on the same persisted value without race conditions or duplicate property inserts.
-* Both Replica A and Replica B reject requests with `startTime < availabilityValidFrom` with HTTP `400 Bad Request` (`error: "availability_range_before_cutover"`).
-* Startup with a conflicting configuration value (`2026-08-01T00:00:00Z`) or an invalid timestamp MUST fail immediately on process startup with a non-zero exit code (`fail-fast`).
-* Startup emits a clear configuration-mismatch error diagnostic.
-* The persisted `system_properties.availability_valid_from` value in database storage remains unchanged (`2026-07-01T00:00:00Z`).
-* Every service replica exhibits identical fail-fast startup behavior on configuration mismatch.
-* Dynamic process startup timestamps (e.g. `std::chrono::system_clock::now()`) are prohibited.
 
 ---
 
@@ -4693,7 +4645,7 @@ lookbackHours
 * Every API calculates the same requested `startTime` and `endTime` from `timestampTill` and `lookbackHours`.
 * Memory, usage, RSSI, and temperature apply the requested half-open aggregation window: `startTime <= sample_time < endTime`.
 * Temperature returns `200 OK` with null aggregates when no valid migrated nullable `temperature` samples exist in the requested window.
-* Availability applies the requested event window only when `startTime >= availabilityValidFrom`; otherwise the availability request is rejected according to the API contract.
+* Availability applies the requested half-open event window directly to matching persisted offline transition rows.
 
 ---
 
@@ -4725,7 +4677,6 @@ Availability:    data.fetch_status = success, data.offline_count = 0, meta.offli
 
 * All metric responses use HTTP `200 OK` when queries succeed but return no data.
 * Availability returns `data.fetch_status = "success"`, `data.offline_count = 0`, `meta.offlineEventCount = 0`, and `meta.observedWindow` with both timestamps `null` when no persisted offline rows match the requested interval.
-* If `startTime < availabilityValidFrom`, Availability returns `400 Bad Request` with `error: "availability_range_before_cutover"`.
 
 ---
 

@@ -7,37 +7,25 @@
 //
 
 #include "StorageService.h"
-#include "RESTObjects/RESTAPI_ProvObjects.h"
-#include "RESTAPI/RESTAPI_mcp_helpers.h"
 #include "fmt/format.h"
 #include "framework/MicroServiceFuncs.h"
 #include "framework/utils.h"
-#include <cstdlib>
 
 namespace OpenWifi {
 	namespace {
-		bool GetConfiguredAvailabilityValidFrom(uint64_t &ValidFrom, bool &Configured,
-											Poco::Logger &Logger) {
-			Configured = false;
-			std::string RawValue;
-			if (const auto *EnvValue = std::getenv("ANALYTICS_AVAILABILITY_VALID_FROM")) {
-				RawValue = EnvValue;
+		uint64_t EffectiveBoardRetention(const AnalyticsObjects::BoardInfo &Board) {
+			uint64_t Retention = 0;
+			for (const auto &Venue : Board.venueList) {
+				if (Venue.retention > Retention)
+					Retention = Venue.retention;
 			}
-			if (RawValue.empty())
-				RawValue = MicroServiceConfigGetString("availability_valid_from", "");
-			if (RawValue.empty())
-				RawValue = MicroServiceConfigGetString("availability.valid_from", "");
-			if (RawValue.empty())
-				RawValue = MicroServiceConfigGetString("availabilityValidFrom", "");
-			if (RawValue.empty())
-				return true;
+			return Retention;
+		}
 
-			Configured = true;
-			if (!MCP::ParseTimestampTill(RawValue, ValidFrom)) {
-				Logger.error("availabilityValidFrom is not a valid UTC timestamp.");
-				return false;
-			}
-			return true;
+		uint64_t RetentionCutoff(uint64_t Now, uint64_t Retention) {
+			if (Retention == 0 || Retention >= Now)
+				return 0;
+			return Now - Retention;
 		}
 	} // namespace
 
@@ -53,30 +41,11 @@ namespace OpenWifi {
 			std::make_unique<OpenWifi::WifiClientHistoryDB>(dbType_, *Pool_, Logger());
 		DeviceAvailabilityEventsDB_ =
 			std::make_unique<OpenWifi::DeviceAvailabilityEventsDB>(dbType_, *Pool_, Logger());
-		SystemPropertiesDB_ =
-			std::make_unique<OpenWifi::SystemPropertiesDB>(dbType_, *Pool_, Logger());
 
-		SystemPropertiesDB_->Create();
 		TimePointsDB_->Create();
 		BoardsDB_->Create();
 		WifiClientHistoryDB_->Create();
 		DeviceAvailabilityEventsDB_->Create();
-
-		uint64_t ConfiguredAvailabilityValidFrom = 0;
-		bool HasConfiguredAvailabilityValidFrom = false;
-		if (!GetConfiguredAvailabilityValidFrom(ConfiguredAvailabilityValidFrom,
-												HasConfiguredAvailabilityValidFrom, Logger())) {
-			std::exit(Poco::Util::Application::EXIT_CONFIG);
-		}
-		auto SeedAvailabilityValidFrom =
-			HasConfiguredAvailabilityValidFrom ? ConfiguredAvailabilityValidFrom : Utils::Now();
-		std::optional<uint64_t> ConfiguredSeed;
-		if (HasConfiguredAvailabilityValidFrom)
-			ConfiguredSeed = ConfiguredAvailabilityValidFrom;
-		if (!SystemPropertiesDB_->InitializeAvailabilityValidFrom(SeedAvailabilityValidFrom,
-														  ConfiguredSeed)) {
-			std::exit(Poco::Util::Application::EXIT_CONFIG);
-		}
 
 		PeriodicCleanup_ = MicroServiceConfigGetInt("storage.cleanup.interval", 6 * 60 * 60);
 		if (PeriodicCleanup_ < 1 * 60 * 60)
@@ -93,26 +62,51 @@ namespace OpenWifi {
 	}
 
 	void Storage::onTimer([[maybe_unused]] Poco::Timer &timer) {
-		BoardsDB::RecordVec BoardList;
-		uint64_t start = 0;
-		bool done = false;
-		const uint64_t batch = 100;
-		poco_information(Logger(), "Starting cleanup of TimePoint Database");
-		while (!done) {
-			if (!BoardsDB().GetRecords(start, batch, BoardList)) {
-				for (const auto &board : BoardList) {
-					for (const auto &venue : board.venueList) {
-						auto now = Utils::Now();
-						auto lower_bound = now - venue.retention;
-						poco_information(
-							Logger(),
-							fmt::format("Removing old records for board '{}'", board.info.name));
-						BoardsDB().DeleteRecords(fmt::format(" boardId='{}' and timestamp<{}",
-															 board.info.id, lower_bound));
-					}
+		uint64_t Start = 0;
+		const uint64_t Batch = 100;
+		poco_information(Logger(), "Starting cleanup of TimePoint and availability databases");
+		while (true) {
+			BoardsDB::RecordVec BoardList;
+			if (!BoardsDB().GetRecords(Start, Batch, BoardList))
+				break;
+
+			const auto Now = Utils::Now();
+			for (const auto &Board : BoardList) {
+				const auto Retention = EffectiveBoardRetention(Board);
+				if (Retention == 0) {
+					poco_warning(
+						Logger(),
+						fmt::format("Skipping cleanup for board '{}' because retention is zero",
+									Board.info.name));
+					continue;
+				}
+
+				const auto Cutoff = RetentionCutoff(Now, Retention);
+				poco_information(
+					Logger(), fmt::format("Removing old records for board '{}'", Board.info.name));
+				if (!TimePointsDB().DeleteRecords(fmt::format(
+						" boardId='{}' and timestamp<{} ", ORM::Escape(Board.info.id), Cutoff))) {
+					poco_error(
+						Logger(),
+						fmt::format("Failed to remove old records for board '{}'", Board.info.name));
+				}
+
+				poco_information(
+					Logger(),
+					fmt::format("Removing expired availability events for board '{}'",
+								Board.info.name));
+				if (!DeviceAvailabilityEventsDB().DeleteExpiredEventsForBoard(
+						Board.info.id, Cutoff)) {
+					poco_error(
+						Logger(),
+						fmt::format("Failed to remove expired availability events for board '{}'",
+									Board.info.name));
 				}
 			}
-			done = (BoardList.size() < batch);
+
+			if (BoardList.size() < Batch)
+				break;
+			Start += BoardList.size();
 		}
 
 		auto MaxDays = MicroServiceConfigGetInt("wificlient.age.limit", 14);

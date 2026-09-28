@@ -23,6 +23,9 @@ namespace OpenWifi {
 		 ORM::IndexEntryVec{{std::string("board_id"), ORM::Indextype::ASC},
 							{std::string("serialNumber"), ORM::Indextype::ASC},
 							{std::string("event_time"), ORM::Indextype::ASC}}},
+		{std::string("availability_board_time_index"),
+		 ORM::IndexEntryVec{{std::string("board_id"), ORM::Indextype::ASC},
+							{std::string("event_time"), ORM::Indextype::ASC}}},
 		{std::string("availability_event_id_index"),
 		 ORM::IndexEntryVec{{std::string("event_id"), ORM::Indextype::ASC}}}};
 
@@ -82,6 +85,12 @@ namespace OpenWifi {
 			observedEndTime = Counts.front().get<2>();
 		}
 		return true;
+	}
+
+	bool DeviceAvailabilityEventsDB::DeleteExpiredEventsForBoard(const std::string &boardId,
+														  uint64_t cutoffTime) {
+		return DeleteRecords(
+			fmt::format(" board_id='{}' and event_time<{} ", ORM::Escape(boardId), cutoffTime));
 	}
 
 } // namespace OpenWifi
