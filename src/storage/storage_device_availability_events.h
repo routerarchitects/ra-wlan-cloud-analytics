@@ -17,10 +17,10 @@ namespace OpenWifi {
 		DeviceAvailabilityEventsDB(OpenWifi::DBType T, Poco::Data::SessionPool &P,
 								   Poco::Logger &L);
 
-		bool CountOfflineEventsBySerial(const std::string &serialNumber, uint64_t startTime,
-										uint64_t endTime, uint64_t &offlineCount,
-										std::optional<uint64_t> &observedStartTime,
-										std::optional<uint64_t> &observedEndTime);
+		bool CountOfflineEventsByBoard(
+			const std::string &boardId, uint64_t startTime, uint64_t endTime,
+			uint64_t &offlineCount, std::optional<uint64_t> &observedStartTime,
+			std::optional<uint64_t> &observedEndTime);
 
 		bool CreateEventIfAbsent(const AnalyticsObjects::DeviceAvailabilityEvent &Event);
 

@@ -2,8 +2,9 @@
 Integration tests for GET /api/v1/devices/{routerId}/availability-summary.
 
 These tests cover the read-path API contract from analytics_mcp_api_test_cases.md:
-persisted offline transition rows are counted by durable serial number after the
-caller is authenticated and the router is resolved through fake OWPROV.
+persisted offline transition rows are counted by current Analytics board and
+durable serial number after the caller is authenticated and the router is
+resolved through fake OWPROV.
 """
 
 from __future__ import annotations
@@ -336,7 +337,10 @@ def test_availability_event_schema_exists_with_required_indexes() -> None:
             assert "serialnumber" in indexes["availability_serial_time_index"].lower()
             assert "event_time" in indexes["availability_serial_time_index"].lower()
             assert "availability_board_serial_time_index" in indexes
-            assert "board_id" in indexes["availability_board_serial_time_index"].lower()
+            board_serial_index = indexes["availability_board_serial_time_index"].lower()
+            assert "board_id" in board_serial_index
+            assert "serialnumber" in board_serial_index
+            assert "event_time" in board_serial_index
             assert "availability_idempotency_key_unique" in indexes
             assert "unique" in indexes["availability_idempotency_key_unique"].lower()
 
@@ -355,28 +359,34 @@ def test_availability_summary_no_events_returns_empty_success(seeded_board) -> N
     assert_zero_availability(result.body, format_utc(start_dt), format_utc(end_dt))
 
 
-def test_availability_summary_counts_half_open_offline_events_only(seeded_board) -> None:
+def test_availability_summary_counts_current_board_half_open_offline_events_only(seeded_board) -> None:
     end_dt = utc_now() - timedelta(seconds=30)
     start_dt = end_dt - timedelta(hours=4)
     before_dt = start_dt - timedelta(seconds=1)
-    start_event_dt = start_dt
+    included_dt = start_dt + timedelta(minutes=30)
     online_dt = start_dt + timedelta(hours=1)
-    inside_dt = end_dt - timedelta(seconds=1)
+    other_router_dt = start_dt + timedelta(hours=2)
+    other_board_dt = start_dt + timedelta(hours=3)
     end_event_dt = end_dt
 
     with db_connection() as connection:
         with connection.cursor() as cursor:
             insert_availability_event(cursor, format_utc(before_dt), reason="before")
-            insert_availability_event(cursor, format_utc(start_event_dt), reason="start")
+            insert_availability_event(cursor, format_utc(included_dt), reason="included")
             insert_availability_event(cursor, format_utc(online_dt), event_type="online")
-            insert_availability_event(cursor, format_utc(inside_dt), reason="inside")
-            insert_availability_event(cursor, format_utc(end_event_dt), reason="end")
             insert_availability_event(
                 cursor,
-                format_utc(inside_dt),
+                format_utc(other_router_dt),
                 serial="availability-other-router",
                 reason="other-router",
             )
+            insert_availability_event(
+                cursor,
+                format_utc(other_board_dt),
+                board=OTHER_BOARD_ID,
+                reason="other-board",
+            )
+            insert_availability_event(cursor, format_utc(end_event_dt), reason="end")
 
     result = http_json(
         availability_summary_path(format_utc(end_dt), lookback_hours="4"),
@@ -389,13 +399,13 @@ def test_availability_summary_counts_half_open_offline_events_only(seeded_board)
         "endTime": format_utc(end_dt),
     }
     assert result.body["meta"]["observedWindow"] == {
-        "startTime": format_utc(start_event_dt),
-        "endTime": format_utc(inside_dt),
+        "startTime": format_utc(included_dt),
+        "endTime": format_utc(included_dt),
     }
     assert result.body["data"] == {
         "gw_uuid": router_id(),
         "fetch_status": "success",
-        "offlineEventCount": 2,
+        "offlineEventCount": 1,
     }
 
 
@@ -472,9 +482,10 @@ def test_availability_summary_entirely_before_availability_valid_from_returns_ze
     }
 
 
-def test_availability_summary_queries_history_by_serial_not_current_board(seeded_board) -> None:
+def test_availability_summary_excludes_events_from_previous_board(seeded_board) -> None:
     end_dt = utc_now() - timedelta(seconds=30)
     old_board_event_dt = end_dt - timedelta(minutes=45)
+    current_board_event_dt = end_dt - timedelta(minutes=15)
 
     with db_connection() as connection:
         with connection.cursor() as cursor:
@@ -483,6 +494,11 @@ def test_availability_summary_queries_history_by_serial_not_current_board(seeded
                 format_utc(old_board_event_dt),
                 board=OLD_BOARD_ID,
                 reason="old-board",
+            )
+            insert_availability_event(
+                cursor,
+                format_utc(current_board_event_dt),
+                reason="current-board",
             )
 
     result = http_json(
@@ -493,8 +509,8 @@ def test_availability_summary_queries_history_by_serial_not_current_board(seeded
     assert result.status == 200
     assert result.body["data"]["offlineEventCount"] == 1
     assert result.body["meta"]["observedWindow"] == {
-        "startTime": format_utc(old_board_event_dt),
-        "endTime": format_utc(old_board_event_dt),
+        "startTime": format_utc(current_board_event_dt),
+        "endTime": format_utc(current_board_event_dt),
     }
 
 

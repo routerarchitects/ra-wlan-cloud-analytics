@@ -2663,13 +2663,14 @@ Rejecting pre-cutover ranges prevents a successful zero response from meaning ei
 ```sql
 SELECT COUNT(*) AS offline_count
 FROM device_availability_events
-WHERE serialNumber = :router_id
+WHERE board_id = :resolvedBoardId
+  AND serialNumber = :router_id
   AND event_type = 'offline'
   AND event_time >= :start_time
   AND event_time < :end_time;
 ```
 
-Do not require `board_id = :resolvedBoardId` for the availability count. `board_id` is nullable event-time context and can differ from the router's current board after reassignment. The durable query identity for gateway availability history is `serialNumber`.
+Require both `board_id = :resolvedBoardId` and `serialNumber = :router_id` for the availability count. The resolved board scopes history to the router's current Analytics board, while the serial number isolates the requested gateway within that board.
 
 The availability REST request path must not call Kafka, compare committed
 offsets to partition high watermarks, inspect consumer lag, wait for the
@@ -2683,7 +2684,7 @@ Authenticate request
 validate routerId, timestampTill, and lookbackHours
 resolve router ownership
 validate retention and availabilityValidFrom
-query device_availability_events for serialNumber and [startTime, endTime)
+query device_availability_events for resolvedBoardId, serialNumber, and [startTime, endTime)
 filter event_type = offline
 offline_count = number of persisted matching rows
 derive observedWindow from matching persisted offline rows

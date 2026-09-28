@@ -6,7 +6,6 @@
 #include "framework/MicroServiceFuncs.h"
 #include "framework/utils.h"
 
-#include <algorithm>
 
 namespace OpenWifi {
 
@@ -53,28 +52,17 @@ namespace OpenWifi {
 									Error))
 			return MCP::SendError(*this, Error);
 
-		uint64_t AvailabilityValidFrom = 0;
-		if (!StorageService()->SystemPropertiesDB().GetAvailabilityValidFrom(
-				AvailabilityValidFrom)) {
-			MCP::SetError(Error, Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR,
-						  "availability_configuration_invalid",
-						  "availabilityValidFrom is not initialized");
-			return MCP::SendError(*this, Error);
-		}
 		uint64_t OfflineCount = 0;
 		std::optional<uint64_t> ObservedStartTime;
 		std::optional<uint64_t> ObservedEndTime;
-		const auto QueryStart = std::max(Window.startTime, AvailabilityValidFrom);
-		if (QueryStart < Window.endTime) {
-			if (!StorageService()->DeviceAvailabilityEventsDB().CountOfflineEventsBySerial(
-					routerId, QueryStart, Window.endTime, OfflineCount, ObservedStartTime,
-					ObservedEndTime)) {
-				poco_error(Logger(), "Failed to query availability events for gateway summary");
-				MCP::SetError(Error, Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR,
-							  "availability_query_failed",
-							  "Unable to retrieve gateway availability history");
-				return MCP::SendError(*this, Error);
-			}
+		if (!StorageService()->DeviceAvailabilityEventsDB().CountOfflineEventsByBoard(
+				Resolved.resolvedBoardId, Window.startTime, Window.endTime, OfflineCount,
+				ObservedStartTime, ObservedEndTime)) {
+			poco_error(Logger(), "Failed to query availability events for gateway summary");
+			MCP::SetError(Error, Poco::Net::HTTPResponse::HTTP_INTERNAL_SERVER_ERROR,
+						  "availability_query_failed",
+						  "Unable to retrieve gateway availability history");
+			return MCP::SendError(*this, Error);
 		}
 
 		auto Summary = MCP::CalculateGatewayAvailabilitySummary(
