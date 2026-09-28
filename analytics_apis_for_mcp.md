@@ -1844,7 +1844,7 @@ When querying device_availability_events, order by event_time only.
 
 `serialNumber` is the durable identity for availability history. `board_id` is event-time context only and must be nullable because connection events can arrive when the router is not currently assigned to an Analytics board, when OWPROV is unavailable, or after ownership has changed. Do not drop availability events only because current board ownership cannot be resolved.
 
-Persisted availability events are subject to the Analytics retention policy associated with their historical `board_id`. Expired rows are periodically removed from `device_availability_events` by the storage cleanup timer using `event_time < now - retention`; rows exactly at the cutoff are preserved. Boards with zero effective retention are skipped, matching the API behavior that treats zero retention as unavailable rather than an instruction to delete all historical rows.
+Persisted availability events are subject to the Analytics retention policy associated with their historical `board_id`. Expired rows are periodically removed from `device_availability_events` by the storage cleanup timer using `event_time < now - retention`; rows exactly at the cutoff are preserved. Boards with zero effective retention are skipped, matching the API behavior that treats zero retention as unavailable rather than an instruction to delete all historical rows. When a board is explicitly deleted or retired, all availability events for that historical `board_id` are deleted with the board to avoid orphaned history that can no longer obtain a board retention value.
 
 Add a persisted current-state table for restart-safe transition detection:
 

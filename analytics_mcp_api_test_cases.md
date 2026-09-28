@@ -1441,8 +1441,8 @@ last_event_time = ping source timestamp
 updated_at >= processing time
 ```
 
-* The availability-summary API uses the documented `meta.requestedWindow`, `meta.observedWindow`, `meta.offlineEventCount`, and `data.offline_count` response shape.
-* A requested window with no persisted offline transition rows returns `data.offline_count = 0`, `meta.offlineEventCount = 0`, and `meta.observedWindow.startTime = meta.observedWindow.endTime = null`.
+* The availability-summary API uses the documented `meta.requestedWindow`, `meta.observedWindow`, and `data.offlineEventCount` response shape.
+* A requested window with no persisted offline transition rows returns `data.offlineEventCount = 0`, and `meta.observedWindow.startTime = meta.observedWindow.endTime = null`.
 
 ---
 
@@ -1482,7 +1482,7 @@ Example messages:
 * No additional `online` event is inserted after the first online state.
 * `last_event_time` is updated to the latest source-newer ping timestamp accepted by the per-serial ordering stage.
 * `current_state` remains `online`.
-* `offline_count` remains `0`.
+* `data.offlineEventCount` remains `0`.
 
 ---
 
@@ -1538,13 +1538,12 @@ event_time = disconnection message timestamp
     "observedWindow": {
       "startTime": "<firstOfflineEventAt>",
       "endTime": "<lastOfflineEventAt>"
-    },
-    "offlineEventCount": 1
+    }
   },
   "data": {
     "gw_uuid": "60cf84f22290",
     "fetch_status": "success",
-    "offline_count": 1
+    "offlineEventCount": 1
   }
 }
 ```
@@ -1580,7 +1579,7 @@ sudo shutdown -h now
 
 * One offline transition is stored.
 * Repeated controller checks while the gateway remains shut down do not create more offline events.
-* `offline_count` increases by exactly `1`.
+* `data.offlineEventCount` increases by exactly `1`.
 
 ---
 
@@ -1607,7 +1606,7 @@ Verify that removing the gateway's Ethernet connection creates one offline trans
 ### Expected result
 
 * One offline event is stored.
-* `offline_count` increases by `1`.
+* `data.offlineEventCount` increases by `1`.
 * Keeping the cable disconnected does not create repeated offline events.
 
 ---
@@ -1635,7 +1634,7 @@ Verify that losing the gateway's Wi-Fi uplink creates an offline transition.
 ### Expected result
 
 * One offline event is stored.
-* `offline_count` increases by exactly `1`.
+* `data.offlineEventCount` increases by exactly `1`.
 
 ---
 
@@ -1663,7 +1662,7 @@ Verify that a powered-on gateway with no cloud connectivity is considered offlin
 * One offline transition is stored.
 * The gateway is considered offline even though it is still powered on.
 * The reason field may indicate network or connection loss when available.
-* `offline_count` increases by `1`.
+* `data.offlineEventCount` increases by `1`.
 
 ---
 
@@ -1719,13 +1718,12 @@ API result:
     "observedWindow": {
       "startTime": "12:10",
       "endTime": "12:10"
-    },
-    "offlineEventCount": 1
+    }
   },
   "data": {
     "gw_uuid": "60cf84f22290",
     "fetch_status": "success",
-    "offline_count": 1
+    "offlineEventCount": 1
   }
 }
 ```
@@ -1812,13 +1810,12 @@ The API returns:
     "observedWindow": {
       "startTime": "<firstOfflineEventAt>",
       "endTime": "<lastOfflineEventAt>"
-    },
-    "offlineEventCount": 3
+    }
   },
   "data": {
     "gw_uuid": "60cf84f22290",
     "fetch_status": "success",
-    "offline_count": 3
+    "offlineEventCount": 3
   }
 }
 ```
@@ -1857,7 +1854,7 @@ Example:
 * Later same-state disconnection messages are ignored.
 * For source-newer repeated disconnection messages accepted by the per-serial ordering stage while `current_state = offline`, `last_event_time` advances.
 * `updated_at` is updated for the latest accepted same-state message.
-* `offline_count` is `1`.
+* `data.offlineEventCount` is `1`.
 
 ---
 
@@ -1885,7 +1882,7 @@ Verify storage-level idempotency when Kafka redelivers the same logical connecti
 * Both deliveries map to the same deterministic `idempotency_key` or source `event_id`.
 * Exactly one transition event row is inserted.
 * The duplicate delivery does not move `current_state`, `last_event_time`, `updated_at`, or transition history.
-* `offline_count` is `1`.
+* `data.offlineEventCount` is `1`.
 
 ---
 
@@ -1969,7 +1966,7 @@ Verify that repeated online messages after an offline-to-online transition do no
 * Exactly one online transition event is inserted.
 * No additional offline event is inserted.
 * The source-newer repeated ping accepted by the per-serial ordering stage updates `last_event_time` and `updated_at`.
-* `offline_count` is unchanged.
+* `data.offlineEventCount` is unchanged.
 
 ---
 
@@ -2033,7 +2030,7 @@ The time window is:
 
 * The `10:00` event is excluded.
 * The `12:00` and `14:00` events are included.
-* `offline_count` is `2`.
+* `data.offlineEventCount` is `2`.
 
 ---
 
@@ -2097,12 +2094,11 @@ transition rows match the requested range.
 ### Expected result
 
 * The response uses the documented top-level `meta` and `data` shape.
-* `meta.offlineEventCount = 0`.
 * `meta.observedWindow.startTime = null`.
 * `meta.observedWindow.endTime = null`.
 * `data.gw_uuid = "60cf84f22290"`.
 * `data.fetch_status = "success"`.
-* `data.offline_count = 0`.
+* `data.offlineEventCount = 0`.
 
 ```json
 {
@@ -2114,13 +2110,12 @@ transition rows match the requested range.
     "observedWindow": {
       "startTime": null,
       "endTime": null
-    },
-    "offlineEventCount": 0
+    }
   },
   "data": {
     "gw_uuid": "60cf84f22290",
     "fetch_status": "success",
-    "offline_count": 0
+    "offlineEventCount": 0
   }
 }
 ```
@@ -2148,8 +2143,7 @@ Requested lookback: 24 hours
 ### Expected result
 
 * The old event is excluded by the half-open requested window.
-* `data.offline_count = 0`.
-* `meta.offlineEventCount = 0`.
+* `data.offlineEventCount = 0`.
 * `meta.observedWindow.startTime = null`.
 * `meta.observedWindow.endTime = null`.
 
@@ -2407,7 +2401,7 @@ Verify that first-row creation is concurrency-safe and does not rely on locking 
 * The final state is `current_state = offline`.
 * No offline transition row is inserted because the prior state was unknown.
 * An availability-summary response for a window containing these first observations uses the documented observed-data response shape.
-* When no offline transition row is persisted for the requested interval, `data.offline_count = 0`, `meta.offlineEventCount = 0`, and both observed-window timestamps are `null`.
+* When no offline transition row is persisted for the requested interval, `data.offlineEventCount = 0`, and both observed-window timestamps are `null`.
 
 ---
 
@@ -2493,7 +2487,7 @@ Verify the explicit bootstrap behavior when the first accepted availability
 message for a gateway is `disconnection`.
 
 This contract treats an initial unknown-to-offline observation as state
-initialization, not as a counted offline transition, because `offline_count`
+initialization, not as a counted offline transition, because `data.offlineEventCount`
 counts observed online-to-offline transitions.
 
 ### Preconditions
@@ -2542,7 +2536,7 @@ Verify that transition detection is scoped by `serialNumber`.
 
 ### Objective
 
-Verify that online transition rows do not affect `offline_count`.
+Verify that online transition rows do not affect `data.offlineEventCount`.
 
 ### Steps
 
@@ -2560,8 +2554,7 @@ Verify that online transition rows do not affect `offline_count`.
 
 * The API counts only the two stored `offline` rows.
 * Stored `online` rows are ignored by the offline count.
-* `meta.offlineEventCount = 2`.
-* `offline_count` is `2`.
+* `data.offlineEventCount` is `2`.
 * `meta.observedWindow` is bounded by the two offline rows (`12:10` and `12:30`); the `12:15` online row must not extend `observedWindow`.
 
 ---
@@ -2621,13 +2614,12 @@ Ethernet reconnected        → online event
     "observedWindow": {
       "startTime": "<firstOfflineEventAt>",
       "endTime": "<lastOfflineEventAt>"
-    },
-    "offlineEventCount": 2
+    }
   },
   "data": {
     "gw_uuid": "60cf84f22290",
     "fetch_status": "success",
-    "offline_count": 2
+    "offlineEventCount": 2
   }
 }
 ```
@@ -4672,11 +4664,11 @@ Memory API:      null summary fields
 Temperature API: null summary fields
 Usage API:       data.items = [], data.totalClients = 0, data.truncated = false
 RSSI API:        data.items = [], data.totalClients = 0, data.truncated = false
-Availability:    data.fetch_status = success, data.offline_count = 0, meta.offlineEventCount = 0
+Availability:    data.fetch_status = success, data.offlineEventCount = 0
 ```
 
 * All metric responses use HTTP `200 OK` when queries succeed but return no data.
-* Availability returns `data.fetch_status = "success"`, `data.offline_count = 0`, `meta.offlineEventCount = 0`, and `meta.observedWindow` with both timestamps `null` when no persisted offline rows match the requested interval.
+* Availability returns `data.fetch_status = "success"`, `data.offlineEventCount = 0`, and `meta.observedWindow` with both timestamps `null` when no persisted offline rows match the requested interval.
 
 ---
 
@@ -4813,30 +4805,23 @@ Expected `data` fields:
 ```text
 gw_uuid
 fetch_status
-offline_count
+offlineEventCount
 ```
 
-`offline_count` is a non-negative integer in successful responses.
+`data.offlineEventCount` is a non-negative integer in successful responses.
 
 Expected availability-specific `meta` fields:
 
 ```text
 requestedWindow
 observedWindow
-offlineEventCount
 ```
 
-For availability responses, `offlineEventCount` is the number of persisted
-offline transition rows in `device_availability_events` that contribute to
-`offline_count`:
-
-```text
-offlineEventCount = offline_count
-```
-
+For availability responses, `data.offlineEventCount` is the number of persisted
+offline transition rows in `device_availability_events` that match the request.
 Online recovery transition rows (`event_type = 'online'`) are stored in
 transition history for state tracking, but they do not contribute to
-`observedWindow`, `offlineEventCount`, or `offline_count`.
+`observedWindow` or `data.offlineEventCount`.
 
 ---
 
@@ -4904,7 +4889,7 @@ total_data_usage    formatted string using the documented unit
 
 * RSSI percentages are numeric.
 * RSSI sample count is an integer.
-* Offline count and offlineEventCount are non-negative integers.
+* `data.offlineEventCount` is a non-negative integer.
 
 ---
 

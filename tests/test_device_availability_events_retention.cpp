@@ -70,6 +70,10 @@ namespace {
 		AssertCount(DB, "board-a", "router-2", 0, std::nullopt, std::nullopt);
 		AssertCount(DB, "board-b", "router-1", 1, 900, 900);
 
+		assert(DB.DeleteEventsForBoard("board-a"));
+		AssertCount(DB, "board-a", "router-1", 0, std::nullopt, std::nullopt);
+		AssertCount(DB, "board-b", "router-1", 1, 900, 900);
+
 		assert(DB.DeleteExpiredEventsForBoard("board-b", 0));
 		AssertCount(DB, "board-b", "router-1", 1, 900, 900);
 		Pool.shutdown();

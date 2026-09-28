@@ -89,6 +89,7 @@ namespace OpenWifi {
 		StopBoard(B.info.id);
 		StorageService()->BoardsDB().DeleteRecord("id", B.info.id);
 		StorageService()->TimePointsDB().DeleteRecords(fmt::format(" boardId='{}' ", B.info.id));
+		StorageService()->DeviceAvailabilityEventsDB().DeleteEventsForBoard(B.info.id);
 	}
 
 	bool VenueCoordinator::GetDevicesForBoard(const AnalyticsObjects::BoardInfo &B,

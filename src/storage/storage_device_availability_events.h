@@ -23,6 +23,7 @@ namespace OpenWifi {
 			std::optional<uint64_t> &observedStartTime,
 			std::optional<uint64_t> &observedEndTime);
 		bool DeleteExpiredEventsForBoard(const std::string &boardId, uint64_t cutoffTime);
+		bool DeleteEventsForBoard(const std::string &boardId);
 
 		bool CreateEventIfAbsent(const AnalyticsObjects::DeviceAvailabilityEvent &Event);
 

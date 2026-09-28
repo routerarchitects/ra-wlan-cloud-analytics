@@ -93,6 +93,10 @@ namespace OpenWifi {
 			fmt::format(" board_id='{}' and event_time<{} ", ORM::Escape(boardId), cutoffTime));
 	}
 
+	bool DeviceAvailabilityEventsDB::DeleteEventsForBoard(const std::string &boardId) {
+		return DeleteRecords(fmt::format(" board_id='{}' ", ORM::Escape(boardId)));
+	}
+
 } // namespace OpenWifi
 
 template <>
