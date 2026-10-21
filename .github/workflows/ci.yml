@@ -312,9 +312,21 @@ jobs:
       # -----------------------------------------------------------------------
       # MCP Analytics integration tests
       # -----------------------------------------------------------------------
+      - name: Configure private-interface authentication fixture
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import os
+          with open(os.environ["GITHUB_ENV"], "a") as output:
+              key = hashlib.sha256(b"https://localhost:16009").hexdigest()
+              output.write("OWANALYTICS_TEST_PRIVATE_KEY=" + key + "\n")
+          PY
+
       - name: Run Python integration tests with fake OWSEC and OWPROV
         env:
           OWANALYTICS_TEST_URL: https://127.0.0.1:16009
+          OWANALYTICS_TEST_PRIVATE_URL: https://127.0.0.1:17009
+          OWANALYTICS_TEST_PRIVATE_CA: /tmp/owanalytics-certs/restapi-ca.pem
           OWANALYTICS_TEST_VALID_TOKEN: root-token
 
           OWANALYTICS_TEST_DB_DSN: >-
