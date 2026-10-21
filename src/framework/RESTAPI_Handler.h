@@ -705,6 +705,7 @@ namespace OpenWifi {
 		}
 
 		Poco::Logger &Logger() { return Logger_; }
+		[[nodiscard]] bool IsInternalRequest() const { return Internal_; }
 
 		virtual void DoGet() = 0;
 		virtual void DoDelete() = 0;

@@ -2,6 +2,7 @@
 
 #include "framework/AuthClient.h"
 #include "framework/RESTAPI_Handler.h"
+#include "framework/MicroServiceFuncs.h"
 #include <Poco/JSON/Object.h>
 #include <Poco/JSON/Stringifier.h>
 
@@ -18,6 +19,17 @@ namespace OpenWifi::MCP {
 
 	bool AuthenticateBearerToken(RESTAPIHandler &Handler, Error &E) {
 		auto Request = Handler.Request;
+		// These summary handlers disable automatic framework authorization so
+		// they can report controlled Bearer errors. On the private router they
+		// must independently authenticate the calling service before the user.
+		if (Handler.IsInternalRequest() &&
+			(Request == nullptr || !Request->has("X-INTERNAL-NAME") ||
+			 Request->get("X-INTERNAL-NAME", "").empty() ||
+			 !MicroServiceIsValidAPIKEY(*Request))) {
+			SetError(E, Poco::Net::HTTPResponse::HTTP_FORBIDDEN, "forbidden",
+					 "Missing or invalid internal service credentials");
+			return false;
+		}
 		std::optional<std::string> Authorization;
 		if (Request != nullptr && Request->has("Authorization"))
 			Authorization = Request->get("Authorization", "");
